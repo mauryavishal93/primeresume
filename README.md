@@ -33,6 +33,8 @@ The production build is generated in `dist/`. `npm start` serves the site and bi
 
 The root `render.yaml` configures a Render Node web service that serves the built site and trusted billing API. Push it to the `main` branch, then in Render choose **New > Blueprint** and connect `mauryavishal93/PersonaCraftPro`. Render runs `npm install && npm run build`, then `npm start`. Approve the `buildmyportfolio` service to start the deploy. Because the GitHub repository is private, authorize Render to access it when prompted. Configure the secret environment variables described below before enabling billing.
 
+The Vercel deployment uses `vercel.json` to proxy `/api/*` requests to the Render service. Deploy this configuration to Vercel and the matching backend changes to Render together; API requests must remain on the backend, while normal Render-hosted page requests redirect to the Vercel site.
+
 The site is multi-page: `/` opens the editor; `/editor.html` is the editor page; `/about.html` is the About page; `/privacy.html` is the privacy policy; `/pricing.html` is the plan and purchase page; `/terms.html` describes service terms; and `/refunds.html` describes refund status.
 
 ## Project structure

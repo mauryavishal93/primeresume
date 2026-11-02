@@ -206,6 +206,15 @@ test('health check returns a fast no-store JSON liveness response', async () => 
   assert.ok(Number.isFinite(Date.parse(body.timestamp)));
 });
 
+test('API requests on the Render hostname are not redirected to the frontend', async () => {
+  const response = await request('/api/health', {
+    headers: { host: 'buildmyportfolio.onrender.com' }
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('location'), null);
+});
+
 test('admin API explains when local Firebase Admin credentials are missing', async () => {
   const previousAdmin = app.locals.firebaseAdmin;
   const previousCredentials = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
