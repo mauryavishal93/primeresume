@@ -20,6 +20,12 @@ Vite opens the editor at `/`. To run the billing API locally, start the backend 
 
 The admin page runs through Vite at `http://localhost:5173/admin.html`; the API must also be running on port `3000`. In one terminal, set `FIREBASE_SERVICE_ACCOUNT_JSON` to a server-only service account for this Firebase project and `ADMIN_EMAILS` to the Google account allowed to administer it, then run `npm run backend`. In another terminal, run `npm run dev`. Use `localhost` (not `127.0.0.1`) for Google sign-in, and add `localhost` to Firebase Authentication's authorized domains if needed. Never commit the service-account JSON. The dashboard reports missing backend credentials or access configuration instead of treating API failures as an authorization denial.
 
+## Deploy on Vercel
+
+Import this repository into Vercel with the repository root as the project root. `vercel.json` runs `npm run build` and publishes Vite's `dist/` output. The catch-all function in `api/[...path].js` runs the Express API directly on Vercel; no Render backend is required. Use Node.js 22.x.
+
+Add `FIREBASE_SERVICE_ACCOUNT_JSON` and `ADMIN_EMAILS` under **Project Settings → Environment Variables** in Vercel, then redeploy. Add the Razorpay and billing release variables there only when enabling paid checkout. Do not copy `.env` into the repository or expose server credentials as `VITE_*` variables.
+
 ## Production
 
 ```sh
@@ -32,8 +38,6 @@ The production build is generated in `dist/`. `npm start` serves the site and bi
 ## Deploy on Render
 
 The root `render.yaml` configures a Render Node web service that serves the built site and trusted billing API. Push it to the `main` branch, then in Render choose **New > Blueprint** and connect `mauryavishal93/PersonaCraftPro`. Render runs `npm install && npm run build`, then `npm start`. Approve the `buildmyportfolio` service to start the deploy. Because the GitHub repository is private, authorize Render to access it when prompted. Configure the secret environment variables described below before enabling billing.
-
-The Vercel deployment uses `vercel.json` to proxy `/api/*` requests to the Render service. Deploy this configuration to Vercel and the matching backend changes to Render together; API requests must remain on the backend, while normal Render-hosted page requests redirect to the Vercel site.
 
 The site is multi-page: `/` opens the editor; `/editor.html` is the editor page; `/about.html` is the About page; `/privacy.html` is the privacy policy; `/pricing.html` is the plan and purchase page; `/terms.html` describes service terms; and `/refunds.html` describes refund status.
 
