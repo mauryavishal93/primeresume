@@ -1,10 +1,10 @@
 import { RESUME_PDF_METADATA_NAMESPACE } from './resume-import-metadata.js';
 
-export function drawPdfText(doc, text, x, y, { font, style, size, color }) {
+export function drawPdfText(doc, text, x, y, { font, style, size, color, renderingMode = 'fill' }) {
   doc.setFont(font, style);
   doc.setFontSize(size);
   doc.setTextColor(...color);
-  doc.text(text, x, y);
+  doc.text(text, x, y, { renderingMode });
 }
 
 export function buildResumePdf(jsPDF, pages, { addSelectableText, addPDFLinks, addPdfDecorations, resumeState }) {
@@ -18,10 +18,10 @@ export function buildResumePdf(jsPDF, pages, { addSelectableText, addPDFLinks, a
     }), RESUME_PDF_METADATA_NAMESPACE);
   }
 
-  pages.forEach(({ sheet }, index) => {
+  pages.forEach(({sheet, image}, index) => {
     if (index > 0) doc.addPage('a4', 'portrait');
-    addPdfDecorations(doc, sheet);
-    addSelectableText(doc, sheet);
+    addPdfDecorations(doc, sheet, image);
+    addSelectableText(doc, sheet, { renderingMode: 'invisible' });
     addPDFLinks(doc, sheet);
   });
 

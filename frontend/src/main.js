@@ -1391,7 +1391,7 @@ function downloadRecoveryData(){
  toast('Saved browser data backup downloaded');
 }
 
-function addSelectableText(doc,sheet){
+function addSelectableText(doc,sheet,{renderingMode='fill'}={}){
  const bounds=sheet.getBoundingClientRect(),scale=210/bounds.width,range=document.createRange(),walker=document.createTreeWalker(sheet,NodeFilter.SHOW_TEXT);
  for(let node=walker.nextNode();node;node=walker.nextNode()){
   const text=node.nodeValue||'';if(!text.trim())continue;
@@ -1405,7 +1405,7 @@ function addSelectableText(doc,sheet){
   let line='',lineTop=null,lineLeft=0;
   const flush=()=>{
    const visibleLine=line.replace(/\s+$/,'');
-   if(visibleLine.trim())drawPdfText(doc,visibleLine,(lineLeft-bounds.left)*scale,(lineTop-bounds.top+fontSize*.86)*scale,{font,style:pdfStyle,size:pdfSize,color});
+   if(visibleLine.trim())drawPdfText(doc,visibleLine,(lineLeft-bounds.left)*scale,(lineTop-bounds.top+fontSize*.86)*scale,{font,style:pdfStyle,size:pdfSize,color,renderingMode});
    line='';lineTop=null;
   };
   for(let offset=0;offset<text.length;){
@@ -1432,50 +1432,30 @@ function addPDFLinks(doc,sheet){
   }
  });
 }
-function pdfColor(value){
- const match=/^rgba?\((.+)\)$/i.exec(value.trim());if(!match)return null;
- const parts=match[1].split(/[\s,/]+/).filter(Boolean);
- if(parts.length<3)return null;
- const channels=parts.slice(0,3).map(part=>parseFloat(part)*(part.endsWith('%')?2.55:1));
- const alphaText=parts[3],alpha=alphaText===undefined?1:parseFloat(alphaText)*(alphaText.endsWith('%')?.01:1);
- if(channels.some(channel=>!Number.isFinite(channel))||!Number.isFinite(alpha)||alpha<=0)return null;
- return channels.map(channel=>Math.round(channel*alpha+255*(1-alpha)));
+function addPdfDecorations(doc,_sheet,image){
+ if(!image)throw new Error('The resume page image is unavailable for PDF export.');
+ doc.addImage(image,'JPEG',0,0,210,297,undefined,'MEDIUM');
 }
-function addPdfDecorations(doc,sheet){
- const bounds=sheet.getBoundingClientRect(),scaleX=210/bounds.width,scaleY=297/bounds.height;
- const elements=[sheet,...sheet.querySelectorAll('*')];
- for(const element of elements){
-  if(element.tagName==='IMG')continue;
-  const rect=element.getBoundingClientRect();
-  if(!rect.width||!rect.height)continue;
-  const x=(rect.left-bounds.left)*scaleX,y=(rect.top-bounds.top)*scaleY,w=rect.width*scaleX,h=rect.height*scaleY;
-  const style=getComputedStyle(element),background=pdfColor(style.backgroundColor);
-  if(background){doc.setFillColor(...background);doc.rect(x,y,w,h,'F')}
-  for(const [side,startX,startY,endX,endY] of [
-   ['Top',x,y,x+w,y],['Right',x+w,y,x+w,y+h],['Bottom',x,y+h,x+w,y+h],['Left',x,y,x,y+h]
-  ]){
-   const width=parseFloat(style[`border${side}Width`])||0,color=pdfColor(style[`border${side}Color`]);
-   if(!width||!color)continue;
-   doc.setDrawColor(...color);doc.setLineWidth(width*(scaleX+scaleY)/2);doc.line(startX,startY,endX,endY);
+function normalizePdfCaptureColors(clonedDocument){
+ clonedDocument.querySelectorAll('.sheet [contenteditable]').forEach(element=>{
+  element.removeAttribute('contenteditable');
+  element.removeAttribute('spellcheck');
+  element.removeAttribute('title');
+ });
+ clonedDocument.querySelectorAll('.sheet .selected').forEach(element=>element.classList.remove('selected'));
+ const stripUnsupportedDeclarations=style=>{
+  for(const property of [...style]){
+   if(/(?:color-mix|color)\(/i.test(style.getPropertyValue(property)))style.removeProperty(property);
   }
- }
- for(const image of sheet.querySelectorAll('img')){
-  if(!image.complete||!image.naturalWidth||!image.naturalHeight)throw new Error('A profile photo could not be loaded for the PDF. Remove it or try again.');
-  const rect=image.getBoundingClientRect();
-  if(!rect.width||!rect.height)continue;
-  const side=Math.min(image.naturalWidth,image.naturalHeight);
-  const sourceX=(image.naturalWidth-side)/2,sourceY=(image.naturalHeight-side)/2;
-  const canvas=document.createElement('canvas');
-  canvas.width=side;canvas.height=side;
-  const context=canvas.getContext('2d');
-  const style=getComputedStyle(image),round=style.borderTopLeftRadius.includes('%')
-   ||parseFloat(style.borderTopLeftRadius)>=Math.min(rect.width,rect.height)/2;
-  if(round){context.beginPath();context.arc(side/2,side/2,side/2,0,Math.PI*2);context.clip()}
-  context.drawImage(image,sourceX,sourceY,side,side,0,0,side,side);
-  const format=round?'PNG':'JPEG',imageData=canvas.toDataURL(`image/${format.toLowerCase()}`,.84);
-  doc.addImage(imageData,format,(rect.left-bounds.left)*scaleX,(rect.top-bounds.top)*scaleY,rect.width*scaleX,rect.height*scaleY,undefined,'MEDIUM');
-  canvas.width=0;canvas.height=0;
- }
+ };
+ const stripUnsupportedColors=rules=>{
+  for(const rule of rules){
+   if(rule.cssRules)stripUnsupportedColors(rule.cssRules);
+   if(rule.style)stripUnsupportedDeclarations(rule.style);
+  }
+ };
+ clonedDocument.querySelectorAll('.sheet [style]').forEach(element=>stripUnsupportedDeclarations(element.style));
+ for(const stylesheet of clonedDocument.styleSheets)stripUnsupportedColors(stylesheet.cssRules);
 }
 async function exportPDF(templateId=null){
  const originalState=state,originalSelection=selectedId,originalZoom=zoom;
@@ -1505,13 +1485,19 @@ async function exportPDF(templateId=null){
  try{
   $('sheets').classList.add('exporting');sheets.forEach(sheet=>sheet.style.transform='none');
   if(document.fonts&&document.fonts.ready)await document.fonts.ready;
+  const {default:html2canvas}=await import('html2canvas');
   const {jsPDF}=await import('jspdf');
   if(generation!==pdfPreviewGeneration)return;
   for(const sheet of sheets){
    const images=[...sheet.querySelectorAll('img')];
    await Promise.all(images.map(image=>image.decode()));
    if(generation!==pdfPreviewGeneration)return;
-   renderedPages.push({sheet});
+   const canvas=await html2canvas(sheet,{scale:2,backgroundColor:'#ffffff',logging:false,useCORS:true,onclone:normalizePdfCaptureColors});
+   try{
+    renderedPages.push({sheet,image:canvas.toDataURL('image/jpeg',.94)});
+   }finally{
+    canvas.width=0;canvas.height=0;
+   }
   }
   const {blob}=await buildResumePdf(jsPDF,renderedPages,{
    addPdfDecorations,
@@ -1543,6 +1529,7 @@ function showPdfPreview(blob,filename,pageCount,title){
  pdfPreviewFilename=filename;
  pdfPreviewUrl=URL.createObjectURL(blob);
  $('pdfPreviewTitle').textContent=title;
+ $('openPdfPreview').href=pdfPreviewUrl;
  $('pdfPreviewFrame').src=pdfPreviewUrl;
  $('pdfPreviewFrame').hidden=false;
  const trialText=pdfPreviewUsesProTemplate&&!canUseFeature(FEATURE_IDS.ALL_TEMPLATES,verifiedEntitlement)
@@ -1562,6 +1549,7 @@ function closePdfPreview(){
  $('pdfPreviewModalBg').setAttribute('aria-hidden','true');
  $('pdfPreviewFrame').removeAttribute('src');
  $('pdfPreviewFrame').hidden=true;
+ $('openPdfPreview').removeAttribute('href');
  $('downloadPdfPreview').disabled=true;
  pdfPreviewBlob=null;
  pdfPreviewFilename='';

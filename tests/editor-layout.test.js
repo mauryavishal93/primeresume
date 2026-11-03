@@ -32,6 +32,30 @@ test('editor hint text is centered in the canvas', () => {
   assert.match(styles, /\.hint\{text-align:center;[^}]*margin:0 auto 12px/);
 });
 
+test('mobile PDF preview opens the native document viewer instead of embedding the PDF', () => {
+  const html = readFileSync(new URL('../frontend/editor.html', import.meta.url), 'utf8');
+  const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
+  assert.match(html, /id="openPdfPreview" target="_blank" rel="noopener"/);
+  assert.match(source, /\$\('openPdfPreview'\)\.href=pdfPreviewUrl/);
+  assert.match(styles, /@media\(max-width:600px\)\{[\s\S]*?\.pdf-preview-mobile-link\{display:inline-flex/);
+  assert.match(styles, /\.pdf-preview-frame\{display:none\}/);
+});
+
+test('PDF export captures the rendered resume and keeps its text layer searchable', () => {
+  const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
+  const pdfSource = readFileSync(new URL('../frontend/src/resume-pdf.js', import.meta.url), 'utf8');
+  assert.match(source, /await html2canvas\(sheet,\{scale:2,backgroundColor:'#ffffff',logging:false,useCORS:true,onclone:normalizePdfCaptureColors\}\)/);
+  assert.match(source, /function normalizePdfCaptureColors\(clonedDocument\)\{[\s\S]*?querySelectorAll\('\.sheet \[contenteditable\]'\)/);
+  assert.match(source, /removeAttribute\('contenteditable'\)/);
+  assert.match(source, /querySelectorAll\('\.sheet \.selected'\)\.forEach/);
+  assert.match(source, /querySelectorAll\('\.sheet \[style\]'\)\.forEach/);
+  assert.match(source, /stripUnsupportedColors\(stylesheet\.cssRules\)/);
+  assert.match(source, /style\.removeProperty\(property\)/);
+  assert.match(source, /renderedPages\.push\(\{sheet,image:canvas\.toDataURL\('image\/jpeg',\.94\)\}\)/);
+  assert.match(source, /doc\.addImage\(image,'JPEG',0,0,210,297/);
+  assert.match(pdfSource, /addSelectableText\(doc, sheet, \{ renderingMode: 'invisible' \}\)/);
+});
+
 test('mobile editor provides view tabs and shows one full-width panel above the canvas', () => {
   const html = readFileSync(new URL('../frontend/editor.html', import.meta.url), 'utf8');
   const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');

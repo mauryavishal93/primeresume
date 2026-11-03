@@ -10,18 +10,20 @@ class UncompressedJsPDF extends jsPDF {
   }
 }
 
-test('builds selectable text across resume pages without flattening pages into images', async () => {
+test('preserves rendered pages and keeps text searchable in the PDF', async () => {
   const resumeState = { version: 4, template: 'classic', profile: { name: 'Alex Morgan' }, sections: [] };
+  const image = { data: new Uint8ClampedArray([255, 255, 255, 255]), width: 1, height: 1 };
   const result = buildResumePdf(UncompressedJsPDF, [
-    { sheet: { text: 'Vector resume page one' } },
-    { sheet: { text: 'Vector resume page two' } }
+    { sheet: { text: 'Vector resume page one' }, image },
+    { sheet: { text: 'Vector resume page two' }, image }
   ], {
-    addPdfDecorations: () => {},
-    addSelectableText: (doc, sheet) => drawPdfText(doc, sheet.text, 24, 36, {
+    addPdfDecorations: (doc, _sheet, pageImage) => doc.addImage(pageImage, 'PNG', 0, 0, 1, 1),
+    addSelectableText: (doc, sheet, options) => drawPdfText(doc, sheet.text, 24, 36, {
       font: 'helvetica',
       style: 'normal',
       size: 12,
-      color: [24, 42, 58]
+      color: [24, 42, 58],
+      ...options
     }),
     addPDFLinks: () => {},
     resumeState
@@ -33,7 +35,8 @@ test('builds selectable text across resume pages without flattening pages into i
   assert.match(pdf, /\(Vector resume page two\) Tj/);
   assert.match(pdf, /PersonaCraftProResume/);
   assert.match(pdf, /Alex Morgan/);
-  assert.doesNotMatch(pdf, /\/Subtype\s*\/Image/);
+  assert.match(pdf, /\/Subtype\s*\/Image/);
+  assert.match(pdf, /3 Tr/);
 });
 
 test('reads structured resume data back from an exported PDF', async () => {

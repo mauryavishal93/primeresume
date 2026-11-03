@@ -286,11 +286,21 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 .pdf-preview-frame{flex:1;width:100%;min-height:0;border:1px solid var(--line);border-radius:8px;background:#eef1f5}
 .pdf-preview-frame[hidden]{display:none}
 .pdf-preview-modal .modal-actions{flex:none}
+.pdf-preview-mobile-link{display:none}
 .cover-letter-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:14px}
 .cover-letter-head h2{margin:0 0 4px;font-size:18px}
 .cover-letter-generate{margin:0 0 12px}
 #coverLetterDraft{min-height:280px;resize:vertical;font:13px/1.6 Georgia,serif}
 @media(max-width:600px){.cover-letter-fields{grid-template-columns:1fr}.cover-letter-modal{padding:16px}}
+@media(max-width:600px){
+ .modal-bg#pdfPreviewModalBg{padding:8px;padding-bottom:max(8px,env(safe-area-inset-bottom))}
+ .pdf-preview-modal{width:100%;height:calc(100dvh - 16px);max-height:calc(100dvh - 16px);padding:14px}
+ .pdf-preview-head{gap:8px}
+ .pdf-preview-mobile-link{display:inline-flex;align-self:flex-start;min-height:44px;align-items:center}
+ .pdf-preview-frame{display:none}
+ .pdf-preview-modal .modal-actions{gap:8px}
+ .pdf-preview-modal .modal-actions .btn{min-height:44px}
+}
 .btn,.size-btn,.template,.tab,.seg button,.add{transition:transform .16s ease,border-color .16s ease,color .16s ease,background-color .16s ease,box-shadow .16s ease}
 .btn:hover:not(:disabled){transform:translateY(-1px)}
 .btn:disabled{opacity:.48;cursor:not-allowed;filter:grayscale(.4)}
