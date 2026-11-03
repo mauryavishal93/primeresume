@@ -4,21 +4,21 @@ A browser-based resume editor with multiple templates, editable sections, JSON p
 
 ## Requirements
 
-- Node.js 20.19 or newer
+- Node.js 22.x
 - npm 10 or newer
 
 ## Setup
 
 ```sh
 npm install
-npm run dev
+npm run start:all
 ```
 
-Vite opens the editor at `/`. To run the billing API locally, start the backend in a second terminal with `npm run backend`; Vite proxies `/api` requests to `http://127.0.0.1:3000`. Billing remains disabled unless all server-side configuration is present.
+This builds the frontend and starts the frontend and API together at `http://localhost:3000`. Billing remains disabled unless all server-side configuration is present. For frontend hot reload during development, use `npm run dev` and run `npm run backend` in a second terminal.
 
 ### Local admin dashboard
 
-The admin page runs through Vite at `http://localhost:5173/admin.html`; the API must also be running on port `3000`. In one terminal, set `FIREBASE_SERVICE_ACCOUNT_JSON` to a server-only service account for this Firebase project and `ADMIN_EMAILS` to the Google account allowed to administer it, then run `npm run backend`. In another terminal, run `npm run dev`. Use `localhost` (not `127.0.0.1`) for Google sign-in, and add `localhost` to Firebase Authentication's authorized domains if needed. Never commit the service-account JSON. The dashboard reports missing backend credentials or access configuration instead of treating API failures as an authorization denial.
+The admin page is available at `http://localhost:3000/admin.html` when using `npm run start:all`. Set `FIREBASE_SERVICE_ACCOUNT_JSON` to a server-only service account for this Firebase project and `ADMIN_EMAILS` to the Google account allowed to administer it in the root `.env` file. Use `localhost` (not `127.0.0.1`) for Google sign-in, and add `localhost` to Firebase Authentication's authorized domains if needed. Never commit the service-account JSON. The dashboard reports missing backend credentials or access configuration instead of treating API failures as an authorization denial.
 
 ## Deploy on Vercel
 

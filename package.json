@@ -10,6 +10,7 @@
     "dev": "vite --open /home.html",
     "backend": "node backend/server.js",
     "build": "vite build",
+    "start:all": "node server.js",
     "test": "node --test",
     "preview": "vite preview --host 0.0.0.0",
     "start": "node backend/server.js"
