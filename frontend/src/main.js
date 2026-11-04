@@ -44,7 +44,7 @@ const makeSections=()=>{
     {id:uid(),type:'certifications',title:'Certifications',visible:true,content:'Add relevant certifications, courses, or professional training.'}
   ];
 };
-const fresh=()=>({version:4,docName:'Untitled resume',template:'classic',layout:'single',mode:'flow',profile:{name:'Name Surname',headline:'Engineer',email:'abc@xyz.com',phone:'+91 98765 43210',location:'Bengaluru, India',website:'linkedin.com/in/abcxyz/',photo:''},design:{accent:'#31547a',font:'Arial',fontSize:12,headingSize:15,margin:DEFAULT_MARGIN,marginY:DEFAULT_MARGIN,pageNumbers:true,headerAlign:'',photoAlign:''},sections:makeSections().map(section=>({...section,headingSize:15,bodySize:12})),positions:{},importedSourceText:''});
+const fresh=()=>({version:4,docName:'Untitled resume',template:'classic',layout:'single',mode:'flow',profile:{name:'Name Surname',headline:'Engineer',email:'abc@xyz.com',phone:'+91 98765 43210',location:'Bengaluru, India',website:'linkedin.com/in/abcxyz/',photo:''},design:{accent:'#31547a',font:'Arial',fontSize:12,headingSize:15,margin:DEFAULT_MARGIN,marginY:DEFAULT_MARGIN,pageNumbers:true,headerAlign:'',photoAlign:''},sections:makeSections().map(section=>({...section,headingSize:15,bodySize:12})),positions:{},freePageCount:1,freeLayoutsByTemplate:{},importedSourceText:''});
 const str=v=>typeof v==='string'?v:'';
 /* Validates + upgrades any project (import or autosave). Throws on files that are not projects. */
 function normalizeState(d){
@@ -54,7 +54,7 @@ function normalizeState(d){
  out.importedSourceText=str(d.importedSourceText);
  if(new TextEncoder().encode(out.importedSourceText).length>200_000)throw Error('The saved original resume text exceeds the supported size.');
  out.template=templateDefs.some(t=>t.id===d.template)?d.template:base.template;
- out.layout=d.layout==='two'?'two':'single';out.mode=d.mode==='free'?'free':'flow';
+ out.layout=d.layout==='two'?'two':'single';out.mode=d.mode==='free'?'free':'flow';out.freePageCount=clamp(Math.floor(Number(d.freePageCount)||1),1,50,1);
  out.profile={...base.profile};for(const k of Object.keys(base.profile))if(typeof d.profile[k]==='string')out.profile[k]=d.profile[k];
  if(out.profile.photo&&!/^data:image\//.test(out.profile.photo))out.profile.photo='';
  const ds=d.design;let mx=clamp(ds.margin,0,100,DEFAULT_MARGIN),my=clamp(ds.marginY!==undefined?ds.marginY:ds.margin,0,100,DEFAULT_MARGIN);
@@ -68,8 +68,29 @@ function normalizeState(d){
   if(['experience','education','projects'].includes(type)||Array.isArray(s.entries))n.entries=(Array.isArray(s.entries)?s.entries:[]).filter(e=>e&&typeof e==='object').map(e=>({role:str(e.role),company:str(e.company),date:str(e.date),details:str(e.details)}));
   else n.content=str(s.content);
   return n});
- out.positions={};const pos=d.positions||d.freePositions;
- if(pos&&typeof pos==='object')for(const [k,p] of Object.entries(pos)){if(!seen.has(k)||!p||typeof p!=='object')continue;const x=Number(p.x),y=Number(p.y),w=Number(p.w);if(![x,y,w].every(Number.isFinite))continue;if(ver<3&&x===0&&w===610)continue;out.positions[k]={x:clamp(x,0,PAGE_W,0),y:clamp(y,0,PAGE_H,0),w:clamp(w,120,PAGE_W,610)}}
+ const normalizePositions=pos=>{
+  const positions={};
+  if(pos&&typeof pos==='object')for(const [k,p] of Object.entries(pos)){
+   if(!seen.has(k)||!p||typeof p!=='object')continue;
+   const x=Number(p.x),y=Number(p.y),w=Number(p.w),page=Number(p.page);
+   if(![x,y,w].every(Number.isFinite)||ver<3&&x===0&&w===610)continue;
+   positions[k]={x:clamp(x,0,PAGE_W,0),y:clamp(y,0,PAGE_H,0),w:clamp(w,120,PAGE_W,610),page:Number.isSafeInteger(page)?clamp(page,0,49,0):0};
+  }
+  return positions;
+ };
+ out.positions=normalizePositions(d.positions||d.freePositions);
+ out.freeLayoutsByTemplate={};
+ if(d.freeLayoutsByTemplate&&typeof d.freeLayoutsByTemplate==='object')for(const [templateId,layout] of Object.entries(d.freeLayoutsByTemplate)){
+  if(!templateDefs.some(template=>template.id===templateId)||!layout||typeof layout!=='object')continue;
+  out.freeLayoutsByTemplate[templateId]={
+   positions:normalizePositions(layout.positions),
+   freePageCount:clamp(Math.floor(Number(layout.freePageCount)||1),1,50,1),
+   initialized:layout.initialized===true
+  };
+ }
+ if(!out.freeLayoutsByTemplate[out.template]&&(out.mode==='free'||Object.keys(out.positions).length)){
+  out.freeLayoutsByTemplate[out.template]={positions:deep(out.positions),freePageCount:out.freePageCount,initialized:true};
+ }
  return out;
 }
 let state=fresh(),selectedId=null,selectedSectionAnchor=null,zoom=1,mobileAutoFitZoom=true,history=[],redoHistory=[],draggingId=null,saveTimer=null,panelWidth=260,collapsed=false,leftWidth=260,leftCollapsed=false,leftTab='templates',rightTab='design',touchPoints=new Map(),pinchStart=null,pinchUsed=false,onboardingDismissed=false,customSectionTrigger=null,inspectorEntriesExpanded=false;
@@ -186,6 +207,7 @@ async function persistCloudResume(){
  }
 }
 function saveLocal(syncCloud=true){
+ saveActiveFreeLayout();
  const persistenceMode=resumeStorageMode(cloudUser,guestResumeStorage.enabled);
  if(persistenceMode==='cloud'){
   cloudDraftDirty=true;
@@ -543,13 +565,63 @@ function transact(fn){const previous=deep(state);fn();if(JSON.stringify(previous
 function undo(){if(!history.length)return;redoHistory.push(deep(state));state=history.pop();if(!state.sections.some(s=>s.id===selectedId))selectedId=null;render();saveLocal();updateUndoButton();toast('Undo complete')}
 function redo(){if(!redoHistory.length)return;history.push(deep(state));state=redoHistory.pop();if(!state.sections.some(s=>s.id===selectedId))selectedId=null;render();saveLocal();updateUndoButton();toast('Redo complete')}
 function activeTemplate(){return templateDefs.find(t=>t.id===state.template)||templateDefs[0]}
+function saveActiveFreeLayout(){
+ if(state.mode!=='free')return;
+ state.freeLayoutsByTemplate??={};
+ state.freeLayoutsByTemplate[state.template]={
+  positions:deep(state.positions||{}),
+  freePageCount:clamp(Math.floor(Number(state.freePageCount)||1),1,50,1),
+  initialized:true
+ };
+}
+function loadFreeLayout(templateId){
+ const layout=state.freeLayoutsByTemplate?.[templateId];
+ if(!layout?.initialized)return false;
+ state.positions=deep(layout.positions||{});
+ state.freePageCount=clamp(Math.floor(Number(layout.freePageCount)||1),1,50,1);
+ return true;
+}
+function captureStructuredFreeLayout(){
+ const positions={},sheets=[...$('sheets').querySelectorAll('.sheet')];
+ for(const section of $('sheets').querySelectorAll('.resume-section[data-resume-section]')){
+  const id=section.dataset.resumeSection;
+  if(positions[id])continue;
+  const sheet=section.closest('.sheet'),sheetIndex=sheets.indexOf(sheet);
+  if(!sheet||sheetIndex<0)continue;
+  const sheetBounds=sheet.getBoundingClientRect(),bounds=section.getBoundingClientRect(),scale=sheetBounds.width/PAGE_W||1;
+  const x=clamp((bounds.left-sheetBounds.left)/scale,0,PAGE_W-120,0);
+  positions[id]={
+   x,
+   y:clamp((bounds.top-sheetBounds.top)/scale,0,PAGE_H,0),
+   w:clamp(bounds.width/scale,120,PAGE_W-x,120),
+   page:sheetIndex
+  };
+ }
+ state.positions=positions;
+ state.freePageCount=clamp(sheets.length,1,50,1);
+ state.freeLayoutsByTemplate??={};
+ state.freeLayoutsByTemplate[state.template]={positions:deep(positions),freePageCount:state.freePageCount,initialized:true};
+}
+function applyTemplate(template){
+ if(state.mode==='free')saveActiveFreeLayout();
+ state.template=template.id;
+ state.layout=template.layout;
+ state.design.accent=template.accent;
+ if(state.mode==='free'){
+  if(!loadFreeLayout(template.id)){
+   state.mode='flow';
+   renderSheets();
+   captureStructuredFreeLayout();
+   state.mode='free';
+  }
+ }
+ selectedId=null;
+}
 function applyHomepageTemplate(){
  const template=templateDefs.find(item=>item.id===requestedHomepageTemplateId&&TEMPLATE_IDS.FREE.includes(item.id));
  if(!template)return false;
  const changed=state.template!==template.id||state.layout!==template.layout||state.design.accent!==template.accent;
- state.template=template.id;
- state.layout=template.layout;
- state.design.accent=template.accent;
+ applyTemplate(template);
  if(changed)selectedId=null;
  return changed;
 }
@@ -605,7 +677,12 @@ async function deleteSectionById(id){
    confirmText: 'Delete section',
    variant: 'danger'
  }))return;
- transact(()=>{state.sections=state.sections.filter(item=>item.id!==id);delete state.positions[id];if(selectedId===id)selectedId=null});
+ transact(()=>{
+  state.sections=state.sections.filter(item=>item.id!==id);
+  delete state.positions[id];
+  for(const layout of Object.values(state.freeLayoutsByTemplate||{}))delete layout.positions[id];
+  if(selectedId===id)selectedId=null;
+ });
  toast('Section deleted.');
 }
 
@@ -675,23 +752,33 @@ function createSheet(index,tmpl,cols){
 }
 
 /* ---------- Content is split into small "atoms" so pages/columns can be filled precisely ---------- */
-function splitLongLine(text,limit){
- const words=String(text||'').split(/\s+/).filter(Boolean),out=[];let part='';
- for(const w of words){if(!part)part=w;else if((part+' '+w).length<=limit)part+=' '+w;else{out.push(part);part=w}}
- if(part)out.push(part);return out.length?out:[''];
-}
 function splitParagraph(text,max=320){
- if(text.length<=max)return [text];
- const sentences=text.match(/[^.!?]+[.!?]+["')\]]*\s*|[^.!?]+$/g)||[text],out=[];let cur='';
- for(const s of sentences){if(cur&&(cur+s).length>max){out.push(cur.trim());cur=s}else cur+=s}
- if(cur.trim())out.push(cur.trim());
- return out.flatMap(p=>p.length>max*2?splitLongLine(p,max):[p]);
+ const chunks=[];let current='';
+ const push=()=>{if(current){chunks.push(current);current=''}};
+ for(const token of text.match(/\S+\s*/g)||[text]){
+  if(token.length>max){
+   push();
+   for(let index=0;index<token.length;index+=max)chunks.push(token.slice(index,index+max));
+  }else{
+   if(current&&current.length+token.length>max)push();
+   current+=token;
+  }
+ }
+ push();
+ return chunks.length?chunks:[text];
 }
-function sectionAtoms(s){
+function sectionAtoms(s,splitLongParagraphs=false){
  const a=[];
- if(s.entries){for(const e of s.entries){const ls=detailLines(e.details);a.push({k:'entry',e});const hasDetail=ls.some(line=>line.trim());ls.forEach((t,i)=>{if(!hasDetail&&i===0)return;a.push({k:'li',e,t:t.trim(),detailIndex:i,blank:!t.trim()})})}}
+ if(s.entries){for(const e of s.entries){const ls=detailLines(e.details);a.push({k:'entry',e});const hasDetail=ls.some(line=>line.trim());ls.forEach((t,i)=>{if(!hasDetail&&i===0)return;const text=t.trim(),chunks=splitLongParagraphs?splitParagraph(text,220):[text];let textStart=0;chunks.forEach(chunk=>{a.push({k:'li',e,t:chunk,detailIndex:i,textStart,textLength:chunk.length,blank:!chunk.trim()});textStart+=chunk.length})})}}
  else if(s.type==='skills')String(s.content||'').split(/[,\n]/).map(x=>x.trim()).filter(Boolean).forEach(t=>a.push({k:'chip',t}));
- else String(s.content||'').replace(/\r\n?/g,'\n').split('\n').forEach((par,lineIndex)=>{a.push({k:'p',t:par,cont:false,lineIndex,blank:!par.trim()})});
+ else String(s.content||'').replace(/\r\n?/g,'\n').split('\n').forEach((par,lineIndex)=>{
+  const chunks=splitLongParagraphs?splitParagraph(par,220):[par];
+  let textStart=0;
+  chunks.forEach((chunk,index)=>{
+   a.push({k:'p',t:chunk,cont:index>0,lineIndex,textStart,textLength:chunk.length,blank:!chunk.trim()});
+   textStart+=chunk.length;
+  });
+ });
  if(!a.length)a.push({k:'p',t:'',cont:false});
  return a;
 }
@@ -710,7 +797,7 @@ function appendAtom(shell,a,st,s){
   body.appendChild(el);st.ul=null;
  }else if(a.k==='li'){
   if(!st.ul){const last=body.lastElementChild;st.ul=document.createElement((s.listStyle||'bullet')==='number'?'ol':'ul');st.ul.className='pointer-list';(last||body).appendChild(st.ul)}
-  el=document.createElement('li');el.contentEditable='true';el.spellcheck=true;el.title='Click to edit bullet';el.classList.toggle('blank-bullet',!!a.blank);el.dataset.sectionId=s.id;el.dataset.entry=entryIndex;el.dataset.entryField='detail';el.dataset.detailSource=a.t;el.dataset.detailIndex=String(a.detailIndex);el.textContent=a.t;st.ul.appendChild(el);
+  el=document.createElement('li');el.contentEditable='true';el.spellcheck=true;el.title='Click to edit bullet';el.classList.toggle('blank-bullet',!!a.blank);el.dataset.sectionId=s.id;el.dataset.entry=entryIndex;el.dataset.entryField='detail';el.dataset.detailSource=a.t;el.dataset.detailIndex=String(a.detailIndex);if(a.textStart!==undefined){el.dataset.detailStart=String(a.textStart);el.dataset.detailLength=String(a.textLength)}el.textContent=a.t;st.ul.appendChild(el);
  }else if(a.k==='chip'){
   let l=body.querySelector('.skill-list');if(!l){l=document.createElement('div');l.className='skill-list';body.appendChild(l)}
   const skills=String(s.content||'').split(/[,\n]/).map(x=>x.trim()).filter(Boolean),skillIndex=skills.indexOf(a.t);
@@ -718,6 +805,7 @@ function appendAtom(shell,a,st,s){
  }else{el=document.createElement('p');if(a.cont)el.className='cont';if(a.blank){el.classList.add('blank-line');el.setAttribute('aria-placeholder',' ') }
    el.textContent=a.t;
    el.contentEditable='true';el.spellcheck=true;el.title='Click to edit text';el.dataset.sectionId=s.id;el.dataset.textSource=a.t;el.dataset.textIndex=String(a.lineIndex||0);
+   if(a.textStart!==undefined){el.dataset.textStart=String(a.textStart);el.dataset.textLength=String(a.textLength)}
    body.appendChild(el)}
  return el;
 }
@@ -755,7 +843,7 @@ function flowSections(root,tmpl){
    shell.remove();return null;
   };
   for(const s of state.sections.filter(x=>x.visible)){
-   const atoms=sectionAtoms(s);let i=0,cont=false,cur=null,lastSi=0;
+   const atoms=sectionAtoms(s,true);let i=0,cont=false,cur=null,lastSi=0;
    const pref=tmpl.id==='peach-mint'?(s.type==='skills'||s.type==='certifications'?1:0):tmpl.id==='teal-modern'?(s.type==='skills'?1:0):tmpl.id==='brian-baxter'?(s.type==='education'||s.type==='certifications'?1:0):!two?0:MAIN_TYPES.has(s.type)?0:SIDE_TYPES.has(s.type)?1:(fill(0,s)<=fill(1,s)?0:1);
   while(i<atoms.length){
     const a=atoms[i];
@@ -781,15 +869,141 @@ function flowSections(root,tmpl){
  }
 }
 function renderFree(root,tmpl){
- const page=createSheet(0,tmpl,false);root.appendChild(page);
- const area=page.querySelector('.sections-area'),mx=clamp(state.design.margin,0,100,DEFAULT_MARGIN),defW=PAGE_W-2*mx;
- if(tmpl.id==='interio-designer')area.style.pointerEvents='auto';
- let cursor=area.offsetTop+parseFloat(getComputedStyle(area).paddingTop);
- state.sections.filter(s=>s.visible).forEach(s=>{
-  const node=renderWhole(s),pos=state.positions[s.id];
-  node.style.cssText+=`;position:absolute;margin:0;z-index:2;left:${pos?pos.x:mx}px;top:${pos?pos.y:cursor}px;width:${pos?pos.w:defW}px`;
-  area.appendChild(node);
-  if(!pos){state.positions[s.id]={x:mx,y:cursor,w:defW};cursor+=node.offsetHeight+14}
+ const pages=[];
+ const ensurePage=index=>{
+  while(pages.length<=index){
+   const page=createSheet(pages.length,tmpl,false);
+   root.appendChild(page);
+   pages.push(page);
+  }
+  state.freePageCount=Math.max(state.freePageCount||1,index+1);
+  return pages[index];
+ };
+ state.freePageCount=1;
+ ensurePage(0);
+ const mx=clamp(state.design.margin,0,100,DEFAULT_MARGIN),defW=PAGE_W-2*mx;
+ const pageCursors=[];
+ let autoPage=0;
+ const getArea=index=>{
+  const area=ensurePage(index).querySelector('.sections-area');
+  if(tmpl.id==='interio-designer')area.style.pointerEvents='auto';
+  return area;
+ };
+ const getPageBounds=(area,page)=>{
+  const sheet=page.getBoundingClientRect(),areaBounds=area.getBoundingClientRect(),scale=sheet.width/PAGE_W||1;
+  const paddingTop=parseFloat(getComputedStyle(area).paddingTop)||0;
+  const paddingBottom=parseFloat(getComputedStyle(area).paddingBottom)||0;
+  return {
+   top:(areaBounds.top-sheet.top)/scale+paddingTop,
+   bottom:(areaBounds.bottom-sheet.top)/scale-paddingBottom
+  };
+ };
+ const getCursor=index=>{
+  if(pageCursors[index]===undefined){
+   const page=ensurePage(index),area=getArea(index);
+   pageCursors[index]=getPageBounds(area,page).top;
+  }
+  return pageCursors[index];
+ };
+ const placeSection=(section,position,withControls=true)=>{
+  let pageIndex=clamp(Math.floor(Number(position.page)||0),0,49,0);
+  let page=ensurePage(pageIndex),area=getArea(pageIndex);
+  let top=clamp(position.y,0,PAGE_H,0);
+  let firstPage=pageIndex,firstTop=top;
+  const x=clamp(position.x,0,PAGE_W-120,0),width=clamp(position.w,120,PAGE_W-x,120);
+  let shell=null,firstShell=null,fragmentState=null,hasAtom=false,lastBottom=top;
+  const createFragment=continuation=>{
+   page=ensurePage(pageIndex);
+   area=getArea(pageIndex);
+   shell=makeShell(section,continuation);
+   shell.style.cssText+=`;position:absolute;margin:0;z-index:2;left:${x}px;top:${top}px;width:${width}px`;
+   area.appendChild(shell);
+   if(!continuation)firstShell=shell;
+   fragmentState={};
+   if(!continuation){
+    const sheetBounds=page.getBoundingClientRect(),bounds=getPageBounds(area,page);
+    const scale=sheetBounds.width/PAGE_W||1;
+    const heading=shell.querySelector('.section-heading');
+    if(heading&&((heading.getBoundingClientRect().bottom-sheetBounds.top)/scale)>bounds.bottom&&pageIndex<49){
+     shell.remove();
+     pageIndex++;
+     page=ensurePage(pageIndex);
+     area=getArea(pageIndex);
+     top=getPageBounds(area,page).top;
+     firstPage=pageIndex;
+     firstTop=top;
+     return createFragment(false);
+    }
+   }
+   return shell;
+  };
+  createFragment(false);
+  for(const atom of sectionAtoms(section)){
+   let element=appendAtom(shell,atom,fragmentState,section);
+   let sheetBounds=page.getBoundingClientRect(),bounds=getPageBounds(area,page),scale=sheetBounds.width/PAGE_W||1;
+   const overflows=element.getBoundingClientRect().bottom>sheetBounds.top+bounds.bottom*scale+.5;
+   if(overflows&&pageIndex<49){
+    const atomParent=element.parentElement;
+    element.remove();
+    if(atomParent&&atomParent!==shell&&(atomParent.classList.contains('pointer-list')||atomParent.classList.contains('skill-list'))&&!atomParent.children.length)atomParent.remove();
+    if(!hasAtom&&shell.querySelector('.section-heading')?.getBoundingClientRect().bottom>sheetBounds.top+bounds.bottom*scale+.5)shell.remove();
+    pageIndex++;
+    page=ensurePage(pageIndex);
+    area=getArea(pageIndex);
+    top=getPageBounds(area,page).top;
+    createFragment(true);
+    element=appendAtom(shell,atom,fragmentState,section);
+    sheetBounds=page.getBoundingClientRect();
+    bounds=getPageBounds(area,page);
+    scale=sheetBounds.width/PAGE_W||1;
+   }
+   hasAtom=true;
+   lastBottom=(shell.getBoundingClientRect().bottom-sheetBounds.top)/scale;
+  }
+  if(withControls&&firstShell)addControls(firstShell);
+  state.freePageCount=Math.max(state.freePageCount||1,pageIndex+1);
+  return {page:pageIndex,bottom:lastBottom,startPage:firstPage,startY:firstTop};
+ };
+ const addControls=node=>{
+  const move=document.createElement('button');
+  move.type='button';
+  move.className='free-position-control free-position-move';
+  move.dataset.freeAction='move';
+  move.setAttribute('aria-label','Move section');
+  move.title='Drag to move this section';
+  move.textContent='⠿';
+  const resize=document.createElement('button');
+  resize.type='button';
+  resize.className='free-position-control free-position-resize';
+  resize.dataset.freeAction='resize';
+  resize.setAttribute('aria-label','Resize section width');
+  resize.title='Drag to resize this section';
+  resize.textContent='↔';
+  node.append(move,resize);
+ };
+ state.sections.filter(section=>section.visible).forEach(section=>{
+  const stored=state.positions[section.id];
+  if(stored){
+   const pageIndex=clamp(Math.floor(Number(stored.page)||0),0,49,0);
+   const placed=placeSection(section,{...stored,page:pageIndex});
+   state.positions[section.id]={...stored,page:placed.startPage,y:placed.startY};
+   pageCursors[placed.page]=Math.max(getCursor(placed.page),placed.bottom+14);
+   autoPage=Math.max(autoPage,placed.page);
+   return;
+  }
+
+  let pageIndex=autoPage,cursor=getCursor(pageIndex),page=ensurePage(pageIndex),area=getArea(pageIndex),bounds=getPageBounds(area,page);
+  if(cursor>bounds.bottom&&pageIndex<49){
+   pageIndex++;
+   page=ensurePage(pageIndex);
+   area=getArea(pageIndex);
+   cursor=getPageBounds(area,page).top;
+  }
+  const position={x:mx,y:cursor,w:defW,page:pageIndex};
+  const placed=placeSection(section,position);
+  state.positions[section.id]={...position,page:placed.startPage,y:placed.startY};
+  pageCursors[placed.page]=placed.bottom+14;
+  autoPage=placed.page;
  });
 }
 function renderSheets(){
@@ -800,7 +1014,7 @@ function renderSheets(){
   sh.querySelector('.page-number').textContent=state.design.pageNumbers?`Page ${i+1} of ${all.length}`:'';
   sh.style.transform=zoom===1?'':`scale(${zoom})`;sh.style.marginBottom=zoom===1?'':((zoom-1)*PAGE_H)+'px';
  });
- $('hint').textContent=state.mode==='free'?'Free position: drag sections · Click text directly to edit':'Click any name, heading, bullet, skill, or paragraph on the page to edit · Use the right panel for design and photo details';
+ $('hint').textContent=state.mode==='free'?'Free position: use the move handle to place sections and the right edge to resize. Pages are added automatically as content grows.':'Click any name, heading, bullet, skill, or paragraph on the page to edit · Use the right panel for design and photo details';
  $('zoomLabel').textContent=Math.round(zoom*100)+'%';
  updateSectionTypographyCallout();
 }
@@ -884,11 +1098,7 @@ async function openTemplatePreview(templateId){
  const originalState=state,originalSelection=selectedId,originalZoom=zoom;
  try{
   state=deep(state);
-  state.template=template.id;
-  state.layout=template.layout;
-  state.design.accent=template.accent;
-  if(template.id==='brian-baxter'){state.positions={};state.freePageCount=1}
-  selectedId=null;
+  applyTemplate(template);
   zoom=1;
   renderSheets();
   renderedPages=[...$('sheets').querySelectorAll('.sheet')].map(sheet=>sheet.cloneNode(true));
@@ -1476,11 +1686,7 @@ async function exportPDF(templateId=null){
   const template=templateDefs.find(item=>item.id===templateId);
   if(!template||!isProTemplate(templateId)||canUseFeature(FEATURE_IDS.ALL_TEMPLATES,verifiedEntitlement))return;
   state=deep(state);
-  state.template=template.id;
-  state.layout=template.layout;
-  state.design.accent=template.accent;
-  if(template.id==='brian-baxter'){state.positions={};state.freePageCount=1}
-  selectedId=null;
+  applyTemplate(template);
   zoom=1;
   renderSheets();
  }
@@ -1957,7 +2163,7 @@ async function previewCoverLetterPdf(){
 }
 function applyAtsFriendlyLayout(){
  transact(()=>{
-  state.template='classic';
+  applyTemplate(templateDefs.find(template=>template.id==='classic'));
   state.layout='single';
   state.design.accent='#31547a';
   state.design.font='Arial';
@@ -2012,7 +2218,7 @@ function previewPendingTemplate(){
 function continueWithFreeTemplate(){
  if(pendingUpgradeFeature!=='template'||!pendingProTemplate){closeUpgrade();return}
  const fallback=isProTemplate(state.template)?templateDefs[0]:activeTemplate();
- if(state.template!==fallback.id)transact(()=>{state.template=fallback.id;state.layout=fallback.layout;state.design.accent=fallback.accent;selectedId=null});
+ if(state.template!==fallback.id)transact(()=>applyTemplate(fallback));
  closeUpgrade();
  toast(`Continuing with ${fallback.name}, a free template. Your resume content is unchanged.`);
 }
@@ -2021,11 +2227,7 @@ async function requestProTemplate(templateId){
  const template=templateDefs.find(item=>item.id===templateId);
  if(canUseFeature(FEATURE_IDS.ALL_TEMPLATES,verifiedEntitlement)){
   transact(()=>{
-   state.template=template.id;
-   state.layout=template.layout;
-   state.design.accent=template.accent;
-   if(template.id==='brian-baxter'){state.positions={};state.freePageCount=1}
-   selectedId=null;
+   applyTemplate(template);
   });
   pendingProTemplate=null;
   toast(`Applied ${template.name}`);
@@ -2102,7 +2304,7 @@ $('templates').addEventListener('click',e=>{
  if(!b)return;
  if(isProTemplate(b.dataset.template)&&!canUseFeature(FEATURE_IDS.ALL_TEMPLATES,verifiedEntitlement)){void requestProTemplate(b.dataset.template);return}
  if(b.dataset.template===state.template)return;
- transact(()=>{state.template=b.dataset.template;const t=activeTemplate();state.layout=t.layout;state.design.accent=t.accent;selectedId=null});toast('Applied '+activeTemplate().name)});
+ transact(()=>applyTemplate(templateDefs.find(template=>template.id===b.dataset.template)));toast('Applied '+activeTemplate().name)});
 $('sectionList').addEventListener('click',e=>{const deleteButton=e.target.closest('[data-delete-section]');if(deleteButton){e.preventDefault();e.stopPropagation();void deleteSectionById(deleteButton.dataset.deleteSection);return}const toggle=e.target.closest('[data-toggle]');if(toggle){transact(()=>{const s=sectionById(toggle.dataset.toggle);if(s)s.visible=!s.visible});return}const row=e.target.closest('[data-section-row]');if(row)selectSection(row.dataset.sectionRow)});
 $('sectionList').addEventListener('dragstart',e=>{const row=e.target.closest('[data-section-row]');if(!row)return;draggingId=row.dataset.sectionRow;e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',draggingId);row.style.opacity='.5'});
 $('sectionList').addEventListener('dragend',e=>{const row=e.target.closest('[data-section-row]');if(row)row.style.opacity='1';draggingId=null});
@@ -2158,16 +2360,30 @@ function caretOffsetWithin(el,includeLineBreaks=false){
  const prefix=range.toString().replace(/\u00a0/g,' ');
  return includeLineBreaks?prefix.length:prefix.replace(/\n/g,'').length;
 }
-function focusTextLine(sectionId,lineIndex,caretOffset=0){
+function focusTextLine(sectionId,lineIndex,caretOffset=0,smooth=false){
  requestAnimationFrame(()=>{
   const target=Array.from(document.querySelectorAll('#sheets [data-text-source][contenteditable="true"]')).find(el=>el.dataset.sectionId===sectionId&&Number(el.dataset.textIndex)===lineIndex);
-  if(!target)return;target.focus();const range=document.createRange(),selection=window.getSelection();range.selectNodeContents(target);
-  if(target.firstChild&&caretOffset>0&&target.firstChild.nodeType===Node.TEXT_NODE){range.setStart(target.firstChild,Math.min(caretOffset,target.firstChild.textContent.length));range.collapse(true)}else{range.collapse(true)}selection.removeAllRanges();selection.addRange(range);
+  if(!target)return;
+  target.focus({preventScroll:true});
+  const placeCaret=()=>{
+   const range=document.createRange(),selection=window.getSelection();
+   range.selectNodeContents(target);
+   if(target.firstChild&&caretOffset>0&&target.firstChild.nodeType===Node.TEXT_NODE)range.setStart(target.firstChild,Math.min(caretOffset,target.firstChild.textContent.length));
+   range.collapse(true);
+   selection.removeAllRanges();
+   selection.addRange(range);
+  };
+  placeCaret();
+  if(!smooth)return;
+  const sheet=target.closest('.sheet');
+  const behavior=window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth';
+  target.classList.add('structured-line-enter');
+  target.scrollIntoView({behavior,block:'nearest',inline:'nearest'});
  });
 }
-function reflowOverflowingDetail(el,force=false){
+function reflowOverflowingDetail(el,force=false,immediate=false){
  if(state.mode!=='flow')return;
- requestAnimationFrame(()=>{
+ const reflow=()=>{
   if(!el.isConnected||document.activeElement!==el)return;
   const area=el.closest('.sheet')?.querySelector('.sections-area');
   if(!area)return;
@@ -2180,12 +2396,14 @@ function reflowOverflowingDetail(el,force=false){
   const moved=Array.from(document.querySelectorAll('#sheets [data-entry-field="detail"]')).find(item=>item.dataset.sectionId===sectionId&&item.dataset.entry===entryIndex&&Number(item.dataset.detailIndex)===detailIndex);
   if(!moved)return;
   if(snapshot)directEditSnapshots.set(moved,snapshot);
-  moved.focus();
+  moved.focus({preventScroll:true});
   const range=document.createRange(),selection=window.getSelection(),textNode=moved.firstChild;
   if(textNode?.nodeType===Node.TEXT_NODE)range.setStart(textNode,Math.min(caret,textNode.textContent.length));
   else range.selectNodeContents(moved);
   range.collapse(true);selection?.removeAllRanges();selection?.addRange(range);
- });
+  moved.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'nearest',inline:'nearest'});
+ };
+ if(immediate)reflow();else requestAnimationFrame(reflow);
 }
 $('sheets').addEventListener('focusin',e=>{
  const el=e.target.closest('[contenteditable="true"]');if(!el)return;
@@ -2209,9 +2427,22 @@ $('sheets').addEventListener('input',e=>{
    const replacements=value.replace(/\r\n?/g,'\n').split('\n');
    const detailIndex=Number.isFinite(Number(el.dataset.detailIndex))?Number(el.dataset.detailIndex):-1;
    const representedCount=Math.max(1,Number(el.dataset.detailCount)||1);
-   if(detailIndex>=0&&detailIndex<details.length)details.splice(detailIndex,representedCount,...replacements);
+   if(el.dataset.detailStart!==undefined&&detailIndex>=0&&detailIndex<details.length){
+    const original=details[detailIndex],start=Number(el.dataset.detailStart),length=Number(el.dataset.detailLength)||0;
+    const nextLine=original.slice(0,start)+value+original.slice(start+length);
+    if(replacements.length>1)details.splice(detailIndex,representedCount,...nextLine.split('\n'));
+    else{
+     details[detailIndex]=nextLine;
+     const delta=value.length-length;
+     Array.from(document.querySelectorAll('#sheets [data-detail-start]')).forEach(fragment=>{
+      if(fragment===el||fragment.dataset.sectionId!==el.dataset.sectionId||fragment.dataset.entry!==el.dataset.entry||Number(fragment.dataset.detailIndex)!==detailIndex)return;
+      if(Number(fragment.dataset.detailStart)>=start+length)fragment.dataset.detailStart=String(Number(fragment.dataset.detailStart)+delta);
+     });
+     el.dataset.detailLength=String(value.length);
+    }
+   }else if(detailIndex>=0&&detailIndex<details.length)details.splice(detailIndex,representedCount,...replacements);
    else if(detailIndex>=0)details.splice(detailIndex,0,...replacements);
-   entry.details=details.join('\n');el.dataset.detailCount=String(replacements.length||1);el.dataset.currentText=value;
+   entry.details=details.join('\n');el.dataset.detailCount=String(replacements.length||1);el.dataset.detailSource=value;el.dataset.currentText=value;
    reflowOverflowingDetail(el,replacements.length>1);
   }
   else if(el.dataset.skillIndex!==undefined){
@@ -2223,10 +2454,26 @@ $('sheets').addEventListener('input',e=>{
    const contentLines=String(section?.content||'').replace(/\r\n?/g,'\n').split('\n');
    const lineIndex=Number(el.dataset.textIndex);
    const replacements=value.replace(/\r\n?/g,'\n').split('\n');
-   if(Number.isInteger(lineIndex)&&lineIndex>=0&&lineIndex<contentLines.length)contentLines.splice(lineIndex,1,...replacements);
-   else contentLines.push(...replacements);
-   section.content=contentLines.join('\n');el.dataset.currentText=value;
-   if(replacements.length>1)requestAnimationFrame(()=>renderSheets());
+   if(Number.isInteger(lineIndex)&&lineIndex>=0&&lineIndex<contentLines.length){
+    if(el.dataset.textStart!==undefined){
+     const original=contentLines[lineIndex],start=Number(el.dataset.textStart),length=Number(el.dataset.textLength)||0;
+     const nextLine=original.slice(0,start)+value+original.slice(start+length);
+     if(replacements.length>1){
+      contentLines.splice(lineIndex,1,...(original.slice(0,start)+value+original.slice(start+length)).split('\n'));
+      requestAnimationFrame(()=>renderSheets());
+     }else{
+      contentLines[lineIndex]=nextLine;
+      const delta=value.length-length;
+      Array.from(document.querySelectorAll('#sheets [data-text-source][data-text-start]')).forEach(fragment=>{
+       if(fragment===el||fragment.dataset.sectionId!==el.dataset.sectionId||Number(fragment.dataset.textIndex)!==lineIndex)return;
+       if(Number(fragment.dataset.textStart)>=start+length)fragment.dataset.textStart=String(Number(fragment.dataset.textStart)+delta);
+      });
+      el.dataset.textLength=String(value.length);
+     }
+    }else contentLines.splice(lineIndex,1,...replacements);
+   }else contentLines.push(...replacements);
+   section.content=contentLines.join('\n');el.dataset.textSource=value;el.dataset.currentText=value;
+   if(replacements.length>1&&el.dataset.textStart===undefined)requestAnimationFrame(()=>renderSheets());
   }
  }
  syncInspectorForInlineEdit(el,value);
@@ -2385,22 +2632,24 @@ $('sheets').addEventListener('keydown',e=>{
   const editSnapshot=directEditSnapshots.get(el);
   directEditSnapshots.set(el,deep(state));
   if(editSnapshot)directEditSnapshots.set(next,editSnapshot);
-  next.focus();
+  next.focus({preventScroll:true});
   const range=document.createRange();range.selectNodeContents(next);range.collapse(true);
   selection?.removeAllRanges();selection?.addRange(range);
+  reflowOverflowingDetail(next,false,true);
   return;
  }
  if(e.key==='Enter'&&!e.shiftKey&&el.dataset.textSource!==undefined){
   e.preventDefault();
   const section=sectionById(el.dataset.sectionId),lineIndex=Number(el.dataset.textIndex);if(!section) return;
-  const storedLines=String(section.content||'').replace(/\r\n?/g,'\n').split('\n');
   const visibleValue=directEditValue(el);
   const editValue=visibleValue;
   const selectionCaret=caretOffsetWithin(el);
   let caret=Math.min(Math.max(selectionCaret,0),editValue.length);
   const lines=String(section.content||'').replace(/\r\n?/g,'\n').split('\n');
-  const before=editValue.slice(0,caret),after=editValue.slice(caret);
   if(!Number.isInteger(lineIndex)||lineIndex<0||lineIndex>=lines.length)return;
+  const start=Number(el.dataset.textStart)||0,length=Number(el.dataset.textLength);
+  const before=lines[lineIndex].slice(0,start)+editValue.slice(0,caret);
+  const after=editValue.slice(caret)+lines[lineIndex].slice(start+(Number.isFinite(length)?length:editValue.length));
   // Always replace the edited line first. This prevents stale stored DOM data
   // from surviving an Enter and accidentally overwriting neighboring lines.
   lines.splice(lineIndex,1,before,after);
@@ -2408,7 +2657,7 @@ $('sheets').addEventListener('keydown',e=>{
   syncInspectorForInlineEdit(el,section.content);
   saveLocal();
   renderSheets();
-  focusTextLine(section.id,lineIndex+1,0);
+  focusTextLine(section.id,lineIndex+1,0,true);
   return;
  }
  if(e.key==='Enter'){
@@ -2427,12 +2676,87 @@ $('sheets').addEventListener('pointerdown',e=>{
   try{e.currentTarget.setPointerCapture(e.pointerId)}catch{}
   if(pinchUsed)return;
  }
- if(state.mode!=='free'||e.button!==0)return;const hit=e.target.closest('[data-resume-section]');if(!hit)return;
- const id=hit.dataset.resumeSection;selectSection(id);const el=$('sheets').querySelector(`[data-resume-section="${id}"]`);if(!el)return;
- const beforeDrag=deep(state),startX=e.clientX,startY=e.clientY,start=deep(state.positions[id]||{x:0,y:0,w:PAGE_W}),sheet=el.closest('.sheet'),scale=sheet.getBoundingClientRect().width/PAGE_W||1;
- const move=ev=>{if(pinchUsed)return;const pos={x:clamp(start.x+(ev.clientX-startX)/scale,0,Math.max(0,PAGE_W-start.w),0),y:clamp(start.y+(ev.clientY-startY)/scale,0,PAGE_H-30,0),w:start.w};state.positions[id]=pos;el.style.left=pos.x+'px';el.style.top=pos.y+'px';updateSectionTypographyCallout()};
- const up=()=>{document.removeEventListener('pointermove',move);document.removeEventListener('pointerup',up);if(JSON.stringify(beforeDrag)!==JSON.stringify(state)){recordHistory(beforeDrag);saveLocal()}};
- document.addEventListener('pointermove',move);document.addEventListener('pointerup',up,{once:true});
+if(state.mode!=='free'||e.button!==0)return;
+const handle=e.target.closest('[data-free-action]');
+if(!handle)return;
+e.preventDefault();
+e.stopPropagation();
+const section=handle.closest('[data-resume-section]');
+const id=section?.dataset.resumeSection;
+const start=state.positions[id];
+if(!section||!start)return;
+selectSection(id);
+const action=handle.dataset.freeAction;
+const beforeDrag=deep(state),startX=e.clientX,startY=e.clientY;
+const sectionBounds=section.getBoundingClientRect();
+const startPage=Number(start.page)||0;
+const startSheet=$('sheets').querySelector(`.sheet[data-page="${startPage+1}"]`);
+const startSheetBounds=startSheet?.getBoundingClientRect();
+if(!startSheet||!startSheetBounds)return;
+const scale=startSheetBounds.width/PAGE_W||1;
+const pointerOffsetX=(startX-sectionBounds.left)/scale;
+const pointerOffsetY=(startY-sectionBounds.top)/scale;
+const move=ev=>{
+ if(pinchUsed)return;
+ const next={...start};
+ if(action==='resize'){
+  next.w=clamp(start.w+(ev.clientX-startX)/scale,120,Math.max(120,PAGE_W-start.x),start.w);
+  state.positions[id]=next;
+  section.style.width=`${next.w}px`;
+  return;
+ }
+ const targetSheet=document.elementFromPoint(ev.clientX,ev.clientY)?.closest('.sheet');
+ const targetPage=targetSheet?Number(targetSheet.dataset.page)-1:startPage;
+ const sheet=targetPage>=0&&targetPage<state.freePageCount
+  ?$('sheets').querySelector(`.sheet[data-page="${targetPage+1}"]`)
+  :startSheet;
+ const bounds=sheet.getBoundingClientRect(),targetIndex=Number(sheet.dataset.page)-1,targetScale=bounds.width/PAGE_W||1;
+ next.page=targetIndex;
+ next.x=clamp((ev.clientX-bounds.left)/targetScale-pointerOffsetX,0,Math.max(0,PAGE_W-next.w),start.x);
+ next.y=clamp((ev.clientY-bounds.top)/targetScale-pointerOffsetY,0,PAGE_H-30,start.y);
+ state.positions[id]=next;
+ const targetArea=sheet.querySelector('.sections-area');
+ if(section.parentElement!==targetArea)targetArea.appendChild(section);
+ section.style.left=`${next.x}px`;
+ section.style.top=`${next.y}px`;
+ updateSectionTypographyCallout();
+};
+const up=()=>{
+ document.removeEventListener('pointermove',move);
+ document.removeEventListener('pointerup',up);
+ document.removeEventListener('pointercancel',up);
+ if(JSON.stringify(beforeDrag)!==JSON.stringify(state)){
+  recordHistory(beforeDrag);
+  renderSheets();
+  renderInspector();
+  saveLocal();
+ }
+};
+document.addEventListener('pointermove',move);
+document.addEventListener('pointerup',up,{once:true});
+document.addEventListener('pointercancel',up,{once:true});
+});
+$('sheets').addEventListener('keydown',e=>{
+const handle=e.target.closest('[data-free-action]');
+if(state.mode!=='free'||!handle||!e.key.startsWith('Arrow'))return;
+e.preventDefault();
+const section=handle.closest('[data-resume-section]'),id=section?.dataset.resumeSection,current=state.positions[id];
+if(!current)return;
+const before=deep(state),next={...current},step=e.shiftKey?20:5;
+if(handle.dataset.freeAction==='resize'){
+ if(e.key==='ArrowRight')next.w=clamp(current.w+step,120,Math.max(120,PAGE_W-current.x),current.w);
+ if(e.key==='ArrowLeft')next.w=clamp(current.w-step,120,Math.max(120,PAGE_W-current.x),current.w);
+}else{
+ if(e.key==='ArrowRight')next.x=clamp(current.x+step,0,Math.max(0,PAGE_W-current.w),current.x);
+ if(e.key==='ArrowLeft')next.x=clamp(current.x-step,0,Math.max(0,PAGE_W-current.w),current.x);
+ if(e.key==='ArrowDown')next.y=clamp(current.y+step,0,PAGE_H-30,current.y);
+ if(e.key==='ArrowUp')next.y=clamp(current.y-step,0,PAGE_H-30,current.y);
+}
+state.positions[id]=next;
+recordHistory(before);
+renderSheets();
+saveLocal();
+$('sheets').querySelector(`[data-resume-section="${id}"] [data-free-action="${handle.dataset.freeAction}"]`)?.focus();
 });
 $('sheets').addEventListener('pointermove',e=>{
  if(e.pointerType!=='touch'||!touchPoints.has(e.pointerId))return;
@@ -2474,7 +2798,16 @@ $('cancelCustom').addEventListener('click',closeCustomSectionDialog);
 $('modalBg').addEventListener('click',e=>{if(e.target===$('modalBg'))closeCustomSectionDialog()});
 $('coverLetterBtn').addEventListener('click',openCoverLetter);$('closeCoverLetter').addEventListener('click',closeCoverLetter);$('coverLetterModalBg').addEventListener('click',e=>{if(e.target===$('coverLetterModalBg'))closeCoverLetter()});$('generateCoverLetter').addEventListener('click',generateCoverLetter);$('copyCoverLetter').addEventListener('click',copyCoverLetter);$('downloadCoverLetter').addEventListener('click',downloadCoverLetter);$('downloadCoverLetterPdf').addEventListener('click',previewCoverLetterPdf);
 $('pageLayout').addEventListener('change',e=>transact(()=>state.layout=e.target.value==='two'?'two':'single'));
-$('editMode').addEventListener('change',e=>transact(()=>{state.mode=e.target.value==='free'?'free':'flow'}));
+$('editMode').addEventListener('change',e=>transact(()=>{
+ const nextMode=e.target.value==='free'?'free':'flow';
+ if(nextMode==='free'&&state.mode!=='free'){
+  if(!loadFreeLayout(state.template))captureStructuredFreeLayout();
+  state.mode='free';
+ }else if(nextMode==='flow'&&state.mode==='free'){
+  saveActiveFreeLayout();
+  state.mode='flow';
+ }
+}));
 $('zoomIn').addEventListener('click',()=>{mobileAutoFitZoom=false;zoom=Math.min(1.5,zoom+.05);renderSheets()});$('zoomOut').addEventListener('click',()=>{mobileAutoFitZoom=false;zoom=Math.max(.45,zoom-.05);renderSheets()});
 $('saveBtn').addEventListener('click',exportJSON);$('loadBtn').addEventListener('click',()=>$('jsonInput').click());$('jsonInput').addEventListener('change',e=>{if(e.target.files[0])importJSON(e.target.files[0]);e.target.value=''});
 $('importResumeBtn').addEventListener('click',()=>$('resumeImportInput').click());

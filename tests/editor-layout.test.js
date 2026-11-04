@@ -120,3 +120,65 @@ test('typography popup is hidden only on mobile and positions using its rendered
   assert.match(source, /const placeAtBottom=targetMiddle<\(mobileVisibleTop\+mobileVisibleBottom\)\/2/);
   assert.match(source, /x=Math\.max\(padding,Math\.min\(x,window\.innerWidth-width-padding\)\)/);
 });
+
+test('free-position pages are created automatically when sections overflow', () => {
+  const html = readFileSync(new URL('../frontend/editor.html', import.meta.url), 'utf8');
+  const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(html, /addFreePageBtn|Add page/);
+  assert.match(source, /out\.freePageCount=clamp\(/);
+  assert.match(source, /state\.freePageCount=1;\s*ensurePage\(0\)/);
+  assert.match(source, /element\.getBoundingClientRect\(\)\.bottom>sheetBounds\.top\+bounds\.bottom\*scale/);
+  assert.match(source, /state\.freePageCount=Math\.max\(state\.freePageCount\|\|1,index\+1\)/);
+  assert.match(source, /createFragment\(true\)/);
+  assert.match(source, /state\.positions\[section\.id\]=\{\.\.\.position,page:placed\.startPage,y:placed\.startY\}/);
+  assert.match(styles, /\.sheets\{width:100%;height:auto;min-height:auto;align-items:flex-start;overflow-x:auto;overflow-y:visible/);
+});
+
+test('free-position layouts are persisted per template and first use copies structured placement', () => {
+  const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
+  assert.match(source, /freeLayoutsByTemplate:\{\}/);
+  assert.match(source, /out\.freeLayoutsByTemplate=\{\}/);
+  assert.match(source, /function saveActiveFreeLayout\(\)/);
+  assert.match(source, /state\.freeLayoutsByTemplate\[state\.template\]=\{/);
+  assert.match(source, /function captureStructuredFreeLayout\(\)/);
+  assert.match(source, /if\(!loadFreeLayout\(state\.template\)\)captureStructuredFreeLayout\(\)/);
+  assert.match(source, /function applyTemplate\(template\)/);
+  assert.match(source, /if\(!loadFreeLayout\(template\.id\)\)/);
+});
+
+test('free-position sections have drag and resize controls with keyboard support', () => {
+  const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
+  assert.match(source, /move\.dataset\.freeAction='move'/);
+  assert.match(source, /resize\.dataset\.freeAction='resize'/);
+  assert.match(source, /next\.w=clamp\(start\.w\+\(ev\.clientX-startX\)\/scale/);
+  assert.match(source, /document\.elementFromPoint\(ev\.clientX,ev\.clientY\)/);
+  assert.match(source, /addEventListener\('keydown',e=>\{[\s\S]*?e\.key\.startsWith\('Arrow'\)/);
+  assert.match(styles, /\.resume-section\.selected \.free-position-control\{display:grid\}/);
+});
+
+test('structured pages scroll smoothly and continue long text without losing editable source ranges', () => {
+  const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
+  assert.match(source, /const chunks=splitLongParagraphs\?splitParagraph\(par,220\):\[par\]/);
+  assert.match(source, /textStart,textLength:chunk\.length/);
+  assert.match(source, /el\.dataset\.textStart=String\(a\.textStart\);el\.dataset\.textLength=String\(a\.textLength\)/);
+  assert.match(source, /el\.dataset\.detailStart=String\(a\.textStart\);el\.dataset\.detailLength=String\(a\.textLength\)/);
+  assert.match(source, /function focusTextLine\(sectionId,lineIndex,caretOffset=0,smooth=false\)/);
+  assert.match(source, /target\.focus\(\{preventScroll:true\}\)/);
+  assert.match(source, /placeCaret\(\);\s*if\(!smooth\)return/);
+  assert.match(source, /const behavior=window\.matchMedia\('\(prefers-reduced-motion: reduce\)'\)\.matches\?'auto':'smooth'/);
+  assert.match(source, /target\.classList\.add\('structured-line-enter'\)/);
+  assert.match(source, /target\.scrollIntoView\(\{behavior,block:'nearest',inline:'nearest'\}\)/);
+  assert.match(source, /function renderSheets\(\)/);
+  assert.match(source, /function reflowOverflowingDetail\(el,force=false,immediate=false\)/);
+  assert.match(source, /if\(immediate\)reflow\(\);else requestAnimationFrame\(reflow\)/);
+  assert.match(source, /next\.focus\(\{preventScroll:true\}\)[\s\S]*?reflowOverflowingDetail\(next,false,true\)/);
+  assert.match(source, /moved\.focus\(\{preventScroll:true\}\)[\s\S]*?moved\.scrollIntoView\(\{behavior:window\.matchMedia/);
+  assert.match(source, /focusTextLine\(section\.id,lineIndex\+1,0,true\)/);
+  assert.match(source, /original\.slice\(0,start\)\+value\+original\.slice\(start\+length\)/);
+  assert.match(source, /lines\[lineIndex\]\.slice\(start\+\(Number\.isFinite\(length\)\?length:editValue\.length\)\)/);
+  assert.match(styles, /\.center\{height:calc\(100vh - 64px\);[^}]*scroll-behavior:smooth/);
+  assert.match(styles, /\.structured-line-enter\{animation:structured-page-appear \.16s ease-out both\}/);
+  assert.match(styles, /@keyframes structured-page-appear\{from\{opacity:\.55\}to\{opacity:1\}\}/);
+  assert.match(styles, /@media screen and \(max-width:960px\)[\s\S]*?\.center\{grid-area:center;width:100%;height:auto/);
+  assert.match(styles, /@media\(prefers-reduced-motion:reduce\)\{\.center\{scroll-behavior:auto\}\.structured-line-enter\{animation:none\}\}/);
+});
