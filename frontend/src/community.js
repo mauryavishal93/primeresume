@@ -1,4 +1,5 @@
 import { cloudConfigured, getFirebaseIdToken, observeAuth } from './firebase-cloud.js';
+import { confirmModern } from './modern-modal.js';
 
 const postList = document.querySelector('[data-post-list]');
 const feedStatus = document.querySelector('[data-feed-status]');
@@ -401,7 +402,13 @@ function openEditor(post = null) {
 }
 
 async function deletePost(postId) {
-  if (!window.confirm('Delete this post? This cannot be undone.')) return;
+  const confirmed = await confirmModern({
+    title: 'Delete this post?',
+    message: 'This will remove the post and cannot be undone.',
+    confirmText: 'Delete post',
+    variant: 'danger'
+  });
+  if (!confirmed) return;
   try {
     await requestApi(`/api/forum/posts/${encodeURIComponent(postId)}`, { method: 'DELETE' });
     commentCache.delete(postId);

@@ -1,0 +1,192 @@
+.modern-modal-dialog {
+  width: min(440px, calc(100vw - 32px));
+  max-width: none;
+  max-height: calc(100dvh - 32px);
+  margin: auto;
+  padding: 28px;
+  overflow: auto;
+  border: 1px solid var(--modal-border);
+  border-radius: 20px;
+  background: var(--modal-surface);
+  color: var(--modal-ink);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, .34);
+}
+
+.modern-modal-dialog::backdrop {
+  background: rgba(3, 8, 17, .68);
+  backdrop-filter: blur(7px);
+}
+
+.modern-modal-form {
+  display: grid;
+  justify-items: start;
+}
+
+.modern-modal-icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  margin-bottom: 20px;
+  place-items: center;
+  border: 1px solid rgba(47, 111, 218, .24);
+  border-radius: 14px;
+  background: var(--modal-accent-soft);
+  color: var(--modal-accent);
+  font-size: 19px;
+  font-weight: 800;
+}
+
+.modern-modal-eyebrow {
+  margin: 0 0 7px;
+  color: var(--modal-accent);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .13em;
+  text-transform: uppercase;
+}
+
+.modern-modal-dialog h2 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.25;
+}
+
+.modern-modal-message {
+  margin: 10px 0 0;
+  color: var(--modal-muted);
+  font-size: 14px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.modern-modal-input {
+  width: 100%;
+  min-height: 46px;
+  margin-top: 18px;
+  padding: 10px 12px;
+  border: 1px solid var(--modal-border);
+  border-radius: 10px;
+  background: var(--modal-input);
+  color: var(--modal-ink);
+  font: inherit;
+}
+
+.modern-modal-input:focus-visible,
+.modern-modal-button:focus-visible {
+  outline: 3px solid rgba(67, 133, 255, .4);
+  outline-offset: 2px;
+}
+
+.modern-modal-actions {
+  display: flex;
+  width: 100%;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 26px;
+}
+
+.modern-modal-button {
+  min-height: 42px;
+  padding: 9px 16px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 750;
+  cursor: pointer;
+  transition: background-color .16s ease, transform .16s ease;
+}
+
+.modern-modal-button:hover {
+  transform: translateY(-1px);
+}
+
+.modern-modal-button-secondary {
+  border-color: var(--modal-border);
+  background: var(--modal-input);
+  color: var(--modal-ink);
+}
+
+.modern-modal-button-secondary:hover {
+  background: var(--modal-hover);
+}
+
+.modern-modal-button-primary {
+  background: var(--modal-accent);
+  color: #fff;
+}
+
+.modern-modal-button-primary:hover {
+  background: var(--modal-accent-hover);
+}
+
+.modern-modal-dialog.is-danger .modern-modal-icon,
+.modern-modal-dialog.is-error .modern-modal-icon {
+  border-color: rgba(220, 53, 78, .22);
+  background: var(--modal-danger-soft);
+  color: var(--modal-danger);
+}
+
+.modern-modal-dialog.is-danger .modern-modal-eyebrow,
+.modern-modal-dialog.is-error .modern-modal-eyebrow {
+  color: var(--modal-danger);
+}
+
+.modern-modal-dialog.is-danger .modern-modal-button-primary {
+  background: var(--modal-danger);
+}
+
+.modern-modal-dialog.is-danger .modern-modal-button-primary:hover {
+  background: var(--modal-danger-hover);
+}
+
+:root {
+  --modal-surface: #fff;
+  --modal-input: #f7f8fb;
+  --modal-hover: #edf0f6;
+  --modal-ink: #172033;
+  --modal-muted: #637087;
+  --modal-border: #e2e7ef;
+  --modal-accent: #315fc2;
+  --modal-accent-hover: #254da4;
+  --modal-accent-soft: #edf3ff;
+  --modal-danger: #c2344c;
+  --modal-danger-hover: #a7273d;
+  --modal-danger-soft: #fff0f2;
+}
+
+:root[data-theme='dark'] {
+  --modal-surface: #101a28;
+  --modal-input: #0c1420;
+  --modal-hover: #1c2a3d;
+  --modal-ink: #f1f5fb;
+  --modal-muted: #aab8ca;
+  --modal-border: rgba(162, 180, 204, .2);
+  --modal-accent: #70a9ff;
+  --modal-accent-hover: #4a8fe9;
+  --modal-accent-soft: rgba(60, 117, 207, .18);
+  --modal-danger: #e15b70;
+  --modal-danger-hover: #cc465c;
+  --modal-danger-soft: rgba(225, 91, 112, .14);
+}
+
+@media (max-width: 480px) {
+  .modern-modal-dialog {
+    padding: 22px;
+    border-radius: 16px;
+  }
+
+  .modern-modal-actions {
+    flex-direction: column-reverse;
+  }
+
+  .modern-modal-button {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modern-modal-button {
+    transition: none;
+  }
+}

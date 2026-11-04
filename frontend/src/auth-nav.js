@@ -1,6 +1,7 @@
 import { cloudConfigured, googleSignInErrorMessage, observeAuth, signInWithGoogle, signOutUser } from './firebase-cloud.js';
 import { loadBillingConfig, loadBillingEntitlement } from './billing-client.js';
 import { canUseFeature, FEATURE_IDS } from './plan-access.js';
+import { confirmModern } from './modern-modal.js';
 
 const nav = document.querySelector('.about-nav');
 const signInButton = document.querySelector('[data-auth-sign-in]');
@@ -244,14 +245,23 @@ signInButton?.addEventListener('click', async () => {
 signOutButton?.addEventListener('click', async () => {
   if (signOutPending) return;
   signOutPending = true;
-  signOutButton.disabled = true;
-  signOutButton.textContent = 'Signing out…';
-  if (status) {
-    status.textContent = 'Signing out…';
-    status.classList.remove('auth-error');
-  }
   try {
+    const confirmed = await confirmModern({
+      title: 'Sign out?',
+      message: 'Are you sure you want to sign out of your account?',
+      confirmText: 'Sign out',
+      cancelText: 'Stay signed in',
+      variant: 'danger'
+    });
+    if (!confirmed) return;
+    signOutButton.disabled = true;
+    signOutButton.textContent = 'Signing out…';
+    if (status) {
+      status.textContent = 'Signing out…';
+      status.classList.remove('auth-error');
+    }
     await signOutUser();
+    window.location.assign('/home.html');
   } catch (error) {
     console.error('Could not sign out.', error);
     if (status) {

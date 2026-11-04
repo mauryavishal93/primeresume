@@ -1,36 +1,43 @@
+import './modern-modal.css';
+
+let modalSequence = 0;
+
 export function showModernDialog({
   title = 'Notice',
   message = '',
   confirmText = 'OK',
   cancelText = 'Cancel',
   type = 'confirm',
+  variant = 'default',
   defaultValue = '',
   placeholder = ''
 } = {}) {
   return new Promise(resolve => {
-    const backdrop = document.createElement('div');
-    backdrop.className = 'modern-modal-backdrop';
-    backdrop.setAttribute('role', 'presentation');
+    const previousFocus = document.activeElement;
+    const dialog = document.createElement('dialog');
+    const id = `modern-modal-title-${++modalSequence}`;
+    dialog.className = `modern-modal-dialog${variant === 'danger' ? ' is-danger' : ''}${variant === 'error' ? ' is-error' : ''}`;
+    dialog.setAttribute('aria-labelledby', id);
 
-    const dialog = document.createElement('div');
-    dialog.className = 'modern-modal-dialog';
-    dialog.setAttribute('role', 'dialog');
-    dialog.setAttribute('aria-modal', 'true');
-    dialog.setAttribute('aria-labelledby', 'modern-modal-title');
+    const form = document.createElement('form');
+    form.className = 'modern-modal-form';
+
+    const icon = document.createElement('span');
+    icon.className = 'modern-modal-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.textContent = variant === 'danger' || variant === 'error' ? '!' : 'i';
+
+    const eyebrow = document.createElement('p');
+    eyebrow.className = 'modern-modal-eyebrow';
+    eyebrow.textContent = variant === 'danger' ? 'Please confirm' : variant === 'error' ? 'Something went wrong' : 'ResumeOut';
 
     const heading = document.createElement('h2');
-    heading.id = 'modern-modal-title';
+    heading.id = id;
     heading.textContent = title;
 
     const body = document.createElement('p');
+    body.className = 'modern-modal-message';
     body.textContent = message;
-
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.value = defaultValue;
-    input.placeholder = placeholder;
-    input.className = 'modern-modal-input';
-    input.setAttribute('aria-label', title);
 
     const actions = document.createElement('div');
     actions.className = 'modern-modal-actions';
@@ -41,49 +48,69 @@ export function showModernDialog({
     cancelButton.textContent = cancelText;
 
     const confirmButton = document.createElement('button');
-    confirmButton.type = 'button';
+    confirmButton.type = 'submit';
     confirmButton.className = 'modern-modal-button modern-modal-button-primary';
     confirmButton.textContent = confirmText;
+    confirmButton.autofocus = type === 'alert';
 
-    const cleanup = (result) => {
-      backdrop.remove();
+    const cancelResult = type === 'prompt' ? null : type === 'alert' ? true : false;
+    let settled = false;
+    const finish = result => {
+      if (settled) return;
+      settled = true;
+      if (dialog.open) dialog.close();
+      dialog.remove();
+      if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus();
       resolve(result);
     };
 
-    cancelButton.addEventListener('click', () => cleanup(type === 'prompt' ? null : false));
-    confirmButton.addEventListener('click', () => {
-      if (type === 'prompt') {
-        cleanup(input.value.trim());
-        return;
-      }
-      cleanup(true);
+    cancelButton.addEventListener('click', () => finish(cancelResult));
+    form.addEventListener('submit', event => {
+      event.preventDefault();
+      finish(type === 'prompt' ? input.value.trim() : true);
     });
-    backdrop.addEventListener('click', (event) => {
-      if (event.target === backdrop) cleanup(type === 'alert' || type === 'prompt' ? (type === 'alert' ? true : null) : false);
+    dialog.addEventListener('cancel', event => {
+      event.preventDefault();
+      finish(cancelResult);
+    });
+    dialog.addEventListener('keydown', event => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      finish(cancelResult);
+    });
+    dialog.addEventListener('click', event => {
+      if (event.target !== dialog) return;
+      const bounds = dialog.getBoundingClientRect();
+      if (event.clientX < bounds.left || event.clientX > bounds.right
+        || event.clientY < bounds.top || event.clientY > bounds.bottom) finish(cancelResult);
     });
 
-    if (type === 'alert') {
-      cancelButton.hidden = true;
-      actions.append(confirmButton);
-      confirmButton.focus();
-    } else {
-      actions.append(cancelButton, confirmButton);
-      if (type === 'prompt') {
-        input.focus();
-        input.select();
-      } else {
-        cancelButton.focus();
-      }
+    form.append(icon, eyebrow, heading, body);
+    let input;
+    if (type === 'prompt') {
+      input = document.createElement('input');
+      input.type = 'text';
+      input.value = defaultValue;
+      input.placeholder = placeholder;
+      input.className = 'modern-modal-input';
+      input.setAttribute('aria-label', title);
+      form.append(input);
     }
 
-    const content = document.createElement('div');
-    content.className = 'modern-modal-content';
-    content.append(body);
-    if (type === 'prompt') content.append(input);
-
-    dialog.append(heading, content, actions);
-    backdrop.append(dialog);
-    document.body.append(backdrop);
+    if (type !== 'alert') actions.append(cancelButton);
+    actions.append(confirmButton);
+    form.append(actions);
+    dialog.append(form);
+    document.body.append(dialog);
+    dialog.showModal();
+    if (type === 'prompt') {
+      input.focus();
+      input.select();
+    } else if (type === 'alert') {
+      confirmButton.focus();
+    } else {
+      cancelButton.focus();
+    }
   });
 }
 
@@ -92,7 +119,7 @@ export function confirmModern(options) {
 }
 
 export function alertModern(options) {
-  return showModernDialog({ ...options, type: 'alert', cancelText: '' });
+  return showModernDialog({ ...options, type: 'alert' });
 }
 
 export function promptModern(options) {

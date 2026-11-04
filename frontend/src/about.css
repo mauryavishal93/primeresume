@@ -4,7 +4,7 @@ body.about-page{margin:0;min-height:100vh;color:var(--about-ink);background:radi
 button,a{font:inherit}
 .about-header{height:74px;padding:0 18px;display:flex;align-items:center;justify-content:space-between;gap:12px;background:rgba(7,12,20,.7);backdrop-filter:blur(10px);border-bottom:1px solid var(--about-line);position:sticky;top:0;z-index:10}
 .about-brand{display:inline-flex;align-items:center;gap:10px;color:var(--about-ink);font-size:16px;font-weight:800;text-decoration:none;white-space:nowrap}
-.about-brand-name{color:inherit;font-size:18px;font-weight:850;letter-spacing:-.055em;line-height:1}.about-brand-name span{color:#7064f2}
+.about-brand-name{color:inherit;font-size:18px;font-weight:850;letter-spacing:-.055em;line-height:1}
 .about-pro-brand-badge{display:inline-flex;align-items:center;padding:3px 8px;border:1px solid #8bd5bd;border-radius:999px;background:#eaf8f3;color:#146c54;font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase}
 .about-pro-brand-badge[hidden]{display:none}
 .signout-dialog{width:min(420px,calc(100vw - 32px));margin:auto;padding:24px;border:1px solid var(--about-line);border-radius:14px;background:#0d1a29;color:var(--about-ink);box-shadow:0 24px 72px #0009}
@@ -241,11 +241,14 @@ button,a{font:inherit}
 
 @media(prefers-reduced-motion:reduce){.feature-card,.hero-actions .btn,.feedback-button{transition:none}.feature-card:hover,.hero-actions .btn:hover,.feedback-button:hover{transform:none}}
 
-/* Shared text wordmark. */
+/* Shared ResumeOut wordmark. */
 .about-brand{gap:10px}
-.about-brand .about-logo{display:block;width:40px;height:40px;flex:none;border-radius:11px;object-fit:contain;filter:drop-shadow(0 3px 6px rgba(79,70,229,.25))}
-.about-brand-name{display:inline-flex;align-items:center;gap:4px;color:inherit;font-size:21px;font-weight:750;letter-spacing:-.04em;line-height:1}
-.about-brand-name span{display:inline-flex;align-items:center;padding:2px 6px;border-radius:6px;background:linear-gradient(135deg,#635ff0,#8954f3);color:#fff;font-size:.72em;font-weight:750;letter-spacing:.01em;line-height:1.35}
+.about-brand .about-logo{display:block;width:40px;height:40px;flex:none;object-fit:contain}
+.about-brand-name{position:relative;display:inline-flex;align-items:center;gap:0;color:inherit;font-size:21px;font-weight:800;letter-spacing:-.055em;line-height:1;padding-bottom:.12em}
+.about-brand-name .brand-resume,.about-brand-name .brand-domain{display:inline}
+.about-brand-name .brand-out{position:relative;margin-left:.015em;background:linear-gradient(115deg,#a10bea,#5600d4 80%);background-clip:text;-webkit-background-clip:text;color:transparent;-webkit-text-fill-color:transparent}
+.about-brand-name .brand-out::after{position:absolute;right:-4%;bottom:-.25em;left:-5%;height:.18em;background:linear-gradient(90deg,#1464ec,#9300ea);clip-path:polygon(0 100%,20% 58%,55% 22%,100% 50%,100% 100%);content:""}
+.about-brand-name .brand-domain{align-self:flex-end;margin-left:.03em;padding-bottom:.05em;font-size:.58em;letter-spacing:-.035em}
 @media(max-width:360px){.about-brand{gap:5px}.about-brand .about-logo{width:26px;height:26px}.about-brand-name{font-size:14px}}
 .about-pro-brand-badge{border-color:#806a3f;background:#302a1d;color:#e0c58c}
 :root[data-theme=dark] .about-header{background:#121714;border-color:#34372f;box-shadow:0 5px 20px rgba(0,0,0,.18);backdrop-filter:blur(12px)}

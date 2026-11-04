@@ -1,4 +1,5 @@
 import { getFirebaseIdToken, observeAuth, signInWithGoogle } from './firebase-cloud.js';
+import { alertModern, confirmModern } from './modern-modal.js';
 
 let currentUser;
 let dashboard;
@@ -432,7 +433,12 @@ async function permanentlyDeleteForumContent(button) {
   const message = kind === 'post'
     ? 'Permanently delete this post or review, all its comments, and all related user/admin history? This cannot be undone.'
     : 'Permanently delete this comment and all related user/admin history? This cannot be undone.';
-  if (!window.confirm(message)) return;
+  if (!await confirmModern({
+    title: kind === 'post' ? 'Permanently delete this post?' : 'Permanently delete this comment?',
+    message,
+    confirmText: 'Delete permanently',
+    variant: 'danger'
+  })) return;
 
   button.disabled = true;
   try {
@@ -586,7 +592,11 @@ observeAuth((user, authError) => {
   $('#access p').textContent = 'Sign in with an administrator account to unlock revenue, billing, and user controls.';
   setDashboardStatus('Sign in required', 'idle');
 });
-$('#sign-in').addEventListener('click', () => signInWithGoogle().catch(error => alert(error.message)));
+$('#sign-in').addEventListener('click', () => signInWithGoogle().catch(error => alertModern({
+  title: 'Sign-in failed',
+  message: error.message,
+  variant: 'error'
+})));
 $('#refresh').addEventListener('click', load);
 $('#forum-activity-refresh').addEventListener('click', () => void loadForumActivity({ reset: true }));
 $('#forum-activity-more').addEventListener('click', () => void loadForumActivity({ append: true }));
@@ -660,7 +670,11 @@ $('#save-pricing-config').addEventListener('click', async () => {
     || inrPrices.some(value => !Number.isInteger(value))
     || usdPrices.some(value => Math.abs(value * 100 - Math.round(value * 100)) > 1e-7)) {
     $('#pricing-config-status').textContent = 'Invalid pricing';
-    alert('Prices must be positive. INR prices must use whole rupees, and USD prices may have at most two decimal places.');
+    await alertModern({
+      title: 'Check the prices',
+      message: 'Prices must be positive. INR prices must use whole rupees, and USD prices may have at most two decimal places.',
+      variant: 'error'
+    });
     return;
   }
 
@@ -686,7 +700,7 @@ $('#save-pricing-config').addEventListener('click', async () => {
     $('#pricing-config-status').textContent = 'Saved';
   } catch (error) {
     $('#pricing-config-status').textContent = 'Failed';
-    alert(error.message);
+    await alertModern({ title: 'Could not save pricing', message: error.message, variant: 'error' });
   } finally {
     saveButton.disabled = false;
   }
@@ -698,13 +712,18 @@ $('#generate-voucher').addEventListener('click', async () => {
     const box = $('#generated-code'); box.hidden = false;
     box.innerHTML = `<span><small>Voucher generated</small><br>${escapeHtml(result.code)} — ${result.plan === 'yearly' ? '1 year' : '1 month'} Pro</span><button type="button" class="copy-code mini-button" data-code="${escapeHtml(result.code)}">Copy</button>`;
     await load();
-  } catch (error) { alert(error.message); }
+  } catch (error) { await alertModern({ title: 'Could not generate voucher', message: error.message, variant: 'error' }); }
 });
 $('#voucher-list').addEventListener('click', async event => {
   const button = event.target.closest('[data-voucher-id]'); if (!button) return;
-  if (!window.confirm('Delete this unused voucher permanently?')) return;
+  if (!await confirmModern({
+    title: 'Delete this voucher?',
+    message: 'This unused voucher will be permanently deleted.',
+    confirmText: 'Delete voucher',
+    variant: 'danger'
+  })) return;
   try { await api(`/api/admin/vouchers/${encodeURIComponent(button.dataset.voucherId)}`, { method: 'DELETE' }); await load(); }
-  catch (error) { alert(error.message); }
+  catch (error) { await alertModern({ title: 'Could not delete voucher', message: error.message, variant: 'error' }); }
 });
 $('#generated-code').addEventListener('click', async event => {
   const button = event.target.closest('[data-code]');
@@ -722,7 +741,7 @@ $('#user-list').addEventListener('click', async event => {
     }
     openProCancel(button.dataset.uid);
     return;
-  } catch (error) { alert(error.message); }
+  } catch (error) { await alertModern({ title: 'Could not open account action', message: error.message, variant: 'error' }); }
 });
 
 let cancelUid;
@@ -735,12 +754,16 @@ $('#close-cancel').addEventListener('click', () => $('#pro-cancel-dialog').close
 $('#pro-cancel-form').addEventListener('submit', async event => {
   event.preventDefault();
   const reason = $('#cancel-reason').value.trim();
-  if (!reason) { alert('Enter a reason for cancelling Pro access.'); return; }
+  if (!reason) {
+    await alertModern({ title: 'Add a cancellation reason', message: 'Enter a reason for cancelling Pro access.', variant: 'error' });
+    $('#cancel-reason').focus();
+    return;
+  }
   try {
     await api(`/api/admin/users/${encodeURIComponent(cancelUid)}/cancel-pro`, { method: 'POST', body: JSON.stringify({ reason }) });
     $('#pro-cancel-dialog').close();
     await load();
-  } catch (error) { alert(error.message); }
+  } catch (error) { await alertModern({ title: 'Could not cancel Pro access', message: error.message, variant: 'error' }); }
 });
 
 let grantUid;
@@ -758,12 +781,16 @@ $('#pro-grant-form').addEventListener('submit', async event => {
   event.preventDefault();
   const amount = Number($('#grant-amount').value || 0);
   const transactionId = $('#grant-transaction').value.trim();
-  if (amount > 0 && !transactionId) { alert('Enter a transaction ID for a paid Pro activation.'); return; }
+  if (amount > 0 && !transactionId) {
+    await alertModern({ title: 'Transaction ID required', message: 'Enter a transaction ID for a paid Pro activation.', variant: 'error' });
+    $('#grant-transaction').focus();
+    return;
+  }
   try {
     await api(`/api/admin/users/${encodeURIComponent(grantUid)}/pro`, { method: 'POST', body: JSON.stringify({ plan: grantPlan, amount, transactionId }) });
     $('#pro-grant-dialog').close();
     await load();
-  } catch (error) { alert(error.message); }
+  } catch (error) { await alertModern({ title: 'Could not activate Pro', message: error.message, variant: 'error' }); }
 });
 
 async function openUserDetail(uid) {

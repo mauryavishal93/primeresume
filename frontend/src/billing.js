@@ -9,6 +9,7 @@ import {
 import { cloudConfigured, observeAuth } from './firebase-cloud.js';
 import { PLAN_CONFIG } from './plan-access.js';
 import { formatCurrencyPrice } from './pricing-currency.js';
+import { confirmModern } from './modern-modal.js';
 
 const $ = selector => document.querySelector(selector);
 const accountStatus = $('#billingAccountStatus');
@@ -198,14 +199,19 @@ async function finalizeCancellation() {
   }
 }
 
-cancelButton.addEventListener('click', () => {
+cancelButton.addEventListener('click', async () => {
   if (cancellationPending || !currentUser || !entitlement?.subscriptionId) return;
   if (cancelDialog && typeof cancelDialog.showModal === 'function') {
     cancelReasonInput.value = '';
     cancelDialog.showModal();
     return;
   }
-  if (!window.confirm('Cancel future renewals? Pro remains active until the current paid period ends.')) return;
+  if (!await confirmModern({
+    title: 'Cancel future renewals?',
+    message: 'Pro remains active until the current paid period ends.',
+    confirmText: 'Cancel renewals',
+    variant: 'danger'
+  })) return;
   void finalizeCancellation();
 });
 
@@ -229,7 +235,11 @@ yearlyButton.addEventListener('click', async () => {
   const price = Number.isSafeInteger(configuredAmount) && configuredAmount > 0
     ? configuredAmount / 100
     : PLAN_CONFIG.pro.currencies[currency].yearly.price;
-  if (!window.confirm(`Schedule Pro Yearly to begin after ${date}? Your monthly access continues until then; ${formatCurrencyPrice(price, currency)}/year will be charged when the switch takes effect.`)) return;
+  if (!await confirmModern({
+    title: 'Schedule yearly billing?',
+    message: `Pro Yearly will begin after ${date}. Your monthly access continues until then; ${formatCurrencyPrice(price, currency)}/year will be charged when the switch takes effect.`,
+    confirmText: 'Schedule yearly'
+  })) return;
   yearlyButton.disabled = true;
   try {
     const result = await scheduleBillingPlanChange(currentUser, 'yearly');

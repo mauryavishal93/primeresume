@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 170" fill="none">
+  <defs>
+    <linearGradient id="growth-arrow" x1="13" y1="126" x2="163" y2="73" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#08A6F5"/>
+      <stop offset=".58" stop-color="#1645D8"/>
+      <stop offset="1" stop-color="#8500E9"/>
+    </linearGradient>
+  </defs>
+  <path d="M43 124V42c0-11 7-18 18-20l68-12 23 23v45M152 117v13c0 11-7 18-18 18H48"
+        stroke="#123FBA" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="m129 10 0 18c0 5 3 8 8 8h15" stroke="#123FBA" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="82" cy="48" r="11" fill="#123FBA"/>
+  <path d="M62 78c2-13 10-20 21-20s19 7 21 20H62Z" fill="#123FBA"/>
+  <path d="M116 42h7M114 66h25M64 91h76M64 108h54M64 124h27"
+        stroke="#123FBA" stroke-width="6" stroke-linecap="round"/>
+  <path d="M15 80c-12 16-9 36 7 46 21 16 54 11 84-5 18-10 33-22 47-37l-11-3 24-9-5 26-4-10c-16 18-33 32-52 42-35 19-76 21-99 1C-11 116-7 93 15 80Z"
+        fill="url(#growth-arrow)"/>
+</svg>

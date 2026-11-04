@@ -303,8 +303,9 @@ async function removeCloudResume(id){
  const confirmed=await confirmModern({
   title:'Delete cloud resume?',
   message:`Delete "${item.name||'Untitled resume'}" from your cloud resumes? This cannot be undone.`,
-  confirmText:'OK',
-  cancelText:'Cancel'
+  confirmText:'Delete resume',
+  cancelText:'Keep resume',
+  variant:'danger'
  });
  if(!confirmed)return;
  if(cloudUser?.uid!==uid||cloudSessionGeneration!==generation)return;
@@ -595,10 +596,15 @@ function renderSectionList(){
  }
  $('sectionList').innerHTML=state.sections.map(s=>`<div class="section-row ${s.id===selectedId?'active':''}" draggable="true" data-section-row="${$esc(s.id)}"><span class="grip" aria-hidden="true">⠿</span><span class="sect-name">${$esc(s.title)}</span><button class="vis" type="button" data-toggle="${$esc(s.id)}" title="${s.visible?'Hide':'Show'} section" aria-label="${s.visible?'Hide':'Show'} ${$esc(s.title)}">${s.visible?'◉':'○'}</button><button class="section-delete" type="button" data-delete-section="${$esc(s.id)}" title="Delete ${$esc(s.title)}" aria-label="Delete ${$esc(s.title)}">×</button></div>`).join('');
 }
-function deleteSectionById(id){
+async function deleteSectionById(id){
  const section=state.sections.find(item=>item.id===id);
  if(!section)return;
- if(!window.confirm(`Delete “${section.title}” from this resume? This removes the section and its contents.`))return;
+ if(!await confirmModern({
+   title: 'Delete resume section?',
+   message: `“${section.title}” and its contents will be removed from this resume.`,
+   confirmText: 'Delete section',
+   variant: 'danger'
+ }))return;
  transact(()=>{state.sections=state.sections.filter(item=>item.id!==id);delete state.positions[id];if(selectedId===id)selectedId=null});
  toast('Section deleted.');
 }
@@ -1058,7 +1064,7 @@ function renderInspector(){
  $('inspector').querySelectorAll('[data-remove-entry]').forEach(el=>el.addEventListener('click',()=>transact(()=>{const x=sectionById(selectedId);if(x)x.entries.splice(+el.dataset.removeEntry,1)})));
  $('addEntry')?.addEventListener('click',()=>transact(()=>{const x=sectionById(selectedId);if(x)x.entries.push({role:'New role',company:'Organization',date:'Year',details:'Add details here.'})}));
  $('duplicateSection')?.addEventListener('click',()=>transact(()=>{const i=state.sections.findIndex(x=>x.id===selectedId);if(i>=0){const n=deep(state.sections[i]);n.id=uid();n.title+=' (copy)';state.sections.splice(i+1,0,n);selectedId=n.id}}));
- $('deleteSection')?.addEventListener('click',()=>deleteSectionById(selectedId));
+ $('deleteSection')?.addEventListener('click',()=>void deleteSectionById(selectedId));
  $('inspector').querySelectorAll('[data-rtab]').forEach(b=>b.addEventListener('click',()=>setRightTab(b.dataset.rtab)));
  $('inspector').querySelectorAll('[data-palign]').forEach(b=>b.addEventListener('click',()=>transact(()=>{state.design.photoAlign=b.dataset.palign})));
  $('inspector').querySelectorAll('[data-halign]').forEach(b=>b.addEventListener('click',()=>transact(()=>{state.design.headerAlign=b.dataset.halign})));
@@ -1358,9 +1364,14 @@ function showRecoveryNotice(recovery){
  $('recoveryBanner').hidden=false;
  setSaveState('Recovered draft ready');
 }
-function resolveLocalRecovery(){
+async function resolveLocalRecovery(){
  if(!recoverySnapshot)return;
- if(!recoverySnapshot.state&&!confirm('Start a new resume and replace the unreadable browser data? Download the saved data first if you may need it.'))return;
+ if(!recoverySnapshot.state&&!await confirmModern({
+   title: 'Start a new resume?',
+   message: 'This will replace the unreadable browser data. Download the saved data first if you may need it.',
+   confirmText: 'Start new resume',
+   variant: 'danger'
+ }))return;
  try{
   if(!recoverySnapshot.state)state=fresh();
   if(cloudUser){
@@ -2092,7 +2103,7 @@ $('templates').addEventListener('click',e=>{
  if(isProTemplate(b.dataset.template)&&!canUseFeature(FEATURE_IDS.ALL_TEMPLATES,verifiedEntitlement)){void requestProTemplate(b.dataset.template);return}
  if(b.dataset.template===state.template)return;
  transact(()=>{state.template=b.dataset.template;const t=activeTemplate();state.layout=t.layout;state.design.accent=t.accent;selectedId=null});toast('Applied '+activeTemplate().name)});
-$('sectionList').addEventListener('click',e=>{const deleteButton=e.target.closest('[data-delete-section]');if(deleteButton){e.preventDefault();e.stopPropagation();deleteSectionById(deleteButton.dataset.deleteSection);return}const toggle=e.target.closest('[data-toggle]');if(toggle){transact(()=>{const s=sectionById(toggle.dataset.toggle);if(s)s.visible=!s.visible});return}const row=e.target.closest('[data-section-row]');if(row)selectSection(row.dataset.sectionRow)});
+$('sectionList').addEventListener('click',e=>{const deleteButton=e.target.closest('[data-delete-section]');if(deleteButton){e.preventDefault();e.stopPropagation();void deleteSectionById(deleteButton.dataset.deleteSection);return}const toggle=e.target.closest('[data-toggle]');if(toggle){transact(()=>{const s=sectionById(toggle.dataset.toggle);if(s)s.visible=!s.visible});return}const row=e.target.closest('[data-section-row]');if(row)selectSection(row.dataset.sectionRow)});
 $('sectionList').addEventListener('dragstart',e=>{const row=e.target.closest('[data-section-row]');if(!row)return;draggingId=row.dataset.sectionRow;e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',draggingId);row.style.opacity='.5'});
 $('sectionList').addEventListener('dragend',e=>{const row=e.target.closest('[data-section-row]');if(row)row.style.opacity='1';draggingId=null});
 $('sectionList').addEventListener('dragover',e=>{if(e.target.closest('[data-section-row]')){e.preventDefault();e.dataTransfer.dropEffect='move'}});
@@ -2508,14 +2519,25 @@ $('resumeImportModalBg').addEventListener('click',event=>{if(event.target===$('r
    if(guestResumeStorage.preferenceError)setSaveState('Unable to save changes');
   });
  $('googleSignOutBtn').addEventListener('click',async()=>{
-  $('accountMenu').open=false;
-  const button=$('googleSignOutBtn');
-  if(signOutPending)return;
-  signOutPending=true;
-  button.disabled=true;
-  button.textContent='Signing out…';
-  try{await signOutUser();toast('Signed out. Your local browser copy is unchanged.')}
-  catch(error){console.error('Could not sign out.',error);toast(error.message||'Could not sign out.')}
+   const button=$('googleSignOutBtn');
+   if(signOutPending)return;
+   signOutPending=true;
+   try{
+    const confirmed=await confirmModern({
+     title:'Sign out?',
+     message:'Are you sure you want to sign out of your account?',
+     confirmText:'Sign out',
+     cancelText:'Stay signed in',
+     variant:'danger'
+    });
+    if(!confirmed)return;
+    $('accountMenu').open=false;
+    button.disabled=true;
+    button.textContent='Signing out…';
+    await signOutUser();
+    window.location.assign('/home.html')
+   }
+   catch(error){console.error('Could not sign out.',error);toast(error.message||'Could not sign out.')}
   finally{
    signOutPending=false;
    button.disabled=false;
@@ -2546,7 +2568,7 @@ $('resumeImportModalBg').addEventListener('click',event=>{if(event.target===$('r
   if(remove)removeCloudResume(remove.dataset.cloudDelete);
  });
  $('downloadRecoveryBackup').addEventListener('click',downloadRecoveryData);
- $('resolveRecovery').addEventListener('click',resolveLocalRecovery);
+ $('resolveRecovery').addEventListener('click',()=>void resolveLocalRecovery());
  $('pdfBtn').addEventListener('click',()=>exportPDF());$('closePdfPreview').addEventListener('click',closePdfPreview);$('cancelPdfPreview').addEventListener('click',closePdfPreview);$('downloadPdfPreview').addEventListener('click',downloadPreviewPdf);$('pdfPreviewModalBg').addEventListener('click',e=>{if(e.target===$('pdfPreviewModalBg'))closePdfPreview()});$('atsBtn').addEventListener('click',openAts);$('atsFriendlyBtn').addEventListener('click',applyAtsFriendlyLayout);$('runAtsBtn').addEventListener('click',()=>runAtsChecks());$('closeAts').addEventListener('click',closeAts);
 $('docName').addEventListener('change',e=>transact(()=>state.docName=e.target.value.trim()||'Untitled resume'));
 $('dismissOnboarding').addEventListener('click',()=>{$('onboardingCard').hidden=true;onboardingDismissed=true;savePrefs()});

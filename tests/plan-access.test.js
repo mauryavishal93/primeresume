@@ -152,6 +152,28 @@ test('hidden sign-out controls stay hidden in both account-menu styles', () => {
   }
 });
 
+test('shared pages and editor confirm sign-out before redirecting home', () => {
+  const sharedNavigation = readFileSync(new URL('../frontend/src/auth-nav.js', import.meta.url), 'utf8');
+  const editor = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
+  assert.match(sharedNavigation, /signOutButton\?\.addEventListener\('click', async \(\) => \{[\s\S]*?await confirmModern\([\s\S]*?await signOutUser\(\)/);
+  assert.match(editor, /\$\('googleSignOutBtn'\)\.addEventListener\('click',async\(\)=>\{[\s\S]*?await confirmModern\([\s\S]*?await signOutUser\(\)/);
+  assert.match(sharedNavigation, /await signOutUser\(\);\s*window\.location\.assign\('\/home\.html'\)/);
+  assert.match(editor, /await signOutUser\(\);\s*window\.location\.assign\('\/home\.html'\)/);
+});
+
+test('site alerts and confirmations use the shared modern modal instead of browser dialogs', () => {
+  const sourceDirectory = new URL('../frontend/src/', import.meta.url);
+  const scripts = readdirSync(sourceDirectory).filter(file => file.endsWith('.js'));
+  for (const script of scripts) {
+    assert.doesNotMatch(readFileSync(new URL(script, sourceDirectory), 'utf8'), /\b(?:window\.)?(?:alert|confirm|prompt)\s*\(/, script);
+  }
+  for (const script of ['admin.js', 'billing.js', 'community.js', 'main.js']) {
+    assert.match(readFileSync(new URL(script, sourceDirectory), 'utf8'), /from '\.\/modern-modal\.js'/, script);
+  }
+  assert.match(readFileSync(new URL('modern-modal.js', sourceDirectory), 'utf8'), /import '\.\/modern-modal\.css'/);
+  assert.match(readFileSync(new URL('modern-modal.css', sourceDirectory), 'utf8'), /\.modern-modal-dialog\.is-danger/);
+});
+
 test('subscription management buttons are hidden unless the user is signed in', () => {
   const source = readFileSync(new URL('../frontend/src/billing.js', import.meta.url), 'utf8');
   const styles = readFileSync(new URL('../frontend/src/pricing.css', import.meta.url), 'utf8');
@@ -160,16 +182,19 @@ test('subscription management buttons are hidden unless the user is signed in', 
   assert.match(styles, /\.billing-plan-actions \.btn\[hidden\]\{display:none!important\}/);
 });
 
-test('all site pages use a text-only two-tone wordmark and the matching favicon', () => {
+test('all site pages use the ResumeOut icon and styled text wordmark', () => {
   const pages = [
     'home.html', 'index.html', 'about.html', 'admin.html', 'billing.html',
-    'editor.html', 'pricing.html', 'privacy.html', 'refunds.html', 'terms.html'
+    'editor.html', 'pricing.html', 'privacy.html', 'refunds.html', 'terms.html',
+    'community.html', 'my-posts.html', 'resume-wizard.html'
   ];
   for (const page of pages) {
     const html = readFileSync(new URL(`../frontend/${page}`, import.meta.url), 'utf8');
-    assert.match(html, /rel="icon"[^>]+personacraftpro-mark\.svg/, page);
-    assert.match(html, /<img class="(?:about-logo|logo)" src="\/images\/personacraftpro-mark\.svg"/, page);
-    assert.match(html, /PersonaCraft<span[^>]*>Pro<\/span>/, page);
+    assert.match(html, /rel="icon"[^>]+resumeout-mark\.svg/, page);
+    assert.match(html, /<img class="(?:about-logo|logo)" src="\/images\/resumeout-mark\.svg"/, page);
+    assert.match(html, /class="brand-resume">Resume<\/span>/, page);
+    assert.match(html, /class="brand-out">Out<\/span>/, page);
+    assert.match(html, /class="brand-domain">\.com<\/span>/, page);
   }
   const editor = readFileSync(new URL('../frontend/editor.html', import.meta.url), 'utf8');
   assert.doesNotMatch(editor, /id="proBrandBadge"/);
@@ -177,17 +202,15 @@ test('all site pages use a text-only two-tone wordmark and the matching favicon'
     readFileSync(new URL('../frontend/src/about.css', import.meta.url), 'utf8'),
     readFileSync(new URL('../frontend/src/style.css', import.meta.url), 'utf8')
   ].join('\n');
-  assert.match(styles, /\.about-brand-name\{display:inline-flex;align-items:center;gap:4px/);
-  assert.match(styles, /\.brand-name\{display:inline-flex;align-items:center;gap:4px/);
-  assert.match(styles, /\.about-brand-name span\{display:inline-flex;align-items:center;padding:2px 6px;border-radius:6px;background:linear-gradient/);
-  assert.match(styles, /\.brand-name span\{display:inline-flex;align-items:center;padding:2px 6px;border-radius:6px;background:linear-gradient/);
-  assert.doesNotMatch(styles, /\.about-brand span:not\(\.about-logo\)\{display:none\}/);
-  assert.doesNotMatch(styles, /\.brand span\{display:none\}/);
-  const logo = readFileSync(new URL('../frontend/public/images/personacraftpro-mark.svg', import.meta.url), 'utf8');
+  assert.match(styles, /\.about-brand-name \.brand-out\{[^}]*background:linear-gradient/);
+  assert.match(styles, /\.brand-name \.brand-out\{[^}]*background:linear-gradient/);
+  assert.match(styles, /\.about-brand-name \.brand-out::after\{[^}]*content:""/);
+  assert.match(styles, /\.brand-name \.brand-out::after\{[^}]*content:""/);
+  assert.match(styles, /:root\[data-theme=light\] \.brand \.logo,:root\[data-theme=dark\] \.brand \.logo\{background:none;box-shadow:none\}/);
+  const logo = readFileSync(new URL('../frontend/public/images/resumeout-mark.svg', import.meta.url), 'utf8');
   assert.match(logo, /<svg/);
-  assert.match(logo, /rx="78"/);
   assert.match(logo, /linearGradient/);
-  assert.match(logo, /FFE56A/);
+  assert.match(logo, /#123FBA/);
 });
 
 test('monthly and yearly prices match the displayed INR subscriptions', () => {
