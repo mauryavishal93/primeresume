@@ -239,7 +239,7 @@ async function startCheckout(planKey) {
     const checkout = new window.Razorpay({
       key: created.keyId,
       subscription_id: created.subscriptionId,
-      name: 'PersonaCraftPro',
+      name: 'ResumeOut.com',
       description: `${created.plan.label} subscription`,
       currency: created.plan.currency,
       prefill: {

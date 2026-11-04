@@ -6,10 +6,10 @@ await build();
 const { app } = await import('./backend/server.js');
 const port = Number(process.env.PORT) || 3000;
 const server = app.listen(port, '0.0.0.0', () => {
-  console.log(`PersonaCraftPro frontend and API listening on port ${port}`);
+  console.log(`ResumeOut.com frontend and API listening on port ${port}`);
 });
 
 server.on('error', error => {
-  console.error('Could not start PersonaCraftPro frontend and API server.', error);
+  console.error('Could not start ResumeOut.com frontend and API server.', error);
   process.exitCode = 1;
 });

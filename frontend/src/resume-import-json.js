@@ -12,7 +12,7 @@ export function parseResumeProjectJson(source) {
     || !project.profile || typeof project.profile !== 'object'
     || !Array.isArray(project.sections)
     || !project.design || typeof project.design !== 'object') {
-    throw new Error('This JSON file does not contain a valid PersonaCraftPro resume project.');
+    throw new Error('This JSON file does not contain a valid ResumeOut.com resume project.');
   }
   return project;
 }

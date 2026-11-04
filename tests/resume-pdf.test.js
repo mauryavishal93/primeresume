@@ -33,7 +33,7 @@ test('preserves rendered pages and keeps text searchable in the PDF', async () =
   assert.match(pdf, /^%PDF-/);
   assert.match(pdf, /\(Vector resume page one\) Tj/);
   assert.match(pdf, /\(Vector resume page two\) Tj/);
-  assert.match(pdf, /PersonaCraftProResume/);
+  assert.match(pdf, /ResumeOut.comResume/);
   assert.match(pdf, /Alex Morgan/);
   assert.match(pdf, /\/Subtype\s*\/Image/);
   assert.match(pdf, /3 Tr/);

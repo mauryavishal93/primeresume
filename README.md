@@ -1,4 +1,4 @@
-# PersonaCraftPro
+# ResumeOut.com
 
 A browser-based resume editor with multiple templates, editable sections, JSON project import/export, guest browser-saving controls, Google sign-in and Firebase cloud resume storage, and high-resolution PDF export with selectable text. Signed-in users reopen the cloud resume they last worked on. PDF downloads are capped below 500 KB; the exporter balances image resolution and JPEG quality, and blocks downloads if a resume cannot fit at readable settings.
 
@@ -37,7 +37,7 @@ The production build is generated in `dist/`. `npm start` serves the site and bi
 
 ## Deploy on Render
 
-The root `render.yaml` configures a Render Node web service that serves the built site and trusted billing API. Push it to the `main` branch, then in Render choose **New > Blueprint** and connect `mauryavishal93/PersonaCraftPro`. Render runs `npm install && npm run build`, then `npm start`. Approve the `buildmyportfolio` service to start the deploy. Because the GitHub repository is private, authorize Render to access it when prompted. Configure the secret environment variables described below before enabling billing.
+The root `render.yaml` configures a Render Node web service that serves the built site and trusted billing API. Push it to the `main` branch, then in Render choose **New > Blueprint** and connect `mauryavishal93/primeresume`. Render runs `npm install && npm run build`, then `npm start`. Approve the `buildmyportfolio` service to start the deploy. Because the GitHub repository is private, authorize Render to access it when prompted. Configure the secret environment variables described below before enabling billing.
 
 The site is multi-page: `/` opens the editor; `/editor.html` is the editor page; `/about.html` is the About page; `/privacy.html` is the privacy policy; `/pricing.html` is the plan and purchase page; `/terms.html` describes service terms; and `/refunds.html` describes refund status.
 

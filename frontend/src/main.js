@@ -48,7 +48,7 @@ const fresh=()=>({version:4,docName:'Untitled resume',template:'classic',layout:
 const str=v=>typeof v==='string'?v:'';
 /* Validates + upgrades any project (import or autosave). Throws on files that are not projects. */
 function normalizeState(d){
- if(!d||typeof d!=='object'||!d.profile||typeof d.profile!=='object'||!Array.isArray(d.sections)||!d.design||typeof d.design!=='object')throw Error('This is not a valid PersonaCraftPro project.');
+ if(!d||typeof d!=='object'||!d.profile||typeof d.profile!=='object'||!Array.isArray(d.sections)||!d.design||typeof d.design!=='object')throw Error('This is not a valid ResumeOut.com project.');
  const base=fresh(),ver=Number(d.version)||1,out={...base,version:4};
  out.docName=str(d.docName).trim()?str(d.docName).slice(0,120):base.docName;
  out.importedSourceText=str(d.importedSourceText);
@@ -929,7 +929,7 @@ async function openTemplatePreview(templateId){
    page.append(image);
    const watermark=document.createElement('span');
    watermark.className='template-preview-watermark';
-   watermark.textContent='PersonaCraftPro · PREVIEW';
+   watermark.textContent='ResumeOut.com · PREVIEW';
    watermark.setAttribute('aria-hidden','true');
    page.append(watermark);
    pages.append(page);

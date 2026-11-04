@@ -727,7 +727,7 @@ async function createVerifiedProviderPlan(planKey, currency, amount) {
       period: basePlan.period,
       interval: basePlan.interval,
       item: {
-        name: `PersonaCraftPro ${basePlan.label}`,
+        name: `ResumeOut.com ${basePlan.label}`,
         amount,
         currency,
         description: `${basePlan.label} recurring subscription`
@@ -750,7 +750,7 @@ app.get('/api/health', (_request, response) => {
     .set('Cache-Control', 'no-store')
     .json({
       status: 'ok',
-      service: 'PersonaCraftPro API',
+      service: 'ResumeOut.com API',
       timestamp: new Date().toISOString()
     });
 });
@@ -2620,6 +2620,6 @@ export { app };
 
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
   app.listen(port, '0.0.0.0', () => {
-    console.log(`PersonaCraftPro backend listening on port ${port}`);
+    console.log(`ResumeOut.com backend listening on port ${port}`);
   });
 }

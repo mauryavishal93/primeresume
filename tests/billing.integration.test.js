@@ -201,7 +201,7 @@ test('health check returns a fast no-store JSON liveness response', async () => 
   const body = await response.json();
   assert.deepEqual(
     { status: body.status, service: body.service },
-    { status: 'ok', service: 'PersonaCraftPro API' }
+    { status: 'ok', service: 'ResumeOut.com API' }
   );
   assert.ok(Number.isFinite(Date.parse(body.timestamp)));
 });

@@ -12,7 +12,7 @@ export function buildResumePdf(jsPDF, pages, { addSelectableText, addPDFLinks, a
 
   if (resumeState) {
     doc.addMetadata(JSON.stringify({
-      format: 'PersonaCraftProResume',
+      format: 'ResumeOut.comResume',
       version: 1,
       resume: resumeState
     }), RESUME_PDF_METADATA_NAMESPACE);

@@ -159,7 +159,7 @@ test('resume project JSON import keeps the complete editor project shape', () =>
   };
   assert.deepEqual(parseResumeProjectJson(JSON.stringify(project)), project);
   assert.throws(() => parseResumeProjectJson('{invalid'), /not valid/);
-  assert.throws(() => parseResumeProjectJson('{}'), /valid PersonaCraftPro resume project/);
+  assert.throws(() => parseResumeProjectJson('{}'), /valid ResumeOut.com resume project/);
 });
 
 test('resume import keeps unclassified text in a single summary paragraph', () => {
@@ -279,15 +279,26 @@ test('imported experience and project details stay in paragraphs until bullets a
   assert.match(editor, /else if\(x\.type!=='skills'\)x\.content=splitContentIntoBullets\(x\.content\)/);
 });
 
-test('resume import restores structured data embedded in PersonaCraftPro PDFs', () => {
+test('resume import restores structured data embedded in ResumeOut.com PDFs', () => {
   const project = { template: 'classic', docName: 'Alex Resume', profile: { name: 'Alex Morgan' }, sections: [] };
-  const metadataValue = JSON.stringify({ format: 'PersonaCraftProResume', version: 1, resume: project });
+  const metadataValue = JSON.stringify({ format: 'ResumeOut.comResume', version: 1, resume: project });
   const metadata = {
     get: name => name === 'jspdf:metadata' ? metadataValue : null,
     getRaw: () => `<rdf:Description xmlns:jspdf="${RESUME_PDF_METADATA_NAMESPACE}"><jspdf:metadata>${metadataValue}</jspdf:metadata></rdf:Description>`
   };
   assert.deepEqual(readEmbeddedResumeProject(metadata), project);
   assert.equal(readEmbeddedResumeProject({ get: () => metadataValue, getRaw: () => '<xmpmeta />' }), null);
+});
+
+test('resume import remains compatible with PDFs exported before the ResumeOut.com rename', () => {
+  const project = { version: 4, profile: { name: 'Alex Morgan' }, sections: [] };
+  const metadataValue = JSON.stringify({ format: 'PersonaCraftProResume', version: 1, resume: project });
+  const metadata = {
+    get: name => name === 'jspdf:metadata' ? metadataValue : null,
+    getRaw: () => '<rdf:Description xmlns:jspdf="https://personacraftpro.com/ns/resume/1.0/"></rdf:Description>'
+  };
+
+  assert.deepEqual(readEmbeddedResumeProject(metadata), project);
 });
 
 test('resume import offers review, backup, and supported file choices before applying', () => {

@@ -13,6 +13,6 @@ feedbackForm?.addEventListener('submit', event => {
     'Feedback:',
     message
   ].filter((line, index, lines) => line || (index > 0 && lines[index - 1])).join('\n');
-  const subject = encodeURIComponent('PersonaCraftPro feedback');
+  const subject = encodeURIComponent('ResumeOut.com feedback');
   window.location.href = `mailto:buildymyportfolio@gmail.com?subject=${subject}&body=${encodeURIComponent(body)}`;
 });
