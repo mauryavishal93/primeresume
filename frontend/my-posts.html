@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="View your PersonaCraftPro community posts, reviews, comments, and their history.">
+    <title>My posts | PersonaCraftPro</title>
+    <link rel="icon" type="image/svg+xml" href="/images/personacraftpro-mark.svg">
+    <link rel="stylesheet" href="/src/about.css">
+    <link rel="stylesheet" href="/src/community.css">
+    <script type="module" src="/src/theme.js"></script>
+    <script type="module" src="/src/auth-nav.js"></script>
+    <script type="module" src="/src/my-posts.js"></script>
+  </head>
+  <body class="about-page community-page my-posts-page">
+    <header class="about-header">
+      <a class="about-brand" href="/home.html" aria-label="PersonaCraftPro home">
+        <img class="about-logo" src="/images/personacraftpro-mark.svg" alt="" aria-hidden="true">
+        <span class="about-brand-name">PersonaCraft<span>Pro</span></span>
+      </a>
+      <nav class="about-nav" aria-label="Main navigation">
+        <button class="theme-switch" type="button" role="switch" data-theme-toggle aria-label="Toggle theme">
+          <span class="theme-switch-track" aria-hidden="true"><span class="theme-switch-thumb"></span></span>
+          <span class="theme-switch-label"></span>
+        </button>
+        <div class="auth-actions">
+          <button class="btn google-signin" type="button" data-auth-sign-in>
+            <span data-auth-sign-in-label>Sign in with Google</span>
+          </button>
+          <button class="btn outline" type="button" data-auth-sign-out hidden>Sign out</button>
+          <span class="auth-status" data-auth-status role="status" aria-live="polite"></span>
+        </div>
+        <a class="btn outline" href="/community.html">Community</a>
+        <a class="btn soft about-editor" href="/home.html">Home</a>
+      </nav>
+    </header>
+    <main class="community-main">
+      <section class="community-hero my-posts-hero" aria-labelledby="myPostsTitle">
+        <div>
+          <p class="about-eyebrow">YOUR COMMUNITY ACTIVITY</p>
+          <h1 id="myPostsTitle">My posts</h1>
+          <p class="community-intro">Review your current posts, reviews, comments, and edit history.</p>
+        </div>
+      </section>
+      <section class="my-posts-history" aria-label="Your community history">
+        <h2 class="my-posts-section-title">Current community content</h2>
+        <p class="community-status" data-content-auth-status role="status" aria-live="polite">Checking your sign-in…</p>
+        <div class="my-posts-content-grid">
+          <section aria-labelledby="currentPostsTitle">
+            <h3 id="currentPostsTitle">Your posts and reviews</h3>
+            <p class="community-status" data-current-posts-status role="status" aria-live="polite"></p>
+            <div class="my-posts-list" data-current-posts-list></div>
+            <button class="community-button community-button-secondary community-load-more" type="button" data-current-posts-more hidden>Load older posts</button>
+          </section>
+          <section aria-labelledby="currentCommentsTitle">
+            <h3 id="currentCommentsTitle">Your comments</h3>
+            <p class="community-status" data-current-comments-status role="status" aria-live="polite"></p>
+            <div class="my-posts-list" data-current-comments-list></div>
+            <button class="community-button community-button-secondary community-load-more" type="button" data-current-comments-more hidden>Load older comments</button>
+          </section>
+        </div>
+        <h2 class="my-posts-section-title">Activity history</h2>
+        <p class="community-status" data-history-status role="status" aria-live="polite"></p>
+        <div class="my-posts-list" data-history-list></div>
+        <button class="community-button community-button-secondary community-load-more" type="button" data-history-more hidden>Load older activity</button>
+      </section>
+    </main>
+  </body>
+</html>

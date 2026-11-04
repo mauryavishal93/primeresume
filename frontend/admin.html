@@ -35,6 +35,17 @@
     </section>
 
     <section id="admin-content" hidden>
+      <nav class="admin-category-nav" aria-label="Admin dashboard categories">
+        <p class="eyebrow">Workspace</p>
+        <button type="button" class="admin-category-link is-active" data-admin-category-link="overview" aria-current="page">Overview</button>
+        <button type="button" class="admin-category-link" data-admin-category-link="users">Users</button>
+        <button type="button" class="admin-category-link" data-admin-category-link="access">Access &amp; vouchers</button>
+        <button type="button" class="admin-category-link" data-admin-category-link="revenue">Revenue</button>
+        <button type="button" class="admin-category-link" data-admin-category-link="pricing">Pricing</button>
+        <button type="button" class="admin-category-link" data-admin-category-link="community">Community</button>
+      </nav>
+      <div class="admin-category-content">
+      <section class="admin-category-panel" data-admin-category="overview" aria-label="Overview">
       <div class="admin-summary-bar" aria-label="User summary filters">
         <button type="button" class="summary-chip active" data-summary-filter="all">
           <span class="summary-label">All users</span>
@@ -90,8 +101,9 @@
           <small id="stat-payment-count">0 payments recorded</small>
         </article>
       </div>
+      </section>
 
-      <section class="admin-card payments-card" aria-labelledby="payments-title">
+      <section class="admin-card payments-card admin-category-panel" data-admin-category="revenue" aria-labelledby="payments-title">
         <div class="admin-card-title">
           <div>
             <p class="eyebrow">Revenue</p>
@@ -111,7 +123,7 @@
         </div>
       </section>
 
-      <section class="admin-card pricing-config-card" aria-labelledby="pricing-config-title">
+      <section class="admin-card pricing-config-card admin-category-panel" data-admin-category="pricing" aria-labelledby="pricing-config-title">
         <div class="admin-card-title">
           <div>
             <p class="eyebrow">Pricing</p>
@@ -160,6 +172,7 @@
         <button id="save-pricing-config" class="admin-button" type="button" disabled>Save pricing</button>
       </section>
 
+      <section class="admin-category-panel" data-admin-category="users" aria-label="User accounts">
       <div class="admin-filter-bar" aria-label="User filters">
         <div class="filter-group search-group">
           <label for="user-search">Search</label>
@@ -229,6 +242,10 @@
           </div>
         </section>
 
+      </div>
+      </section>
+
+      <section class="admin-category-panel admin-access-category" data-admin-category="access" aria-label="Access and vouchers">
         <section class="admin-card voucher-card">
           <details class="voucher-manager" open>
             <summary>
@@ -252,6 +269,58 @@
             <div id="voucher-list" class="voucher-list"></div>
           </details>
         </section>
+      </section>
+
+    <section id="admin-forum-content" class="admin-forum-content admin-category-panel" data-admin-category="community" aria-label="Community moderation">
+      <details class="admin-card forum-activity-card" aria-labelledby="forum-activity-title">
+        <summary class="forum-content-summary">
+          <span>
+            <p class="eyebrow">Community</p>
+            <h2 id="forum-activity-title">Post and comment history</h2>
+          </span>
+          <span class="forum-content-toggle-label">Expand history</span>
+        </summary>
+        <div class="forum-content-card-body">
+          <div class="admin-card-title">
+            <p class="forum-content-description">Review post and comment activity, including deleted content.</p>
+            <button id="forum-activity-refresh" class="admin-button secondary" type="button">Refresh history</button>
+          </div>
+          <p id="forum-activity-status" class="forum-activity-status" role="status" aria-live="polite">History appears here after data loads.</p>
+          <div id="forum-activity-list" class="forum-activity-list"></div>
+          <button id="forum-activity-more" class="admin-button secondary" type="button" hidden>Load older activity</button>
+        </div>
+      </details>
+
+      <details class="admin-card forum-content-card" aria-labelledby="forum-content-title" open>
+        <summary class="forum-content-summary">
+          <span>
+            <span class="eyebrow">Community content</span>
+            <h2 id="forum-content-title">Community posts and comments</h2>
+          </span>
+          <span class="forum-content-toggle-label">Collapse content</span>
+        </summary>
+        <div class="forum-content-card-body">
+          <div class="admin-card-title">
+            <p class="forum-content-description">Review community posts and comments, including deleted posts.</p>
+            <button id="forum-content-refresh" class="admin-button secondary" type="button">Refresh content</button>
+          </div>
+          <div class="forum-content-grid">
+            <section aria-labelledby="forum-posts-title">
+              <h3 id="forum-posts-title">Posts and reviews</h3>
+              <p id="forum-posts-status" class="forum-activity-status" role="status" aria-live="polite">Waiting for data.</p>
+              <div id="forum-posts-list" class="forum-activity-list"></div>
+              <button id="forum-posts-more" class="admin-button secondary forum-content-more" type="button" hidden>Load older posts</button>
+            </section>
+            <section aria-labelledby="forum-comments-title">
+              <h3 id="forum-comments-title">Comments</h3>
+              <p id="forum-comments-status" class="forum-activity-status" role="status" aria-live="polite">Waiting for data.</p>
+              <div id="forum-comments-list" class="forum-activity-list"></div>
+              <button id="forum-comments-more" class="admin-button secondary forum-content-more" type="button" hidden>Load older comments</button>
+            </section>
+          </div>
+        </div>
+      </details>
+    </section>
       </div>
     </section>
   </main>

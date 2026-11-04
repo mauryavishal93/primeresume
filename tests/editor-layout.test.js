@@ -74,6 +74,30 @@ test('mobile editor provides view tabs and shows one full-width panel above the 
   assert.match(styles, /#importResumeBtn svg\{width:16px;height:16px;flex:0 0 16px/);
 });
 
+test('editor account menu links to Community and My posts', () => {
+  const html = readFileSync(new URL('../frontend/editor.html', import.meta.url), 'utf8');
+  const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
+  const accountMenu = html.slice(html.indexOf('id="accountMenu"'), html.indexOf('</details>', html.indexOf('id="accountMenu"')));
+  const options = [
+    'My cloud resumes',
+    'My posts',
+    'Billing',
+    'Community',
+    'About',
+    'Appearance',
+    'Sign out'
+  ];
+  let previousIndex = -1;
+  for (const option of options) {
+    const optionIndex = accountMenu.indexOf(option);
+    assert.ok(optionIndex > previousIndex, `${option} should appear in the shared account menu order`);
+    previousIndex = optionIndex;
+  }
+  assert.match(accountMenu, /id="myPostsLink"[^>]*hidden/);
+  assert.match(source, /\$\('myPostsLink'\)\.hidden=true/);
+  assert.match(source, /\$\('myPostsLink'\)\.hidden=!user/);
+});
+
 test('resume editing tools collapse vertically on mobile only', () => {
   const html = readFileSync(new URL('../frontend/editor.html', import.meta.url), 'utf8');
   const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');

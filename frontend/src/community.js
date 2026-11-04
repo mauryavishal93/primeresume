@@ -15,6 +15,7 @@ const submitPostButton = document.querySelector('[data-submit-post]');
 const ratingAverage = document.querySelector('[data-rating-average]');
 const ratingStars = document.querySelector('[data-rating-summary-stars]');
 const ratingCount = document.querySelector('[data-rating-count]');
+const requestedPostId = new URLSearchParams(window.location.search).get('post');
 const commentCache = new Map();
 const commentCursors = new Map();
 let currentUser = null;
@@ -144,6 +145,7 @@ function setAuthState(user, error = null) {
 function createPostCard(post) {
   const article = createElement('article', 'community-post-card');
   article.dataset.postId = post.id;
+  article.id = `community-post-${post.id}`;
 
   const metadata = createElement('div', 'community-post-meta');
   metadata.append(
@@ -163,6 +165,11 @@ function createPostCard(post) {
   article.append(createElement('p', 'community-post-content', post.content));
 
   const actions = createElement('div', 'community-post-actions');
+  if (post.isDeleted) {
+    actions.append(createElement('strong', 'community-deleted-post', 'Deleted post · Admin view'));
+    article.append(actions);
+    return article;
+  }
   const commentsButton = createElement('button', 'community-button community-button-secondary', 'View comments');
   commentsButton.type = 'button';
   commentsButton.setAttribute('aria-expanded', 'false');
@@ -262,7 +269,7 @@ function renderComments(comments, list, status, loadMoreButton, hasMore = false)
           await requestApi(`/api/forum/posts/${encodeURIComponent(item.dataset.postId || '')}/comments/${encodeURIComponent(comment.id)}`, { method: 'DELETE' });
           const updated = (commentCache.get(item.dataset.postId) || []).filter(entry => entry.id !== comment.id);
           commentCache.set(item.dataset.postId, updated);
-          renderComments(updated, list, status, loadMoreCommentsButton, Boolean(commentCursors.get(item.dataset.postId)));
+          renderComments(updated, list, status, loadMoreButton, Boolean(commentCursors.get(item.dataset.postId)));
         } catch (error) {
           remove.disabled = false;
           setStatus(status, error.message, true);
@@ -343,13 +350,29 @@ async function loadPosts({ append = false } = {}) {
     const query = append && nextPostCursor ? `?cursor=${encodeURIComponent(nextPostCursor)}` : '';
     const result = await requestApi(`/api/forum/posts${query}`);
     if (viewerUid !== (currentUser?.uid || null)) return;
-    posts = append ? [...posts, ...result.posts] : result.posts;
-    nextPostCursor = result.nextCursor;
+    if (requestedPostId && !append) {
+      let linkedPost = result.posts.find(post => post.id === requestedPostId);
+      if (!linkedPost) {
+        const linkedResult = await requestApi(`/api/forum/posts/${encodeURIComponent(requestedPostId)}`);
+        linkedPost = linkedResult.post;
+      }
+      if (viewerUid !== (currentUser?.uid || null)) return;
+      posts = [linkedPost];
+      nextPostCursor = null;
+    } else {
+      posts = append ? [...posts, ...result.posts] : result.posts;
+      nextPostCursor = result.nextCursor;
+    }
     loadMorePostsButton.hidden = !nextPostCursor;
     if (!append) updateRatingSummary(result.ratingSummary);
     retryAppend = false;
     setStatus(feedStatus, '');
     renderPosts();
+    if (requestedPostId && !append) {
+      window.requestAnimationFrame(() => {
+        document.getElementById(`community-post-${requestedPostId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+    }
   } catch (error) {
     if (!append) {
       posts = [];

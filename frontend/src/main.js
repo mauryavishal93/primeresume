@@ -335,6 +335,7 @@ async function updateCloudAccount(user,error){
   $('cloudActions').hidden=false;
   $('accountMenu').hidden=false;
   $('cloudResumesBtn').hidden=true;
+  $('myPostsLink').hidden=true;
   $('googleSignOutBtn').hidden=true;
   $('accountUserName').textContent='Guest';
   $('accountUserEmail').textContent='';
@@ -397,6 +398,7 @@ async function updateCloudAccount(user,error){
  $('cloudActions').hidden=!!user;
  $('accountMenu').hidden=false;
  $('cloudResumesBtn').hidden=!user;
+ $('myPostsLink').hidden=!user;
  $('googleSignOutBtn').hidden=!user;
  $('googleSignOutBtn').disabled=false;
  $('googleSignOutBtn').textContent='Sign out';

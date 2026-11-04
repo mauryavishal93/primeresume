@@ -161,8 +161,9 @@ function forumSnapshotExists(snapshot) {
   return Boolean(snapshot?.exists);
 }
 
-function publicForumPost(document, viewerUid = null) {
+function publicForumPost(document, viewerUid = null, includeDeleted = false) {
   const data = document.data();
+  if (data.isDeleted && !includeDeleted) return null;
   const post = forumPostInput(data);
   if (!post) return null;
   return {
@@ -171,7 +172,11 @@ function publicForumPost(document, viewerUid = null) {
     authorName: forumAuthorName({ name: data.authorName }),
     isOwner: Boolean(viewerUid && viewerUid === data.authorUid),
     createdAt: Number.isFinite(data.createdAt) ? data.createdAt : 0,
-    updatedAt: Number.isFinite(data.updatedAt) ? data.updatedAt : 0
+    updatedAt: Number.isFinite(data.updatedAt) ? data.updatedAt : 0,
+    ...(includeDeleted ? {
+      isDeleted: Boolean(data.isDeleted),
+      deletedAt: Number.isFinite(data.deletedAt) ? data.deletedAt : null
+    } : {})
   };
 }
 
@@ -188,13 +193,282 @@ function publicForumComment(document, viewerUid = null) {
   };
 }
 
-async function deleteForumComments(postReference) {
+async function deleteForumComments(postReference, post, actor) {
   const comments = postReference.collection('comments');
   while (true) {
-    const snapshot = await comments.limit(300).get();
+    const snapshot = await comments.limit(100).get();
     if (!snapshot.docs.length) return;
-    await Promise.all(snapshot.docs.map(document => comments.doc(document.id).delete()));
+    const { db } = await getFirebaseAdmin();
+    const batch = db.batch();
+    for (const document of snapshot.docs) {
+      const comment = document.data();
+      const activity = {
+        eventType: 'comment_deleted',
+        userUid: comment.authorUid,
+        userName: forumAuthorName({ name: comment.authorName }),
+        actorUid: actor.uid,
+        actorName: forumAuthorName(actor),
+        postId: postReference.id,
+        postTitle: post.title,
+        commentId: document.id,
+        reason: 'post_deleted',
+        before: { content: forumCommentInput(comment) },
+        after: null,
+        occurredAt: Date.now()
+      };
+      appendForumActivityWrites(batch, db, activity);
+      batch.delete(comments.doc(document.id));
+    }
+    await batch.commit();
   }
+}
+
+async function permanentlyDeleteForumComments(db, postReference) {
+  const comments = postReference.collection('comments');
+  let deletedCount = 0;
+  while (true) {
+    const snapshot = await comments.limit(400).get();
+    if (!snapshot.docs.length) return deletedCount;
+    const batch = db.batch();
+    snapshot.docs.forEach(document => batch.delete(comments.doc(document.id)));
+    await batch.commit();
+    deletedCount += snapshot.docs.length;
+  }
+}
+
+async function permanentlyDeleteForumActivity(db, postId, commentId = null) {
+  const collection = db.collection('forumActivity');
+  let query = collection.where('postId', '==', postId);
+  let cursor = null;
+  let deletedCount = 0;
+  while (true) {
+    let pageQuery = query.limit(250);
+    if (cursor) pageQuery = pageQuery.startAfter(cursor);
+    const snapshot = await pageQuery.get();
+    if (!snapshot.docs.length) break;
+    const matchingDocs = commentId
+      ? snapshot.docs.filter(document => document.data().commentId === commentId)
+      : snapshot.docs;
+    if (matchingDocs.length) {
+      const batch = db.batch();
+      matchingDocs.forEach(document => {
+        const event = document.data();
+        batch.delete(db.doc(document.ref.path));
+        if (typeof event.userUid === 'string' && event.userUid) {
+          batch.delete(db.collection('users').doc(event.userUid).collection('forumActivity').doc(document.id));
+        }
+      });
+      await batch.commit();
+      deletedCount += matchingDocs.length;
+    }
+    if (snapshot.docs.length < 250) break;
+    cursor = snapshot.docs.at(-1);
+  }
+  return deletedCount;
+}
+
+async function permanentlyDeleteForumPost(db, postReference, postId) {
+  await permanentlyDeleteForumComments(db, postReference);
+  await permanentlyDeleteForumActivity(db, postId);
+  await postReference.delete();
+}
+
+async function permanentlyDeleteAdminPost(db, postId) {
+  const postReference = db.collection('forumPosts').doc(postId);
+  const snapshot = await postReference.get();
+  if (!forumSnapshotExists(snapshot)) {
+    const commentCount = await permanentlyDeleteForumComments(db, postReference);
+    const activityCount = await permanentlyDeleteForumActivity(db, postId);
+    return Boolean(commentCount || activityCount);
+  }
+  await permanentlyDeleteForumPost(db, postReference, postId);
+  return true;
+}
+
+async function permanentlyDeleteAdminComment(db, postId, commentId) {
+  const postReference = db.collection('forumPosts').doc(postId);
+  const commentReference = postReference.collection('comments').doc(commentId);
+  const commentSnapshot = await commentReference.get();
+  const activityCount = await permanentlyDeleteForumActivity(db, postId, commentId);
+  if (!forumSnapshotExists(commentSnapshot) && !activityCount) return false;
+  if (forumSnapshotExists(commentSnapshot)) await commentReference.delete();
+  return true;
+}
+
+function forumPostSnapshot(post) {
+  if (!post) return null;
+  return {
+    type: post.type,
+    title: post.title,
+    content: post.content,
+    ...(post.type === 'review' ? { rating: post.rating } : {})
+  };
+}
+
+function appendForumActivityWrites(batch, db, activity) {
+  const eventId = randomUUID();
+  const record = { ...activity, id: eventId };
+  batch.set(db.collection('forumActivity').doc(eventId), record);
+  batch.set(db.collection('users').doc(activity.userUid).collection('forumActivity').doc(eventId), record);
+}
+
+function publicForumActivity(document) {
+  const data = document.data();
+  if (!data || typeof data.userUid !== 'string' || typeof data.eventType !== 'string') return null;
+  return {
+    id: document.id,
+    eventType: data.eventType,
+    userUid: data.userUid,
+    userName: forumAuthorName({ name: data.userName }),
+    actorUid: typeof data.actorUid === 'string' ? data.actorUid : null,
+    actorName: forumAuthorName({ name: data.actorName }),
+    postId: typeof data.postId === 'string' ? data.postId : '',
+    postTitle: typeof data.postTitle === 'string' ? data.postTitle : '',
+    commentId: typeof data.commentId === 'string' ? data.commentId : null,
+    reason: typeof data.reason === 'string' ? data.reason : null,
+    before: data.before && typeof data.before === 'object' ? data.before : null,
+    after: data.after && typeof data.after === 'object' ? data.after : null,
+    occurredAt: Number.isFinite(data.occurredAt) ? data.occurredAt : 0
+  };
+}
+
+function validForumActivityCursor(cursor) {
+  return cursor === undefined || (typeof cursor === 'string' && validForumText(cursor, 1, 150));
+}
+
+async function loadForumActivity(collection, cursor, includeDeletions = true) {
+  let query = collection.orderBy('occurredAt', 'desc');
+  if (cursor) {
+    const cursorSnapshot = await collection.doc(cursor).get();
+    if (!forumSnapshotExists(cursorSnapshot)) return null;
+    query = query.startAfter(cursorSnapshot);
+  }
+  const deletionEventsPromise = includeDeletions
+    ? Promise.resolve([])
+    : Promise.all(['post_deleted', 'comment_deleted'].map(eventType =>
+      collection.where('eventType', '==', eventType).get()
+    )).then(snapshots => snapshots.flatMap(result =>
+      result.docs.map(publicForumActivity).filter(Boolean)
+    ));
+  const [snapshot, deletionEvents] = await Promise.all([
+    query.limit(50).get(),
+    deletionEventsPromise
+  ]);
+  const events = snapshot.docs.map(publicForumActivity).filter(Boolean);
+  const deletedPostIds = new Set(deletionEvents
+    .filter(event => event.eventType === 'post_deleted' || event.reason === 'post_deleted')
+    .map(event => event.postId)
+    .filter(Boolean));
+  const deletedCommentIds = new Set(deletionEvents
+    .filter(event => event.eventType === 'comment_deleted')
+    .map(event => event.commentId)
+    .filter(Boolean));
+  return {
+    events: includeDeletions
+      ? events
+      : events.filter(event =>
+        !['post_deleted', 'comment_deleted'].includes(event.eventType)
+        && !deletedPostIds.has(event.postId)
+        && !deletedCommentIds.has(event.commentId)
+      ),
+    nextCursor: snapshot.docs.length === 50 ? snapshot.docs.at(-1).id : null
+  };
+}
+
+function forumContentCursorPath(cursor, kind) {
+  if (cursor === undefined) return null;
+  if (typeof cursor !== 'string' || cursor.length > 2048 || !/^[A-Za-z0-9_-]+$/.test(cursor)) return false;
+  const path = Buffer.from(cursor, 'base64url').toString('utf8');
+  if (Buffer.from(path, 'utf8').toString('base64url') !== cursor) return false;
+  const parts = path.split('/');
+  if (parts.some(part => !part || part.length > 150)) return false;
+  const validPath = kind === 'posts'
+    ? parts.length === 2 && parts[0] === 'forumPosts'
+    : parts.length === 4 && parts[0] === 'forumPosts' && parts[2] === 'comments';
+  return validPath ? path : false;
+}
+
+async function loadForumContent(db, kind, cursor, userUid = null) {
+  const cursorPath = forumContentCursorPath(cursor, kind);
+  if (cursorPath === false) return null;
+  let query = kind === 'posts'
+    ? db.collection('forumPosts')
+    : db.collectionGroup('comments');
+  if (userUid) query = query.where('authorUid', '==', userUid);
+  if (cursorPath) {
+    const cursorSnapshot = await db.doc(cursorPath).get();
+    if (!forumSnapshotExists(cursorSnapshot)
+      || (userUid && cursorSnapshot.data().authorUid !== userUid)) return null;
+    query = query.startAfter(cursorSnapshot);
+  }
+  let snapshot;
+  const documents = [];
+  let hasMore = false;
+  do {
+    snapshot = await query.limit(25).get();
+    const candidates = kind === 'posts' && userUid
+      ? snapshot.docs.filter(document => !document.data().isDeleted && forumPostInput(document.data()))
+      : snapshot.docs;
+    const remaining = 25 - documents.length;
+    documents.push(...candidates.slice(0, remaining));
+    if (kind !== 'posts' || !userUid) {
+      hasMore = snapshot.docs.length === 25;
+      break;
+    }
+    if (candidates.length > remaining) {
+      hasMore = true;
+      break;
+    }
+    if (documents.length === 25 || snapshot.docs.length < 25) {
+      hasMore = snapshot.docs.length === 25;
+      break;
+    }
+    query = query.startAfter(snapshot.docs.at(-1));
+  } while (true);
+  const items = await Promise.all(documents.map(async document => {
+    const data = document.data();
+    const path = document.ref.path.split('/');
+    if (kind === 'posts') {
+      if (userUid && data.isDeleted) return null;
+      const post = forumPostInput(data);
+      if (!post) return null;
+      return {
+        id: document.id,
+        ...post,
+        authorName: forumAuthorName({ name: data.authorName }),
+        ...(!userUid ? { authorUid: data.authorUid || '' } : {}),
+        createdAt: Number.isFinite(data.createdAt) ? data.createdAt : 0,
+        updatedAt: Number.isFinite(data.updatedAt) ? data.updatedAt : 0,
+        ...(!userUid ? {
+          isDeleted: Boolean(data.isDeleted),
+          deletedAt: Number.isFinite(data.deletedAt) ? data.deletedAt : null
+        } : {})
+      };
+    }
+    if (path.length !== 4 || path[0] !== 'forumPosts' || path[2] !== 'comments') return null;
+    const content = forumCommentInput(data);
+    if (!content) return null;
+    const postSnapshot = await db.doc(`forumPosts/${path[1]}`).get();
+    return {
+      id: document.id,
+      postId: path[1],
+      postTitle: forumSnapshotExists(postSnapshot) && typeof postSnapshot.data().title === 'string'
+        ? postSnapshot.data().title
+        : 'Deleted post',
+      content,
+      authorName: forumAuthorName({ name: data.authorName }),
+      ...(!userUid ? { authorUid: data.authorUid || '' } : {}),
+      createdAt: Number.isFinite(data.createdAt) ? data.createdAt : 0
+    };
+  }));
+  const validItems = items.filter(Boolean);
+  const nextCursorDocument = kind === 'posts' && userUid ? documents.at(-1) : snapshot.docs.at(-1);
+  return {
+    items: validItems,
+    nextCursor: hasMore
+      ? Buffer.from(nextCursorDocument.ref.path, 'utf8').toString('base64url')
+      : null
+  };
 }
 
 function isAdminUser(user) {
@@ -489,6 +763,160 @@ app.use('/api/forum', (_request, response, next) => {
   next();
 });
 
+app.use('/api/admin/forum', (_request, response, next) => {
+  response.set('Cache-Control', 'no-store');
+  next();
+});
+
+app.get('/api/forum/activity', requireFirebaseUser, async (request, response) => {
+  const cursor = request.query.cursor;
+  if (!validForumActivityCursor(cursor)) {
+    response.status(400).json({ error: 'The activity page cursor is invalid.' });
+    return;
+  }
+  try {
+    const { db } = await getFirebaseAdmin();
+    const collection = db.collection('users').doc(request.user.uid).collection('forumActivity');
+    const page = await loadForumActivity(collection, cursor, false);
+    if (!page) {
+      response.status(400).json({ error: 'This activity page cursor is no longer available. Reload your history.' });
+      return;
+    }
+    response.json(page);
+  } catch (error) {
+    console.error('Could not load user community activity.', error);
+    response.status(503).json({ error: 'Your community history is temporarily unavailable. Please try again.' });
+  }
+});
+
+app.get('/api/admin/forum/activity', requireFirebaseUser, requireAdmin, async (request, response) => {
+  const cursor = request.query.cursor;
+  if (!validForumActivityCursor(cursor)) {
+    response.status(400).json({ error: 'The activity page cursor is invalid.' });
+    return;
+  }
+  try {
+    const { db } = await getFirebaseAdmin();
+    const page = await loadForumActivity(db.collection('forumActivity'), cursor);
+    if (!page) {
+      response.status(400).json({ error: 'This activity page cursor is no longer available. Reload community history.' });
+      return;
+    }
+    response.json(page);
+  } catch (error) {
+    console.error('Could not load admin community activity.', error);
+    response.status(503).json({ error: 'Community history is temporarily unavailable. Please try again.' });
+  }
+});
+
+app.get('/api/forum/my-content', requireFirebaseUser, async (request, response) => {
+  const { kind, cursor } = request.query;
+  if (!['posts', 'comments'].includes(kind)) {
+    response.status(400).json({ error: 'Choose posts or comments to view your current content.' });
+    return;
+  }
+  try {
+    const { db } = await getFirebaseAdmin();
+    const page = await loadForumContent(db, kind, cursor, request.user.uid);
+    if (!page) {
+      response.status(400).json({ error: 'This content page cursor is invalid or no longer available. Reload your content.' });
+      return;
+    }
+    response.json(page);
+  } catch (error) {
+    console.error('Could not load user community content.', error);
+    response.status(503).json({ error: 'Your current community content is temporarily unavailable. Please try again.' });
+  }
+});
+
+app.get('/api/admin/forum/content', requireFirebaseUser, requireAdmin, async (request, response) => {
+  const { kind, cursor } = request.query;
+  if (!['posts', 'comments'].includes(kind)) {
+    response.status(400).json({ error: 'Choose posts or comments to view current community content.' });
+    return;
+  }
+  try {
+    const { db } = await getFirebaseAdmin();
+    const page = await loadForumContent(db, kind, cursor);
+    if (!page) {
+      response.status(400).json({ error: 'This content page cursor is invalid or no longer available. Reload community content.' });
+      return;
+    }
+    response.json(page);
+  } catch (error) {
+    console.error('Could not load admin community content.', error);
+    response.status(503).json({ error: 'Current community content is temporarily unavailable. Please try again.' });
+  }
+});
+
+app.delete('/api/admin/forum/posts/:postId', requireFirebaseUser, requireAdmin, async (request, response) => {
+  const { postId } = request.params;
+  if (!postId || postId.length > 150) {
+    response.status(400).json({ error: 'The post ID is invalid.' });
+    return;
+  }
+  try {
+    const { db } = await getFirebaseAdmin();
+    if (!await permanentlyDeleteAdminPost(db, postId)) {
+      response.status(404).json({ error: 'This post no longer exists.' });
+      return;
+    }
+    response.status(204).end();
+  } catch (error) {
+    console.error('Could not permanently delete community post.', error);
+    response.status(500).json({ error: 'The post and its community history could not be permanently deleted.' });
+  }
+});
+
+app.post('/api/admin/forum/permanent-delete', requireFirebaseUser, requireAdmin, async (request, response) => {
+  const { kind, postId, commentId } = request.body || {};
+  if (!['post', 'comment'].includes(kind)
+    || typeof postId !== 'string'
+    || !postId
+    || postId.length > 150
+    || (kind === 'comment' && (typeof commentId !== 'string' || !commentId || commentId.length > 150))) {
+    response.status(400).json({ error: 'The post or comment identifiers are invalid.' });
+    return;
+  }
+  try {
+    const { db } = await getFirebaseAdmin();
+    const deleted = kind === 'post'
+      ? await permanentlyDeleteAdminPost(db, postId)
+      : await permanentlyDeleteAdminComment(db, postId, commentId);
+    if (!deleted) {
+      response.status(404).json({ error: `This ${kind} no longer exists.` });
+      return;
+    }
+    response.json({ deleted: true });
+  } catch (error) {
+    console.error(`Could not permanently delete community ${kind}.`, error);
+    response.status(500).json({
+      error: kind === 'post'
+        ? 'The post and its community history could not be permanently deleted.'
+        : 'The comment and its community history could not be permanently deleted.'
+    });
+  }
+});
+
+app.delete('/api/admin/forum/posts/:postId/comments/:commentId', requireFirebaseUser, requireAdmin, async (request, response) => {
+  const { postId, commentId } = request.params;
+  if (!postId || postId.length > 150 || !commentId || commentId.length > 150) {
+    response.status(400).json({ error: 'The post or comment ID is invalid.' });
+    return;
+  }
+  try {
+    const { db } = await getFirebaseAdmin();
+    if (!await permanentlyDeleteAdminComment(db, postId, commentId)) {
+      response.status(404).json({ error: 'This comment no longer exists.' });
+      return;
+    }
+    response.status(204).end();
+  } catch (error) {
+    console.error('Could not permanently delete community comment.', error);
+    response.status(500).json({ error: 'The comment and its community history could not be permanently deleted.' });
+  }
+});
+
 app.get('/api/forum/posts', optionalFirebaseUser, async (request, response) => {
   const cursor = request.query.cursor;
   if (cursor !== undefined && (typeof cursor !== 'string' || !validForumText(cursor, 1, 150))) {
@@ -507,17 +935,59 @@ app.get('/api/forum/posts', optionalFirebaseUser, async (request, response) => {
       }
       query = query.startAfter(cursorSnapshot);
     }
-    const snapshot = await query.limit(50).get();
-    const posts = snapshot.docs.map(document => publicForumPost(document, request.user?.uid)).filter(Boolean);
-    const ratings = posts.filter(post => post.type === 'review' && Number.isInteger(post.rating));
+    const posts = [];
+    while (posts.length < 51) {
+      const snapshot = await query.limit(50).get();
+      for (const document of snapshot.docs) {
+        const post = publicForumPost(document, request.user?.uid);
+        if (post) posts.push({ post, document });
+        if (posts.length === 51) break;
+      }
+      if (posts.length === 51 || snapshot.docs.length < 50) break;
+      query = collection.orderBy('createdAt', 'desc').startAfter(snapshot.docs.at(-1));
+    }
+    const hasMore = posts.length > 50;
+    const visiblePosts = posts.slice(0, 50);
+    const feedPosts = visiblePosts.map(item => item.post);
+    const ratings = feedPosts.filter(post => post.type === 'review' && Number.isInteger(post.rating));
     response.json({
-      posts,
-      nextCursor: snapshot.docs.length === 50 ? snapshot.docs.at(-1).id : null,
+      posts: feedPosts,
+      nextCursor: hasMore ? visiblePosts.at(-1).document.id : null,
       ratingSummary: {
         count: ratings.length,
         average: ratings.length
           ? Math.round(ratings.reduce((total, post) => total + post.rating, 0) / ratings.length * 10) / 10
           : null
+      }
+    });
+
+    app.get('/api/forum/posts/:postId', optionalFirebaseUser, async (request, response) => {
+      const postId = request.params.postId;
+      if (!postId || postId.length > 150) {
+        response.status(400).json({ error: 'The post ID is invalid.' });
+        return;
+      }
+      try {
+        const { db } = await getFirebaseAdmin();
+        const snapshot = await db.collection('forumPosts').doc(postId).get();
+        if (!forumSnapshotExists(snapshot)) {
+          response.status(404).json({ error: 'This post no longer exists.' });
+          return;
+        }
+        const isDeleted = Boolean(snapshot.data().isDeleted);
+        if (isDeleted && !isAdminUser(request.user)) {
+          response.status(404).json({ error: 'This post is no longer available.' });
+          return;
+        }
+        const post = publicForumPost(snapshot, request.user?.uid, true);
+        if (!post) {
+          response.status(404).json({ error: 'This post no longer exists.' });
+          return;
+        }
+        response.json({ post });
+      } catch (error) {
+        console.error('Could not load community post.', error);
+        response.status(503).json({ error: 'This community post is temporarily unavailable. Please try again.' });
       }
     });
   } catch (error) {
@@ -542,7 +1012,23 @@ app.post('/api/forum/posts', requireFirebaseUser, async (request, response) => {
       createdAt: Date.now(),
       updatedAt: Date.now()
     };
-    await reference.set(record);
+    const batch = db.batch();
+    batch.set(reference, record);
+    appendForumActivityWrites(batch, db, {
+      eventType: 'post_created',
+      userUid: request.user.uid,
+      userName: forumAuthorName(request.user),
+      actorUid: request.user.uid,
+      actorName: forumAuthorName(request.user),
+      postId: reference.id,
+      postTitle: post.title,
+      commentId: null,
+      reason: null,
+      before: null,
+      after: forumPostSnapshot(post),
+      occurredAt: record.createdAt
+    });
+    await batch.commit();
     response.status(201).json({
       post: {
         id: reference.id,
@@ -574,6 +1060,10 @@ app.patch('/api/forum/posts/:postId', requireFirebaseUser, async (request, respo
       return;
     }
     const current = snapshot.data();
+    if (current.isDeleted) {
+      response.status(404).json({ error: 'This post is no longer available.' });
+      return;
+    }
     if (current.authorUid !== request.user.uid) {
       response.status(403).json({ error: 'You can only edit your own posts.' });
       return;
@@ -588,7 +1078,23 @@ app.patch('/api/forum/posts/:postId', requireFirebaseUser, async (request, respo
       return;
     }
     const updated = { ...post, updatedAt: Date.now() };
-    await reference.set(updated, { merge: true });
+    const batch = db.batch();
+    batch.set(reference, updated, { merge: true });
+    appendForumActivityWrites(batch, db, {
+      eventType: 'post_edited',
+      userUid: request.user.uid,
+      userName: forumAuthorName(request.user),
+      actorUid: request.user.uid,
+      actorName: forumAuthorName(request.user),
+      postId,
+      postTitle: post.title,
+      commentId: null,
+      reason: null,
+      before: forumPostSnapshot(current),
+      after: forumPostSnapshot(post),
+      occurredAt: updated.updatedAt
+    });
+    await batch.commit();
     response.json({
       post: {
         id: postId,
@@ -619,12 +1125,39 @@ app.delete('/api/forum/posts/:postId', requireFirebaseUser, async (request, resp
       response.status(404).json({ error: 'This post no longer exists.' });
       return;
     }
-    if (snapshot.data().authorUid !== request.user.uid) {
+    const current = snapshot.data();
+    if (current.isDeleted) {
+      response.status(404).json({ error: 'This post is no longer available.' });
+      return;
+    }
+    if (current.authorUid !== request.user.uid) {
       response.status(403).json({ error: 'You can only delete your own posts.' });
       return;
     }
-    await deleteForumComments(reference);
-    await reference.delete();
+    await deleteForumComments(reference, current, request.user);
+    const deletedAt = Date.now();
+    const batch = db.batch();
+    appendForumActivityWrites(batch, db, {
+      eventType: 'post_deleted',
+      userUid: request.user.uid,
+      userName: forumAuthorName(request.user),
+      actorUid: request.user.uid,
+      actorName: forumAuthorName(request.user),
+      postId,
+      postTitle: current.title,
+      commentId: null,
+      reason: null,
+      before: forumPostSnapshot(current),
+      after: null,
+      occurredAt: deletedAt
+    });
+    batch.set(reference, {
+      isDeleted: true,
+      deletedAt,
+      deletedBy: request.user.uid,
+      updatedAt: deletedAt
+    }, { merge: true });
+    await batch.commit();
     response.status(204).end();
   } catch (error) {
     console.error('Could not delete community post.', error);
@@ -646,7 +1179,8 @@ app.get('/api/forum/posts/:postId/comments', optionalFirebaseUser, async (reques
   try {
     const { db } = await getFirebaseAdmin();
     const postReference = db.collection('forumPosts').doc(postId);
-    if (!forumSnapshotExists(await postReference.get())) {
+    const postSnapshot = await postReference.get();
+    if (!forumSnapshotExists(postSnapshot) || postSnapshot.data().isDeleted) {
       response.status(404).json({ error: 'This post no longer exists.' });
       return;
     }
@@ -681,7 +1215,8 @@ app.post('/api/forum/posts/:postId/comments', requireFirebaseUser, async (reques
   try {
     const { db } = await getFirebaseAdmin();
     const postReference = db.collection('forumPosts').doc(postId);
-    if (!forumSnapshotExists(await postReference.get())) {
+    const postSnapshot = await postReference.get();
+    if (!forumSnapshotExists(postSnapshot) || postSnapshot.data().isDeleted) {
       response.status(404).json({ error: 'This post no longer exists.' });
       return;
     }
@@ -692,7 +1227,23 @@ app.post('/api/forum/posts/:postId/comments', requireFirebaseUser, async (reques
       authorName: forumAuthorName(request.user),
       createdAt: Date.now()
     };
-    await reference.set(comment);
+    const batch = db.batch();
+    batch.set(reference, comment);
+    appendForumActivityWrites(batch, db, {
+      eventType: 'comment_created',
+      userUid: request.user.uid,
+      userName: forumAuthorName(request.user),
+      actorUid: request.user.uid,
+      actorName: forumAuthorName(request.user),
+      postId,
+      postTitle: postSnapshot.data().title,
+      commentId: reference.id,
+      reason: null,
+      before: null,
+      after: { content },
+      occurredAt: comment.createdAt
+    });
+    await batch.commit();
     response.status(201).json({
       comment: {
         id: reference.id,
@@ -717,7 +1268,8 @@ app.delete('/api/forum/posts/:postId/comments/:commentId', requireFirebaseUser, 
   try {
     const { db } = await getFirebaseAdmin();
     const postReference = db.collection('forumPosts').doc(postId);
-    if (!forumSnapshotExists(await postReference.get())) {
+    const postSnapshot = await postReference.get();
+    if (!forumSnapshotExists(postSnapshot) || postSnapshot.data().isDeleted) {
       response.status(404).json({ error: 'This post no longer exists.' });
       return;
     }
@@ -731,7 +1283,24 @@ app.delete('/api/forum/posts/:postId/comments/:commentId', requireFirebaseUser, 
       response.status(403).json({ error: 'You can only delete your own comments.' });
       return;
     }
-    await reference.delete();
+    const comment = snapshot.data();
+    const batch = db.batch();
+    appendForumActivityWrites(batch, db, {
+      eventType: 'comment_deleted',
+      userUid: request.user.uid,
+      userName: forumAuthorName(request.user),
+      actorUid: request.user.uid,
+      actorName: forumAuthorName(request.user),
+      postId,
+      postTitle: postSnapshot.data().title,
+      commentId,
+      reason: null,
+      before: { content: forumCommentInput(comment) },
+      after: null,
+      occurredAt: Date.now()
+    });
+    batch.delete(reference);
+    await batch.commit();
     response.status(204).end();
   } catch (error) {
     console.error('Could not delete community comment.', error);

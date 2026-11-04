@@ -61,12 +61,15 @@ function createAccountMenu() {
   profile.append(largeAvatar, identity);
   panel.append(profile);
 
+  const cloudLink = addMenuItem(panel, 'a', 'account-menu-item', 'My cloud resumes', '/editor.html?open=cloud');
+  cloudLink.hidden = true;
+  const myPostsLink = addMenuItem(panel, 'a', 'account-menu-item', 'My posts', '/my-posts.html');
+  myPostsLink.hidden = true;
+  if (location.pathname === '/my-posts.html') myPostsLink.setAttribute('aria-current', 'page');
   const billingLink = addMenuItem(panel, 'a', 'account-menu-item', 'Billing', '/billing.html');
   if (location.pathname === '/billing.html') billingLink.setAttribute('aria-current', 'page');
   const communityLink = addMenuItem(panel, 'a', 'account-menu-item', 'Community', '/community.html');
   if (location.pathname === '/community.html') communityLink.setAttribute('aria-current', 'page');
-  const cloudLink = addMenuItem(panel, 'a', 'account-menu-item', 'My cloud resumes', '/editor.html?open=cloud');
-  cloudLink.hidden = true;
   const about = addMenuItem(panel, 'a', 'account-menu-item', 'About', '/about.html');
 
   const appearance = document.createElement('div');
@@ -124,7 +127,7 @@ function createAccountMenu() {
     }
   });
 
-  return { menu, summary, avatar, largeAvatar, name, email, about, billingLink, cloudLink };
+  return { menu, summary, avatar, largeAvatar, name, email, about, billingLink, cloudLink, myPostsLink };
 }
 
 const accountMenu = createAccountMenu();
@@ -175,6 +178,7 @@ function updateAuthControls(user, error) {
       accountMenu.avatar.textContent = 'G';
       accountMenu.largeAvatar.textContent = 'G';
       accountMenu.summary.setAttribute('aria-label', 'Account menu');
+      accountMenu.myPostsLink.hidden = true;
       accountMenu.cloudLink.hidden = true;
     }
     if (signOutButton) signOutButton.hidden = true;
@@ -199,6 +203,7 @@ function updateAuthControls(user, error) {
   if (accountMenu) {
     accountMenu.menu.hidden = false;
     accountMenu.cloudLink.hidden = !user;
+    accountMenu.myPostsLink.hidden = !user;
     if (user) {
       const accountName = user.displayName?.trim() || user.email?.split('@')[0] || 'Google user';
       const initial = Array.from(accountName)[0]?.toLocaleUpperCase() || 'U';
@@ -211,12 +216,15 @@ function updateAuthControls(user, error) {
       else accountMenu.about.removeAttribute('aria-current');
       if (location.pathname === '/billing.html') accountMenu.billingLink.setAttribute('aria-current', 'page');
       else accountMenu.billingLink.removeAttribute('aria-current');
+      if (location.pathname === '/my-posts.html') accountMenu.myPostsLink.setAttribute('aria-current', 'page');
+      else accountMenu.myPostsLink.removeAttribute('aria-current');
     } else {
       accountMenu.name.textContent = 'Guest';
       accountMenu.email.textContent = '';
       accountMenu.avatar.textContent = 'G';
       accountMenu.largeAvatar.textContent = 'G';
       accountMenu.summary.setAttribute('aria-label', 'Account menu');
+      accountMenu.myPostsLink.hidden = true;
     }
   }
 }
