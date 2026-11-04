@@ -8,5 +8,17 @@
       "destination": "/admin.html",
       "permanent": false
     }
+  ],
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "missing": [
+        {
+          "type": "query",
+          "key": "__api_path"
+        }
+      ],
+      "destination": "/api/handler?__api_path=:path*"
+    }
   ]
 }
