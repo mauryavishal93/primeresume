@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { parseResumeText } from '../frontend/src/resume-import-structure.js';
 import { readEmbeddedResumeProject, RESUME_PDF_METADATA_NAMESPACE } from '../frontend/src/resume-import-metadata.js';
-import { splitContentIntoBullets, splitSummaryIntoBullets } from '../frontend/src/resume-summary.js';
+import { joinContentAsParagraph, normalizePastedText, splitContentIntoBullets, splitSummaryIntoBullets } from '../frontend/src/resume-summary.js';
 import { parseResumeProjectJson } from '../frontend/src/resume-import-json.js';
 
 test('resume import maps common contact details and section headings', () => {
@@ -247,6 +247,15 @@ test('switching a summary to bullets splits it into editable sentences', () => {
     'Product engineer.\nBuilds accessible apps.\nLeads teams.'
   );
   assert.equal(splitSummaryIntoBullets('Product engineer'), 'Product engineer');
+});
+
+test('switching a section to no pointer joins its lines into one paragraph', () => {
+  assert.equal(joinContentAsParagraph('First detail.\n\nSecond detail.\tThird detail.'), 'First detail. Second detail. Third detail.');
+  assert.equal(joinContentAsParagraph('  Single detail.  '), 'Single detail.');
+});
+
+test('pasted multiline text normalizes line endings and repeated blank lines', () => {
+  assert.equal(normalizePastedText('First\r\n\r\n\r\nSecond\r\n'), 'First\n\nSecond');
 });
 
 test('imported experience and project details stay in paragraphs until bullets are selected', () => {

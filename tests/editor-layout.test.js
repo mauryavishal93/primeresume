@@ -158,8 +158,9 @@ test('free-position sections have drag and resize controls with keyboard support
 
 test('structured pages scroll smoothly and continue long text without losing editable source ranges', () => {
   const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
-  assert.match(source, /const chunks=splitLongParagraphs\?splitParagraph\(par,220\):\[par\]/);
-  assert.match(source, /textStart,textLength:chunk\.length/);
+  assert.match(source, /a\.push\(\{k:'p',t:par,cont:false,lineIndex,textStart:0,textLength:par\.length,blank:!par\.trim\(\)\}\)/);
+  assert.match(source, /textStart:0,textLength:text\.length/);
+  assert.doesNotMatch(source, /splitParagraph|splitLongParagraphs/);
   assert.match(source, /el\.dataset\.textStart=String\(a\.textStart\);el\.dataset\.textLength=String\(a\.textLength\)/);
   assert.match(source, /el\.dataset\.detailStart=String\(a\.textStart\);el\.dataset\.detailLength=String\(a\.textLength\)/);
   assert.match(source, /function focusTextLine\(sectionId,lineIndex,caretOffset=0,smooth=false\)/);
@@ -171,8 +172,15 @@ test('structured pages scroll smoothly and continue long text without losing edi
   assert.match(source, /function renderSheets\(\)/);
   assert.match(source, /function reflowOverflowingDetail\(el,force=false,immediate=false\)/);
   assert.match(source, /if\(immediate\)reflow\(\);else requestAnimationFrame\(reflow\)/);
-  assert.match(source, /next\.focus\(\{preventScroll:true\}\)[\s\S]*?reflowOverflowingDetail\(next,false,true\)/);
-  assert.match(source, /moved\.focus\(\{preventScroll:true\}\)[\s\S]*?moved\.scrollIntoView\(\{behavior:window\.matchMedia/);
+  assert.match(source, /focusDetailEditor\(next,\{preventScroll:true\}\)[\s\S]*?reflowOverflowingDetail\(next,false,true\)/);
+  assert.match(source, /focusDetailEditor\(moved,\{preventScroll:true\}\)[\s\S]*?moved\.scrollIntoView\(\{behavior:window\.matchMedia/);
+  assert.match(source, /st\.ul\.contentEditable='true'/);
+  assert.match(source, /function resumeEditableField\(target\)/);
+  assert.match(source, /function detailSourceOffset\(section,entryIndex,node,offset\)/);
+  assert.match(source, /function replaceEntryDetailSelection\(section,entryIndex,start,end,text,el\)/);
+  assert.match(source, /const ls=detailLines\(e\.details\);a\.push\(\{k:'entry',e\}\);ls\.forEach/);
+  assert.doesNotMatch(source, /if\(!hasDetail&&i===0\)return/);
+  assert.match(source, /if\(a\.blank\)el\.classList\.add\('blank-line'\)/);
   assert.match(source, /focusTextLine\(section\.id,lineIndex\+1,0,true\)/);
   assert.match(source, /original\.slice\(0,start\)\+value\+original\.slice\(start\+length\)/);
   assert.match(source, /lines\[lineIndex\]\.slice\(start\+\(Number\.isFinite\(length\)\?length:editValue\.length\)\)/);
@@ -181,4 +189,24 @@ test('structured pages scroll smoothly and continue long text without losing edi
   assert.match(styles, /@keyframes structured-page-appear\{from\{opacity:\.55\}to\{opacity:1\}\}/);
   assert.match(styles, /@media screen and \(max-width:960px\)[\s\S]*?\.center\{grid-area:center;width:100%;height:auto/);
   assert.match(styles, /@media\(prefers-reduced-motion:reduce\)\{\.center\{scroll-behavior:auto\}\.structured-line-enter\{animation:none\}\}/);
+});
+
+test('all content sections share cross-line selection and preserve an editable blank line', () => {
+  const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
+  assert.match(source, /if\(section\?\.content!==undefined&&section\.type!=='skills'&&el\?\.dataset\.textIndex!==undefined\)return \{kind:'content',section\}/);
+  assert.match(source, /scope\?\.kind==='content'\?contentTextBoundaries\(section\.id\):null/);
+  assert.match(source, /scope\?\.kind==='content'&&e\.shiftKey/);
+  assert.match(source, /if\(scope\.kind==='content'\)replaceContentSelection\(scope\.section,selected\.start,selected\.end/);
+  assert.match(source, /section\.content=content\.slice\(0,start\)\+text\+content\.slice\(end\)/);
+  assert.match(source, /else String\(s\.content\|\|''\)\.replace/);
+  assert.match(source, /if\(a\.blank\)\{el\.classList\.add\('blank-line'\)/);
+});
+
+test('cut writes selected resume text to the clipboard before removing it', () => {
+  const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
+  assert.match(source, /addEventListener\('cut',e=>\{[\s\S]*?if\(selected&&e\.clipboardData\)\{[\s\S]*?e\.clipboardData\.setData\('text\/plain',source\.slice\(selected\.start,selected\.end\)\);[\s\S]*?e\.preventDefault\(\);[\s\S]*?replaceContentSelection\(scope\.section,selected\.start,selected\.end,''/);
+  assert.match(source, /else replaceEntryDetailSelection\(scope\.section,scope\.entryIndex,selected\.start,selected\.end,''/);
+  assert.match(source, /if\(shortcut&&\(key==='c'\|\|key==='x'\)\)\{[\s\S]*?writeResumeClipboardText\(copiedText\)\.then\(\(\)=>\{[\s\S]*?if\(key!=='x'\)return;[\s\S]*?replaceContentSelection\(scope\.section,selected\.start,selected\.end,''/);
+  assert.match(source, /function resumeSelectionText\(scope,selected\)/);
+  assert.match(source, /function writeResumeClipboardText\(text\)/);
 });
