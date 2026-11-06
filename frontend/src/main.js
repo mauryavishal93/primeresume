@@ -1694,6 +1694,8 @@ async function exportPDF(templateId=null){
  $('pdfPreviewTitle').textContent='Preview your resume PDF';
  status.textContent='Preparing your PDF preview…';
  frame.hidden=true;
+ $('pdfPreviewPages').replaceChildren();
+ $('pdfPreviewPages').hidden=true;
  downloadBtn.disabled=true;
  btn.disabled=true;btn.textContent='Creating preview…';
  const renderedPages=[];
@@ -1721,7 +1723,7 @@ async function exportPDF(templateId=null){
    resumeState:state,
   });
   if(generation!==pdfPreviewGeneration)return;
-  showPdfPreview(blob,`${(state.docName||'resume').replace(/[^a-z0-9-_]+/gi,'-')}.pdf`,sheets.length,'Preview your resume PDF');
+  showPdfPreview(blob,`${(state.docName||'resume').replace(/[^a-z0-9-_]+/gi,'-')}.pdf`,sheets.length,'Preview your resume PDF',renderedPages.map(page=>page.image));
  }catch(e){
   console.error(e);
   status.textContent=e.message||'PDF preview could not be created. Close this window and try again.';
@@ -1738,13 +1740,22 @@ function openPdfPreview(){
  $('pdfPreviewModalBg').setAttribute('aria-hidden','false');
  $('closePdfPreview').focus();
 }
-function showPdfPreview(blob,filename,pageCount,title){
+function showPdfPreview(blob,filename,pageCount,title,previewPages=[]){
  if(pdfPreviewUrl)URL.revokeObjectURL(pdfPreviewUrl);
  pdfPreviewBlob=blob;
  pdfPreviewFilename=filename;
  pdfPreviewUrl=URL.createObjectURL(blob);
  $('pdfPreviewTitle').textContent=title;
  $('openPdfPreview').href=pdfPreviewUrl;
+ const pages=$('pdfPreviewPages');
+ pages.replaceChildren(...previewPages.map((src,index)=>{
+  const image=document.createElement('img');
+  image.src=src;
+  image.alt=`Resume PDF page ${index+1}`;
+  image.decoding='async';
+  return image;
+ }));
+ pages.hidden=previewPages.length===0;
  $('pdfPreviewFrame').src=pdfPreviewUrl;
  $('pdfPreviewFrame').hidden=false;
  const trialText=pdfPreviewUsesProTemplate&&!canUseFeature(FEATURE_IDS.ALL_TEMPLATES,verifiedEntitlement)
@@ -1764,6 +1775,8 @@ function closePdfPreview(){
  $('pdfPreviewModalBg').setAttribute('aria-hidden','true');
  $('pdfPreviewFrame').removeAttribute('src');
  $('pdfPreviewFrame').hidden=true;
+ $('pdfPreviewPages').replaceChildren();
+ $('pdfPreviewPages').hidden=true;
  $('openPdfPreview').removeAttribute('href');
  $('downloadPdfPreview').disabled=true;
  pdfPreviewBlob=null;
@@ -2141,6 +2154,8 @@ async function previewCoverLetterPdf(){
  $('pdfPreviewTitle').textContent='Preview your cover letter PDF';
  $('pdfPreviewStatus').textContent='Preparing your PDF preview…';
  $('pdfPreviewFrame').hidden=true;
+ $('pdfPreviewPages').replaceChildren();
+ $('pdfPreviewPages').hidden=true;
  $('downloadPdfPreview').disabled=true;
  try{
   button.disabled=true;
