@@ -31,6 +31,8 @@ const baseDocumentTitle=document.title;
 const clamp=(v,min,max,def)=>{v=Number(v);return Number.isFinite(v)?Math.max(min,Math.min(max,v)):def};
 const PAGE_W=794,PAGE_H=1122,DEFAULT_MARGIN=32,FONTS=['Arial','Georgia','Verdana','Trebuchet MS','Times New Roman','Courier New'];
 const KNOWN_TYPES=['summary','experience','education','skills','projects','certifications','custom'];
+const SKILL_STYLES=[['tags','Tags'],['pills','Pills'],['outlined','Outlined'],['list','Simple list'],['inline','Inline'],['grid','Grid'],['soft','Soft color'],['gradient','Gradient'],['underline','Underline'],['numbered','Numbered'],['compact','Compact'],['dense','Dense (space-saving)']];
+function normalizeSkillStyle(style){return style==='cards'?'dense':SKILL_STYLES.some(([value])=>value===style)?style:'tags'}
 const templateDefs=resumeTemplateDefs;
 const requestedHomepageTemplateId=new URLSearchParams(location.search).get('template');
 const requestedWizardResume=new URLSearchParams(location.search).get('newResume')==='1';
@@ -38,7 +40,7 @@ const makeSections=()=>{
   return [
     {id:uid(),type:'summary',title:'Professional Summary',visible:true,listStyle:'none',content:'Quality Engineering professional with experience in test automation, scalable test frameworks, and delivering reliable software. Skilled at collaborating across teams to improve product quality and release confidence.'},
     {id:uid(),type:'experience',title:'Work Experience',visible:true,entries:[{role:'Senior QA Automation Engineer',company:'Example Technology Company',date:'2022 — Present',details:'Designed and maintained scalable UI and API automation suites.\nImproved regression reliability and reduced repetitive manual effort.\nCollaborated with developers and product teams to resolve release risks.'},{role:'QA Engineer',company:'Previous Company',date:'2019 — 2022',details:'Built automated tests and reusable test utilities.\nReported defects with clear reproduction steps and impact analysis.'}]},
-    {id:uid(),type:'skills',title:'Technical Skills',visible:true,content:'Playwright, Selenium, JavaScript, TypeScript, API Testing, CI/CD, SQL, Git, Test Strategy'},
+    {id:uid(),type:'skills',title:'Technical Skills',visible:true,skillStyle:'tags',content:'Playwright, Selenium, JavaScript, TypeScript, API Testing, CI/CD, SQL, Git, Test Strategy'},
     {id:uid(),type:'education',title:'Education',visible:true,entries:[{role:'Bachelor of Engineering',company:'University Name',date:'2015 — 2019',details:'Relevant coursework, projects or academic achievements.'}]},
     {id:uid(),type:'projects',title:'Selected Projects',visible:true,entries:[{role:'Automation Framework Modernization',company:'Personal / Professional Project',date:'2024',details:'Created reusable automation components and reporting workflows.\nIntegrated test execution into a repeatable CI process.'}]},
     {id:uid(),type:'certifications',title:'Certifications',visible:true,content:'Add relevant certifications, courses, or professional training.'}
@@ -65,6 +67,7 @@ function normalizeState(d){
   const type=KNOWN_TYPES.includes(s.type)?s.type:'custom';let id=str(s.id)||uid();while(seen.has(id))id=uid();seen.add(id);
   const normalizedListStyle=['none','bullet','number','arrow','check','dash','diamond'].includes(s.listStyle)?s.listStyle:(type==='summary'?'none':'bullet');
   const n={id,type,title:str(s.title).trim()?str(s.title):'Untitled section',visible:s.visible!==false,listStyle:(type==='summary'&&ver<4&&normalizedListStyle==='bullet')?'none':normalizedListStyle,...normalizeSectionTypography(s,out.design)};
+  if(type==='skills')n.skillStyle=normalizeSkillStyle(s.skillStyle);
   if(['experience','education','projects'].includes(type)||Array.isArray(s.entries))n.entries=(Array.isArray(s.entries)?s.entries:[]).filter(e=>e&&typeof e==='object').map(e=>({role:str(e.role),company:str(e.company),date:str(e.date),details:str(e.details)}));
   else n.content=str(s.content);
   return n});
@@ -93,7 +96,7 @@ function normalizeState(d){
  }
  return out;
 }
-let state=fresh(),selectedId=null,selectedSectionAnchor=null,zoom=1,mobileAutoFitZoom=true,history=[],redoHistory=[],draggingId=null,saveTimer=null,panelWidth=260,collapsed=false,leftWidth=260,leftCollapsed=false,leftTab='templates',rightTab='design',touchPoints=new Map(),pinchStart=null,pinchUsed=false,onboardingDismissed=false,customSectionTrigger=null,inspectorEntriesExpanded=false;
+let state=fresh(),selectedId=null,selectedSectionAnchor=null,zoom=1,mobileAutoFitZoom=true,history=[],redoHistory=[],draggingId=null,saveTimer=null,panelWidth=260,collapsed=false,leftWidth=260,leftCollapsed=false,leftTab='templates',rightTab='design',touchPoints=new Map(),pinchStart=null,pinchUsed=false,onboardingDismissed=false,sectionTypographyCalloutEnabled=false,customSectionTrigger=null,inspectorEntriesExpanded=false;
 let resumeMouseSelection=null;
 let pendingResumeImport=null,resumeImportBusy=false;
 let localPersistenceBlocked=false,recoverySnapshot=null;
@@ -756,16 +759,17 @@ function createSheet(index,tmpl,cols){
 function sectionAtoms(s){
  const a=[];
  if(s.entries){for(const e of s.entries){const ls=detailLines(e.details);a.push({k:'entry',e});ls.forEach((t,i)=>{const text=t.trim();a.push({k:s.listStyle==='none'?'detail-paragraph':'li',e,t:text,detailIndex:i,textStart:0,textLength:text.length,blank:!text.trim()})})}}
- else if(s.type==='skills')String(s.content||'').split(/[,\n]/).map(x=>x.trim()).filter(Boolean).forEach(t=>a.push({k:'chip',t}));
+ else if(s.type==='skills')String(s.content||'').split(/[,\n]/).map(x=>x.trim()).filter(Boolean).forEach((t,index)=>a.push({k:'chip',t,index}));
  else String(s.content||'').replace(/\r\n?/g,'\n').split('\n').forEach((par,lineIndex)=>{
   a.push({k:'p',t:par,cont:false,lineIndex,textStart:0,textLength:par.length,blank:!par.trim()});
  });
- if(!a.length)a.push({k:'p',t:'',cont:false});
+ if(!a.length)a.push(s.type==='skills'?{k:'chip',t:'',index:0}:{k:'p',t:'',cont:false});
  return a;
 }
 function makeShell(s,cont){
  const sec=document.createElement('section');sec.className='resume-section pointer-'+(s.listStyle||'bullet')+(selectedId===s.id?' selected':'');sec.dataset.resumeSection=s.id;
  sec.dataset.sectionType=s.type;
+ if(s.type==='skills')sec.dataset.skillStyle=normalizeSkillStyle(s.skillStyle);
  applySectionTypography(sec,s);
  sec.innerHTML=`${cont?'':`<h2 class="section-heading" contenteditable="true" spellcheck="true" data-section-title="${$esc(s.id)}" title="Click to edit this section title">${$esc(s.title)}</h2>`}<div class="section-body"></div>`;return sec;
 }
@@ -788,7 +792,7 @@ function appendAtom(shell,a,st,s){
   el=document.createElement('li');el.spellcheck=true;el.title='Click to edit bullet';el.classList.toggle('blank-bullet',!!a.blank);el.dataset.sectionId=s.id;el.dataset.entry=entryIndex;el.dataset.entryField='detail';el.dataset.detailSource=a.t;el.dataset.detailIndex=String(a.detailIndex);if(a.textStart!==undefined){el.dataset.detailStart=String(a.textStart);el.dataset.detailLength=String(a.textLength)}el.textContent=a.t;st.ul.appendChild(el);
  }else if(a.k==='chip'){
   let l=body.querySelector('.skill-list');if(!l){l=document.createElement('div');l.className='skill-list';body.appendChild(l)}
-  const skills=String(s.content||'').split(/[,\n]/).map(x=>x.trim()).filter(Boolean),skillIndex=skills.indexOf(a.t);
+  const skills=String(s.content||'').split(/[,\n]/).map(x=>x.trim()).filter(Boolean),skillIndex=a.index;
   el=document.createElement('span');el.className='skill';el.contentEditable='true';el.spellcheck=true;el.title='Click to edit skill';el.dataset.sectionId=s.id;el.dataset.skillIndex=String(skillIndex);el.textContent=a.t;l.appendChild(el);
  }else{el=document.createElement('p');if(a.cont)el.className='cont';if(a.blank){el.classList.add('blank-line');el.setAttribute('aria-placeholder',' ') }
    el.textContent=a.t;
@@ -1017,6 +1021,7 @@ function fitMobileZoom(){
 }
 function updateSectionTypographyCallout(){
  let callout=$('sectionTypographyCallout');
+ if(!sectionTypographyCalloutEnabled){if(callout)callout.hidden=true;return}
  if(!callout){
   callout=document.createElement('aside');
   callout.id='sectionTypographyCallout';
@@ -1212,7 +1217,7 @@ function renderInspector(){
  <div class="field"><label><input type="checkbox" data-design="pageNumbers" ${d.pageNumbers?'checked':''}>Show page numbers (reserves a small footer)</label></div>
  <div class="small-note">Page size is A4 (210 × 297 mm). The same margins drive the preview, print and PDF. Your draft is saved in this browser. Export JSON for a backup.</div>${state.importedSourceText?`<details class="resume-import-source"><summary>Original imported text (saved with this project)</summary><pre>${$esc(state.importedSourceText)}</pre></details>`:''}`:''}`;
  if(rightTab==='section'&&s){
-   h+=`<div class="eyebrow">Selected section</div><div class="field"><label>Section title</label><input id="sectionTitle" value="${$esc(s.title)}"></div><div class="field-row"><div class="field"><label for="sectionHeadingSize">Heading size (px)</label><input id="sectionHeadingSize" type="number" min="10" max="36" step="1" value="${s.headingSize}"></div><div class="field"><label for="sectionBodySize">Body size (px)</label><input id="sectionBodySize" type="number" min="8" max="24" step="1" value="${s.bodySize}"></div></div><div class="field"><label>Line pointers</label><select id="sectionPointer">${[['bullet','• Bullet'],['number','1. Numbered'],['arrow','→ Arrow'],['check','✓ Check mark'],['dash','– Dash'],['diamond','◆ Diamond'],['none','No pointer']].map(([value,label])=>`<option value="${value}" ${(s.listStyle||'bullet')===value?'selected':''}>${label}</option>`).join('')}</select></div>`;
+   h+=`<div class="eyebrow">Selected section</div><div class="field"><label>Section title</label><input id="sectionTitle" value="${$esc(s.title)}"></div><div class="field-row"><div class="field"><label for="sectionHeadingSize">Heading size (px)</label><input id="sectionHeadingSize" type="number" min="10" max="36" step="1" value="${s.headingSize}"></div><div class="field"><label for="sectionBodySize">Body size (px)</label><input id="sectionBodySize" type="number" min="8" max="24" step="1" value="${s.bodySize}"></div></div>${s.type==='skills'?`<div class="field"><label for="skillStyle">Core skills display style</label><select id="skillStyle">${SKILL_STYLES.map(([value,label])=>`<option value="${value}" ${(s.skillStyle||'tags')===value?'selected':''}>${label}</option>`).join('')}</select></div>`:`<div class="field"><label>Line pointers</label><select id="sectionPointer">${[['bullet','• Bullet'],['number','1. Numbered'],['arrow','→ Arrow'],['check','✓ Check mark'],['dash','– Dash'],['diamond','◆ Diamond'],['none','No pointer']].map(([value,label])=>`<option value="${value}" ${(s.listStyle||'bullet')===value?'selected':''}>${label}</option>`).join('')}</select></div>`}`;
    if(s.entries){
     h+=s.entries.map((e,i)=>`<details class="inspector-entry"${i===0?' open':''}><summary><span>Entry ${i+1}</span><span class="inspector-entry-title" data-entry-summary="${i}">${$esc(e.role||e.company||'Add entry details')}</span></summary><div class="inspector-entry-content"><div class="field"><label>Role / qualification</label><input data-entry="role" data-index="${i}" value="${$esc(e.role)}"></div><div class="field"><label>Company / institution</label><input data-entry="company" data-index="${i}" value="${$esc(e.company)}"></div><div class="field"><label>Date</label><input data-entry="date" data-index="${i}" value="${$esc(e.date)}"></div><div class="field"><label>Details</label><div class="detail-bullet-list" data-entry-details="${i}">${renderDetailInputs(e,i)}</div><button class="btn outline small" type="button" data-add-detail-line="${i}">＋ Add bullet</button></div><button class="btn danger small" data-remove-entry="${i}">Remove entry</button></div></details>`).join('');
      h+='<button class="btn outline small" id="addEntry">＋ Add entry</button>';
@@ -1235,6 +1240,7 @@ function renderInspector(){
  $('sectionTitle')?.addEventListener('input',e=>{const x=sectionById(selectedId);if(x)x.title=e.target.value||'Untitled section';saveLocal();syncSheetFields();});
  $('sectionHeadingSize')?.addEventListener('change',e=>{const value=Number(e.target.value);if(e.target.value===''||!Number.isFinite(value)){renderInspector();return}const id=selectedId;transact(()=>{const section=sectionById(id);if(section)section.headingSize=clamp(value,10,36,section.headingSize)})});
  $('sectionBodySize')?.addEventListener('change',e=>{const value=Number(e.target.value);if(e.target.value===''||!Number.isFinite(value)){renderInspector();return}const id=selectedId;transact(()=>{const section=sectionById(id);if(section)section.bodySize=clamp(value,8,24,section.bodySize)})});
+ $('skillStyle')?.addEventListener('change',e=>{const id=selectedId,style=e.target.value;if(!SKILL_STYLES.some(([value])=>value===style))return;transact(()=>{const section=sectionById(id);if(section?.type==='skills')section.skillStyle=style})});
  $('sectionPointer')?.addEventListener('change',e=>{const x=sectionById(selectedId);if(!x)return;const nextStyle=e.target.value;if(nextStyle==='none'){if(x.entries)x.entries.forEach(entry=>{entry.details=joinContentAsParagraph(entry.details)});else if(x.type!=='skills')x.content=joinContentAsParagraph(x.content)}else if(x.listStyle==='none'&&nextStyle!=='none'){if(x.entries)x.entries.forEach(entry=>{entry.details=splitContentIntoBullets(entry.details)});else if(x.type!=='skills')x.content=splitContentIntoBullets(x.content)}x.listStyle=nextStyle;saveLocal();renderSheets();renderInspector();});
  $('sectionContent')?.addEventListener('input',e=>{const x=sectionById(selectedId);if(x)x.content=e.target.value;saveLocal();syncSheetFields();});
  $('inspector').querySelectorAll('[data-entry]').forEach(el=>el.addEventListener('input',()=>{const x=sectionById(selectedId),i=+el.dataset.index;if(!x?.entries?.[i])return;x.entries[i][el.dataset.entry]=el.value;if(el.dataset.entry==='role'||el.dataset.entry==='company')updateInspectorEntryTitle(i,x.entries[i]);saveLocal();syncSheetFields();}));
@@ -1298,13 +1304,15 @@ function setMobilePanel(panel){
  if(next==='templates'||next==='sections')setTab(next);
  else if(next==='design'&&rightTab!=='design')setRightTab('design');
 }
-function savePrefs(){try{localStorage.setItem('resumeStudioUI',JSON.stringify({leftWidth,panelWidth,leftCollapsed,collapsed,leftTab,rightTab,onboardingDismissed}))}catch(e){}}
-function loadPrefs(){try{const u=JSON.parse(localStorage.getItem('resumeStudioUI')||'null');if(u){leftWidth=clamp(u.leftWidth,LW[0],LW[1],260);panelWidth=clamp(u.panelWidth,RW[0],RW[1],300);leftCollapsed=!!u.leftCollapsed;collapsed=!!u.collapsed;leftTab=u.leftTab==='sections'?'sections':'templates';rightTab=u.rightTab==='section'?'section':'design';onboardingDismissed=u.onboardingDismissed===true}}catch(e){}}
+function savePrefs(){try{localStorage.setItem('resumeStudioUI',JSON.stringify({leftWidth,panelWidth,leftCollapsed,collapsed,leftTab,rightTab,onboardingDismissed,sectionTypographyCalloutEnabled}))}catch(error){console.error('Could not save editor preferences.',error)}}
+function loadPrefs(){try{const u=JSON.parse(localStorage.getItem('resumeStudioUI')||'null');if(u){leftWidth=clamp(u.leftWidth,LW[0],LW[1],260);panelWidth=clamp(u.panelWidth,RW[0],RW[1],300);leftCollapsed=!!u.leftCollapsed;collapsed=!!u.collapsed;leftTab=u.leftTab==='sections'?'sections':'templates';rightTab=u.rightTab==='section'?'section':'design';onboardingDismissed=u.onboardingDismissed===true;sectionTypographyCalloutEnabled=u.sectionTypographyCalloutEnabled===true}}catch(error){console.error('Could not load editor preferences.',error)}}
+function updateSectionTypographyToggle(){const toggle=$('sectionTypographyToggle');toggle.setAttribute('aria-checked',String(sectionTypographyCalloutEnabled));toggle.setAttribute('aria-label',`${sectionTypographyCalloutEnabled?'Hide':'Show'} section text sizes`);toggle.querySelector('.section-typography-label').textContent=sectionTypographyCalloutEnabled?'On':'Off'}
 function render(){renderTemplates();renderSectionList();renderSheets();renderInspector();$('docName').value=state.docName;$('pageLayout').value=state.layout;$('editMode').value=state.mode;updateUndoButton()}
 /* Selecting only toggles highlight classes: no re-layout, so the page never jumps while you click around. */
 function selectSection(id,expandEntries=false,anchor=null){selectedId=id;selectedSectionAnchor=anchor;rightTab='section';inspectorEntriesExpanded=expandEntries;renderSectionList();document.querySelectorAll('[data-resume-section]').forEach(el=>el.classList.toggle('selected',el.dataset.resumeSection===id));renderInspector();updateSectionTypographyCallout()}
 function addSection(type,title,content){
  const s={id:uid(),type,title:title||type.charAt(0).toUpperCase()+type.slice(1),visible:true,listStyle:'bullet',headingSize:state.design.headingSize,bodySize:state.design.fontSize};
+ if(type==='skills')s.skillStyle='tags';
  if(['experience','education','projects'].includes(type)){
   const defaultRole = type==='education'?'Degree / qualification':type==='projects'?'Project name':'Role / milestone';
   s.entries=[{role:defaultRole,company:'Organization',date:'Year',details:'Add one detail per line.'}];
@@ -2411,12 +2419,68 @@ function contentSelectionOffsets(section,selection){
  if(start===null||end===null)return null;
  return {start:Math.min(start,end),end:Math.max(start,end)};
 }
+function skillSourceRanges(section){
+ const content=String(section.content||'').replace(/\r\n?/g,'\n'),ranges=[];
+ for(const match of content.matchAll(/[^,\n]+/g)){
+  const value=match[0],trimmed=value.trim();
+  if(!trimmed)continue;
+  const leading=value.indexOf(trimmed);
+  ranges.push({start:match.index+leading,end:match.index+leading+trimmed.length});
+ }
+ return ranges;
+}
+function skillSourceOffset(section,node,offset){
+ const editable=node?.nodeType===Node.ELEMENT_NODE
+  ?(node.matches('.skill')?node:node.closest('.skill'))
+  :node?.parentElement?.closest('.skill');
+ if(!editable||editable.dataset.sectionId!==section.id)return null;
+ const ranges=skillSourceRanges(section),range=ranges[Number(editable.dataset.skillIndex)];
+ if(!range&&String(section.content||'')==='')return 0;
+ if(!range)return null;
+ const prefix=document.createRange();prefix.selectNodeContents(editable);
+ try{prefix.setEnd(node,offset)}catch{return null}
+ return range.start+prefix.toString().replace(/\u00a0/g,' ').length;
+}
+function skillSelectionOffsets(section,selection){
+ if(!selection||selection.isCollapsed||!selection.rangeCount)return null;
+ const start=skillSourceOffset(section,selection.anchorNode,selection.anchorOffset);
+ const end=skillSourceOffset(section,selection.focusNode,selection.focusOffset);
+ if(start===null||end===null)return null;
+ return {start:Math.min(start,end),end:Math.max(start,end)};
+}
+function skillTextBoundaries(section){
+ const editables=Array.from(document.querySelectorAll('#sheets .skill[contenteditable="true"]')).filter(el=>el.dataset.sectionId===section.id);
+ if(!editables.length)return null;
+ const boundary=(el,last)=>{
+  const walker=document.createTreeWalker(el,NodeFilter.SHOW_TEXT);
+  let node=walker.nextNode();
+  if(!last)return node?{node,offset:0}:{node:el,offset:0};
+  while(node){const current=node;node=walker.nextNode();if(!node)return {node:current,offset:current.textContent.length}}
+  return {node:el,offset:el.childNodes.length};
+ };
+ return {first:boundary(editables[0],false),last:boundary(editables[editables.length-1],true)};
+}
+function skillTextPosition(section,sourceOffset){
+ const ranges=skillSourceRanges(section);
+ sourceOffset=Math.max(0,Math.min(sourceOffset,String(section.content||'').length));
+ const index=ranges.findIndex(range=>sourceOffset<=range.end);
+ const skillIndex=index<0?ranges.length-1:index;
+ const range=ranges[skillIndex];
+ const editable=Array.from(document.querySelectorAll('#sheets .skill[contenteditable="true"]')).find(el=>el.dataset.sectionId===section.id&&Number(el.dataset.skillIndex)===skillIndex);
+ if(!editable)return null;
+ if(!range)return {node:editable,offset:0};
+ const offset=Math.max(0,Math.min(sourceOffset-range.start,range.end-range.start));
+ const walker=document.createTreeWalker(editable,NodeFilter.SHOW_TEXT);
+ const node=walker.nextNode();
+ return node?{node,offset}:{node:editable,offset:0};
+}
 function resumeSelectionScope(el){
  const node=window.getSelection()?.focusNode;
  const detailEl=el?.matches?.('[data-entry-field="detail"]')?el
   :el?.closest?.('[data-entry-field="detail"]')
   ||(node?.nodeType===Node.ELEMENT_NODE?node.closest('[data-entry-field="detail"]'):node?.parentElement?.closest('[data-entry-field="detail"]'));
  const section=el?.dataset.sectionId?sectionById(el.dataset.sectionId):null;
+ if(section?.type==='skills'&&el?.dataset.skillIndex!==undefined)return {kind:'skills',section};
  if(section?.content!==undefined&&section.type!=='skills'&&el?.dataset.textIndex!==undefined)return {kind:'content',section};
  const detailSection=detailEl?.dataset.sectionId?sectionById(detailEl.dataset.sectionId):section;
  if(detailSection?.entries&&detailEl?.dataset.entryField==='detail')return {kind:'detail',section:detailSection,entryIndex:Number(detailEl.dataset.entry)};
@@ -2452,6 +2516,7 @@ function detailSourceOffset(section,entryIndex,node,offset){
 }
 function resumeSelectionOffsets(scope,selection){
  if(scope?.kind==='content')return contentSelectionOffsets(scope.section,selection);
+ if(scope?.kind==='skills')return skillSelectionOffsets(scope.section,selection);
  if(scope?.kind!=='detail'||!selection||selection.isCollapsed||!selection.rangeCount)return null;
  const start=detailSourceOffset(scope.section,scope.entryIndex,selection.anchorNode,selection.anchorOffset);
  const end=detailSourceOffset(scope.section,scope.entryIndex,selection.focusNode,selection.focusOffset);
@@ -2460,7 +2525,7 @@ function resumeSelectionOffsets(scope,selection){
 }
 function resumeSelectionText(scope,selected){
  if(!scope||!selected)return '';
- const source=scope.kind==='content'?String(scope.section.content||''):String(scope.section.entries?.[scope.entryIndex]?.details||'');
+ const source=scope.kind==='content'||scope.kind==='skills'?String(scope.section.content||''):String(scope.section.entries?.[scope.entryIndex]?.details||'');
  return source.slice(selected.start,selected.end);
 }
 function writeResumeClipboardText(text){
@@ -2551,20 +2616,32 @@ function replaceContentSelection(section,start,end,text,el){
  const content=String(section.content||'').replace(/\r\n?/g,'\n');
  start=Math.max(0,Math.min(start,content.length));end=Math.max(start,Math.min(end,content.length));
  section.content=content.slice(0,start)+text+content.slice(end);
+ if(section.type==='skills')section.content=section.content.split(/[,\n]/).map(skill=>skill.trim()).filter(Boolean).join(', ');
  syncInspectorForInlineEdit(el,section.content);saveLocal();renderSheets();
+ if(section.type==='skills'){
+  const position=skillTextPosition(section,start+text.length);
+  requestAnimationFrame(()=>{
+   if(!position)return;
+   const target=position.node.nodeType===Node.ELEMENT_NODE?position.node:position.node.parentElement?.closest('.skill');
+   target?.focus({preventScroll:true});
+   const range=document.createRange(),selection=window.getSelection();
+   range.setStart(position.node,position.offset);range.collapse(true);selection?.removeAllRanges();selection?.addRange(range);
+  });
+  return;
+ }
  const caret=section.content.slice(0,start+text.length),lineIndex=caret.split('\n').length-1;
  focusTextPosition(section.id,lineIndex,caret.length-(caret.lastIndexOf('\n')+1));
 }
 $('sheets').addEventListener('mousedown',e=>{
  if(e.button!==0)return;
- const el=e.target.closest('[data-text-source], [data-entry-field="detail"]'),scope=resumeSelectionScope(el);
+ const el=e.target.closest('[data-text-source], [data-entry-field="detail"], .skill'),scope=resumeSelectionScope(el);
  if(!scope){resumeMouseSelection=null;return}
  const point=caretPointFromCoordinates(e.clientX,e.clientY);
  resumeMouseSelection=point?{scope,anchor:point}:null;
 });
 document.addEventListener('mousemove',e=>{
  if(!resumeMouseSelection||!(e.buttons&1))return;
- const target=document.elementFromPoint(e.clientX,e.clientY)?.closest('[data-text-source], [data-entry-field="detail"]'),scope=resumeSelectionScope(target);
+ const target=document.elementFromPoint(e.clientX,e.clientY)?.closest('[data-text-source], [data-entry-field="detail"], .skill'),scope=resumeSelectionScope(target);
  if(!scope||scope.kind!==resumeMouseSelection.scope.kind||scope.section.id!==resumeMouseSelection.scope.section.id||scope.kind==='detail'&&scope.entryIndex!==resumeMouseSelection.scope.entryIndex)return;
  const point=caretPointFromCoordinates(e.clientX,e.clientY);
  if(!point)return;
@@ -2685,7 +2762,7 @@ $('sheets').addEventListener('input',e=>{
    reflowOverflowingDetail(el,replacements.length>1);
   }
   else if(el.dataset.skillIndex!==undefined){
-   const skills=String(section?.content||'').split(/[,:\n]/).map(x=>x.trim()).filter(Boolean),index=Number(el.dataset.skillIndex);
+   const skills=String(section?.content||'').split(/[,\n]/).map(x=>x.trim()),index=Number(el.dataset.skillIndex);
    if(skills[index]!==undefined)skills[index]=value;section.content=skills.join(', ');
   }
   else if(el.dataset.textSource!==undefined){
@@ -2721,6 +2798,10 @@ $('sheets').addEventListener('input',e=>{
 $('sheets').addEventListener('focusout',e=>{
  const el=e.target.closest('[contenteditable="true"]');if(!el)return;
  if(reflowingDetail)return;
+ if(el.dataset.skillIndex!==undefined){
+  const section=sectionById(el.dataset.sectionId);
+  if(section)section.content=String(section.content||'').split(/[,\n]/).map(skill=>skill.trim()).filter(Boolean).join(', ');
+ }
  const before=directEditSnapshots.get(el);if(before&&JSON.stringify(before)!==JSON.stringify(state)){recordHistory(before);saveLocal();renderSheets();renderInspector();updateUndoButton();toast('Resume updated')}
  directEditSnapshots.delete(el);delete el.dataset.currentText;
 });
@@ -2735,19 +2816,21 @@ $('sheets').addEventListener('keydown',e=>{
   if(selected){
    e.preventDefault();
    const copiedText=resumeSelectionText(scope,selected);
-   const source=scope.kind==='content'?String(scope.section.content||''):String(scope.section.entries?.[scope.entryIndex]?.details||'');
+   const source=scope.kind==='content'||scope.kind==='skills'?String(scope.section.content||''):String(scope.section.entries?.[scope.entryIndex]?.details||'');
    writeResumeClipboardText(copiedText).then(()=>{
     if(key!=='x')return;
-    const current=scope.kind==='content'?String(scope.section.content||''):String(scope.section.entries?.[scope.entryIndex]?.details||'');
+    const current=scope.kind==='content'||scope.kind==='skills'?String(scope.section.content||''):String(scope.section.entries?.[scope.entryIndex]?.details||'');
     if(current!==source){toast('Copied the selected text, but the resume changed before it could be cut.');return}
-    if(scope.kind==='content')replaceContentSelection(scope.section,selected.start,selected.end,'',el);
+    if(scope.kind==='content'||scope.kind==='skills')replaceContentSelection(scope.section,selected.start,selected.end,'',el);
     else replaceEntryDetailSelection(scope.section,scope.entryIndex,selected.start,selected.end,'',el);
    }).catch(()=>toast('Could not copy the selected text. Check clipboard permissions and try again.'));
    return;
   }
  }
  const contentBoundaries=scope?.kind==='content'?contentTextBoundaries(section.id):null;
+ const skillBoundaries=scope?.kind==='skills'?skillTextBoundaries(section):null;
  const contentRange=scope?.kind==='content'?contentSelectionOffsets(section,selection):null;
+ const skillRange=scope?.kind==='skills'?skillSelectionOffsets(section,selection):null;
  const detailBoundaries=scope?.kind==='detail'?detailTextBoundaries(scope.section,scope.entryIndex):null;
  const detailRange=scope?.kind==='detail'?resumeSelectionOffsets(scope,selection):null;
  if(contentBoundaries&&(e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='a'){
@@ -2761,6 +2844,37 @@ $('sheets').addEventListener('keydown',e=>{
   const range=document.createRange();range.setStart(detailBoundaries.first.node,detailBoundaries.first.offset);range.setEnd(detailBoundaries.last.node,detailBoundaries.last.offset);
   selection?.removeAllRanges();selection?.addRange(range);
   return;
+ }
+ if(skillBoundaries&&(e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='a'){
+  e.preventDefault();
+  const range=document.createRange();range.setStart(skillBoundaries.first.node,skillBoundaries.first.offset);range.setEnd(skillBoundaries.last.node,skillBoundaries.last.offset);
+  selection?.removeAllRanges();selection?.addRange(range);
+  return;
+ }
+ if(scope?.kind==='skills'&&e.shiftKey&&selection?.rangeCount&&(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'].includes(e.key))){
+  const anchor=skillSourceOffset(section,selection.anchorNode,selection.anchorOffset);
+  const focus=skillSourceOffset(section,selection.focusNode,selection.focusOffset);
+  if(anchor!==null&&focus!==null){
+   e.preventDefault();
+   const content=String(section.content||''),ranges=skillSourceRanges(section);
+   const skillIndex=Math.max(0,ranges.findIndex(range=>focus<=range.end));
+   const currentRange=ranges[skillIndex],previousRange=ranges[Math.max(0,skillIndex-1)],nextRange=ranges[Math.min(ranges.length-1,skillIndex+1)];
+   let next=focus;
+   if(e.key==='Home')next=e.ctrlKey||e.metaKey?0:currentRange?.start??0;
+   else if(e.key==='End')next=e.ctrlKey||e.metaKey?content.length:currentRange?.end??content.length;
+   else if(e.ctrlKey||e.metaKey){
+    if(e.key==='ArrowLeft')next=contentWordBoundary(section,focus,-1);
+    else if(e.key==='ArrowRight')next=contentWordBoundary(section,focus,1);
+    else if(e.key==='ArrowUp')next=previousRange?.start??focus;
+    else next=nextRange?.end??focus;
+   }else if(e.key==='ArrowLeft')next=Math.max(0,focus-1);
+   else if(e.key==='ArrowRight')next=Math.min(content.length,focus+1);
+   else if(e.key==='ArrowUp')next=previousRange?.start??focus;
+   else next=nextRange?.end??focus;
+   const anchorPoint=skillTextPosition(section,anchor),focusPoint=skillTextPosition(section,next);
+   if(anchorPoint&&focusPoint)selection.setBaseAndExtent(anchorPoint.node,anchorPoint.offset,focusPoint.node,focusPoint.offset);
+   return;
+  }
  }
  if(scope?.kind==='detail'&&e.shiftKey&&selection&&selection.rangeCount&&['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)){
   const anchor=detailSourceOffset(scope.section,scope.entryIndex,selection.anchorNode,selection.anchorOffset);
@@ -2835,8 +2949,9 @@ $('sheets').addEventListener('keydown',e=>{
    return;
   }
  }
- if(contentRange&&(e.key==='Backspace'||e.key==='Delete')){
-  e.preventDefault();replaceContentSelection(section,contentRange.start,contentRange.end,'',el);return;
+ if((contentRange||skillRange)&&(e.key==='Backspace'||e.key==='Delete')){
+  const selected=skillRange||contentRange;
+  e.preventDefault();replaceContentSelection(section,selected.start,selected.end,'',el);return;
  }
  if(detailRange&&(e.key==='Backspace'||e.key==='Delete')){
   e.preventDefault();replaceEntryDetailSelection(scope.section,scope.entryIndex,detailRange.start,detailRange.end,'',el);return;
@@ -3066,7 +3181,7 @@ $('sheets').addEventListener('beforeinput',e=>{
  if(!scope)return;
  const selection=window.getSelection(),selected=resumeSelectionOffsets(scope,selection);
  if(!selected)return;
- const selector=scope.kind==='content'?'[data-text-source]':'[data-entry-field="detail"]';
+ const selector=scope.kind==='content'?'[data-text-source]':scope.kind==='skills'?'.skill':'[data-entry-field="detail"]';
  const startEditable=selection.anchorNode?.nodeType===Node.ELEMENT_NODE
   ?(selection.anchorNode.matches(selector)?selection.anchorNode:selection.anchorNode.closest(selector))
   :selection.anchorNode?.parentElement?.closest(selector);
@@ -3079,12 +3194,26 @@ $('sheets').addEventListener('beforeinput',e=>{
  else if(e.inputType==='insertParagraph'||e.inputType==='insertLineBreak')insertedText='\n';
  if(insertedText===null||insertedText===undefined)return;
  e.preventDefault();
- if(scope.kind==='content')replaceContentSelection(scope.section,selected.start,selected.end,insertedText,el);
+ if(scope.kind==='content'||scope.kind==='skills')replaceContentSelection(scope.section,selected.start,selected.end,insertedText,el);
  else replaceEntryDetailSelection(scope.section,scope.entryIndex,selected.start,selected.end,insertedText,el);
 });
 $('sheets').addEventListener('paste',e=>{
  const el=resumeEditableField(e.target);if(!el)return;
  const clipboard=e.clipboardData||window.clipboardData;
+ const scope=resumeSelectionScope(el);
+ if(scope?.kind==='skills'){
+  const text=normalizePastedText(clipboard.getData('text/plain')).replace(/\n+/g,', ');
+  if(!text){e.preventDefault();return}
+  e.preventDefault();
+  const selection=window.getSelection(),selected=resumeSelectionOffsets(scope,selection);
+  const range=selection?.rangeCount?selection.getRangeAt(0):null;
+  const caret=range&&el.contains(range.startContainer)
+   ?skillSourceOffset(scope.section,range.startContainer,range.startOffset)
+   :skillSourceOffset(scope.section,selection?.anchorNode,selection?.anchorOffset);
+  const start=selected?.start??caret,end=selected?.end??caret;
+  if(start!==null&&start!==undefined&&end!==null&&end!==undefined)replaceContentSelection(scope.section,start,end,text,el);
+  return;
+ }
  const text=(el.dataset.textSource!==undefined?normalizePastedText(clipboard.getData('text/plain')):clipboard.getData('text/plain').replace(/\r/g,'').replace(/\n/g,el.dataset.entryField==='detail'?'\n':' '));
  e.preventDefault();
  if(el.dataset.textSource!==undefined){
@@ -3140,7 +3269,7 @@ $('sheets').addEventListener('copy',e=>{
  if(!scope||!e.clipboardData)return;
  const selected=resumeSelectionOffsets(scope,window.getSelection());
  if(!selected)return;
- const source=scope.kind==='content'?String(scope.section.content||''):String(scope.section.entries?.[scope.entryIndex]?.details||'');
+ const source=scope.kind==='content'||scope.kind==='skills'?String(scope.section.content||''):String(scope.section.entries?.[scope.entryIndex]?.details||'');
  e.clipboardData.setData('text/plain',source.slice(selected.start,selected.end));
  e.preventDefault();
 });
@@ -3148,10 +3277,10 @@ $('sheets').addEventListener('cut',e=>{
  const el=resumeEditableField(e.target),section=el?.dataset.sectionId?sectionById(el.dataset.sectionId):null;
  const scope=resumeSelectionScope(el),selected=scope?resumeSelectionOffsets(scope,window.getSelection()):null;
  if(selected&&e.clipboardData){
-  const source=scope.kind==='content'?String(scope.section.content||''):String(scope.section.entries?.[scope.entryIndex]?.details||'');
+  const source=scope.kind==='content'||scope.kind==='skills'?String(scope.section.content||''):String(scope.section.entries?.[scope.entryIndex]?.details||'');
   e.clipboardData.setData('text/plain',source.slice(selected.start,selected.end));
   e.preventDefault();
-  if(scope.kind==='content')replaceContentSelection(scope.section,selected.start,selected.end,'',el);
+  if(scope.kind==='content'||scope.kind==='skills')replaceContentSelection(scope.section,selected.start,selected.end,'',el);
   else replaceEntryDetailSelection(scope.section,scope.entryIndex,selected.start,selected.end,'',el);
   return;
  }
@@ -3394,6 +3523,7 @@ $('resumeImportModalBg').addEventListener('click',event=>{if(event.target===$('r
  $('pdfBtn').addEventListener('click',()=>exportPDF());$('closePdfPreview').addEventListener('click',closePdfPreview);$('cancelPdfPreview').addEventListener('click',closePdfPreview);$('downloadPdfPreview').addEventListener('click',downloadPreviewPdf);$('pdfPreviewModalBg').addEventListener('click',e=>{if(e.target===$('pdfPreviewModalBg'))closePdfPreview()});$('atsBtn').addEventListener('click',openAts);$('atsFriendlyBtn').addEventListener('click',applyAtsFriendlyLayout);$('runAtsBtn').addEventListener('click',()=>runAtsChecks());$('closeAts').addEventListener('click',closeAts);
 $('docName').addEventListener('change',e=>transact(()=>state.docName=e.target.value.trim()||'Untitled resume'));
 $('dismissOnboarding').addEventListener('click',()=>{$('onboardingCard').hidden=true;onboardingDismissed=true;savePrefs()});
+$('sectionTypographyToggle').addEventListener('click',()=>{sectionTypographyCalloutEnabled=!sectionTypographyCalloutEnabled;updateSectionTypographyToggle();savePrefs();updateSectionTypographyCallout()});
 $('undoBtn')?.addEventListener('click',undo);
 $('redoBtn')?.addEventListener('click',redo);
 const mobileToolbarQuery=window.matchMedia('(max-width:800px)'),resumeToolbar=document.querySelector('.toolbar'),resumeToolbarToggle=$('toggleResumeTools');
@@ -3460,6 +3590,7 @@ addEventListener('pagehide',()=>{
  try{guestResumeStorage.save(state)}catch(error){console.error('Could not save the resume while closing the page.',error)}
 });
 loadPrefs();
+updateSectionTypographyToggle();
 if(wizardDraftLoaded&&!onboardingDismissed){
  onboardingDismissed=true;
  savePrefs();

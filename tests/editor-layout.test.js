@@ -196,7 +196,7 @@ test('all content sections share cross-line selection and preserve an editable b
   assert.match(source, /if\(section\?\.content!==undefined&&section\.type!=='skills'&&el\?\.dataset\.textIndex!==undefined\)return \{kind:'content',section\}/);
   assert.match(source, /scope\?\.kind==='content'\?contentTextBoundaries\(section\.id\):null/);
   assert.match(source, /scope\?\.kind==='content'&&e\.shiftKey/);
-  assert.match(source, /if\(scope\.kind==='content'\)replaceContentSelection\(scope\.section,selected\.start,selected\.end/);
+  assert.match(source, /if\(scope\.kind==='content'\|\|scope\.kind==='skills'\)replaceContentSelection\(scope\.section,selected\.start,selected\.end/);
   assert.match(source, /section\.content=content\.slice\(0,start\)\+text\+content\.slice\(end\)/);
   assert.match(source, /else String\(s\.content\|\|''\)\.replace/);
   assert.match(source, /if\(a\.blank\)\{el\.classList\.add\('blank-line'\)/);
@@ -209,4 +209,31 @@ test('cut writes selected resume text to the clipboard before removing it', () =
   assert.match(source, /if\(shortcut&&\(key==='c'\|\|key==='x'\)\)\{[\s\S]*?writeResumeClipboardText\(copiedText\)\.then\(\(\)=>\{[\s\S]*?if\(key!=='x'\)return;[\s\S]*?replaceContentSelection\(scope\.section,selected\.start,selected\.end,''/);
   assert.match(source, /function resumeSelectionText\(scope,selected\)/);
   assert.match(source, /function writeResumeClipboardText\(text\)/);
+});
+
+test('Core Skills support selecting, copying, cutting, pasting, and deleting multiple skills', () => {
+  const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
+  assert.match(source, /if\(section\?\.type==='skills'&&el\?\.dataset\.skillIndex!==undefined\)return \{kind:'skills',section\}/);
+  assert.match(source, /function skillSourceRanges\(section\)/);
+  assert.match(source, /function skillSelectionOffsets\(section,selection\)/);
+  assert.match(source, /function skillTextBoundaries\(section\)/);
+  assert.match(source, /skillBoundaries&&\(e\.metaKey\|\|e\.ctrlKey\)&&e\.key\.toLowerCase\(\)==='a'/);
+  assert.match(source, /scope\?\.kind==='skills'\?skillSelectionOffsets\(section,selection\):null/);
+  assert.match(source, /scope\?\.kind==='skills'\)\{[\s\S]*?replaceContentSelection\(scope\.section,start,end,text,el\)/);
+  assert.match(source, /if\(section\.type==='skills'\)section\.content=section\.content\.split/);
+});
+
+test('Core Skills offer saved display styles in the Selected section inspector', () => {
+  const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
+  assert.match(source, /const SKILL_STYLES=\[\['tags','Tags'\],\['pills','Pills'\],\['outlined','Outlined'\],\['list','Simple list'\],\['inline','Inline'\],\['grid','Grid'\],\['soft','Soft color'\],\['gradient','Gradient'\],\['underline','Underline'\],\['numbered','Numbered'\],\['compact','Compact'\],\['dense','Dense \(space-saving\)'\]\]/);
+  assert.match(source, /function normalizeSkillStyle\(style\)\{return style==='cards'\?'dense'/);
+  assert.match(source, /if\(type==='skills'\)n\.skillStyle=normalizeSkillStyle\(s\.skillStyle\)/);
+  assert.match(source, /<label for="skillStyle">Core skills display style<\/label><select id="skillStyle">/);
+  assert.match(source, /\$\('skillStyle'\)\?\.addEventListener\('change'/);
+  assert.match(source, /sec\.dataset\.skillStyle=normalizeSkillStyle\(s\.skillStyle\)/);
+  for (const style of ['pills', 'outlined', 'list', 'inline', 'grid', 'soft', 'gradient', 'underline', 'numbered', 'compact', 'dense']) {
+    assert.match(styles, new RegExp(`\\.resume-section\\[data-skill-style=${style}\\]`));
+  }
+  assert.doesNotMatch(source.match(/const SKILL_STYLES=\[[^\n]+\]/)[0], /cards|Skill cards/);
+  assert.match(styles, /\.resume-section\[data-skill-style=dense\] \.skill\{padding:0 3px;border:0/);
 });

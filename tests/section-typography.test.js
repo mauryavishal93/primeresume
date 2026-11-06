@@ -47,6 +47,23 @@ test('section typography is applied to rendered sections and editable in the ins
   assert.match(styles, /#sectionTypographyCallout\[hidden\]\{display:none\}/);
 });
 
+test('section typography callout is opt-in and its Account setting is persisted', () => {
+  const html = readFileSync(new URL('../frontend/editor.html', import.meta.url), 'utf8');
+  const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
+  const styles = readFileSync(new URL('../frontend/src/style.css', import.meta.url), 'utf8');
+  assert.match(html, /Section text sizes<\/span><button class="section-typography-switch" id="sectionTypographyToggle"[^>]*aria-checked="false"/);
+  const toggleMarkup = html.match(/<button class="section-typography-switch" id="sectionTypographyToggle"[\s\S]*?<\/button>/)[0];
+  assert.doesNotMatch(toggleMarkup, /data-theme-toggle|theme-switch/);
+  assert.match(toggleMarkup, /section-typography-label">Off/);
+  assert.match(source, /sectionTypographyCalloutEnabled=false/);
+  assert.match(source, /if\(!sectionTypographyCalloutEnabled\)\{if\(callout\)callout\.hidden=true;return\}/);
+  assert.match(source, /rightTab,onboardingDismissed,sectionTypographyCalloutEnabled/);
+  assert.match(source, /sectionTypographyCalloutEnabled=u\.sectionTypographyCalloutEnabled===true/);
+  assert.match(source, /sectionTypographyCalloutEnabled=!sectionTypographyCalloutEnabled/);
+  assert.match(styles, /\.section-typography-switch\[aria-checked=true\] \.section-typography-thumb\{transform:translateX\(15px\)\}/);
+  assert.match(styles, /\.section-typography-thumb\{[^}]*transform:translateX\(0\)/);
+});
+
 test('editing preserves template section backgrounds and uses a visible focus ring', () => {
   const styles = readFileSync(new URL('../frontend/src/style.css', import.meta.url), 'utf8');
   const brianStyles = readFileSync(new URL('../Templates/brian-baxter/style.css', import.meta.url), 'utf8');
