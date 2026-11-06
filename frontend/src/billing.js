@@ -3,7 +3,9 @@ import {
   loadBillingActivity,
   loadBillingConfig,
   loadBillingEntitlement,
+  loadBillingPayments,
   redeemBillingVoucher,
+  requestBillingRefundReview,
   scheduleBillingPlanChange
 } from './billing-client.js';
 import { cloudConfigured, observeAuth } from './firebase-cloud.js';
@@ -16,6 +18,7 @@ const accountStatus = $('#billingAccountStatus');
 const planTitle = $('#billingPlanTitle');
 const planDetail = $('#billingPlanDetail');
 const historyList = $('#billingHistory');
+const paymentsList = $('#billingPayments');
 const billingStatus = $('#billingServiceStatus');
 const voucherInput = $('#voucherCode');
 const redeemButton = $('#redeemVoucher');
@@ -65,6 +68,65 @@ function renderHistory(activity) {
     time.textContent = formatDate(item.occurredAt);
     row.append(icon, details, time);
     historyList.append(row);
+  }
+}
+
+function renderPayments(payments) {
+  paymentsList.replaceChildren();
+  if (!payments.length) {
+    const empty = document.createElement('p');
+    empty.className = 'billing-history-empty';
+    empty.textContent = 'No eligible Razorpay payments were found for this account.';
+    paymentsList.append(empty);
+    return;
+  }
+
+  for (const payment of payments) {
+    const card = document.createElement('article');
+    card.className = 'billing-payment-item';
+    const details = document.createElement('div');
+    const title = document.createElement('strong');
+    title.textContent = `${payment.planKey === 'yearly' ? 'Yearly' : 'Monthly'} Pro · ${formatCurrencyPrice(Number(payment.amount) / 100, payment.currency || 'INR')}`;
+    const meta = document.createElement('p');
+    meta.textContent = `${payment.paymentId} · ${formatDate(payment.createdAt)}`;
+    details.append(title, meta);
+
+    const request = payment.refundRequest;
+    if (request) {
+      const state = document.createElement('p');
+      state.className = 'billing-payment-request-state';
+      state.textContent = request.status === 'requested'
+        ? 'Refund review requested. Our team will review it; this does not issue a refund automatically.'
+        : `Refund request status: ${request.status}.`;
+      card.append(details, state);
+    } else {
+      const reason = document.createElement('textarea');
+      reason.maxLength = 500;
+      reason.rows = 2;
+      reason.placeholder = 'Reason for requesting a refund (optional)';
+      reason.setAttribute('aria-label', `Optional refund request reason for payment ${payment.paymentId}`);
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'btn outline';
+      button.textContent = 'Request refund review';
+      const state = document.createElement('p');
+      state.className = 'billing-payment-request-state';
+      button.addEventListener('click', async () => {
+        if (!currentUser || button.disabled) return;
+        button.disabled = true;
+        state.textContent = 'Submitting refund review request…';
+        try {
+          await requestBillingRefundReview(currentUser, payment.paymentId, reason.value.trim());
+          await refreshBillingPage(currentUser);
+          billingStatus.textContent = 'Refund review requested. No refund has been issued; your request will be reviewed.';
+        } catch (error) {
+          state.textContent = error.message || 'Could not submit the refund request.';
+          button.disabled = false;
+        }
+      });
+      card.append(details, reason, button, state);
+    }
+    paymentsList.append(card);
   }
 }
 
@@ -136,6 +198,7 @@ async function refreshBillingPage(user, authError = null) {
   if (!user) {
     accountStatus.textContent = 'Sign in with Google to view and manage billing for your account.';
     historyList.textContent = 'Sign in to view billing activity.';
+    paymentsList.textContent = 'Sign in to view payment history and request a refund review.';
     updatePlanSummary(null);
     updateVoucherControls();
     return;
@@ -151,9 +214,10 @@ async function refreshBillingPage(user, authError = null) {
   }
 
   if (currentUser?.uid !== user.uid || requestId !== refreshId) return;
-  const [entitlementResult, activityResult] = await Promise.allSettled([
+  const [entitlementResult, activityResult, paymentsResult] = await Promise.allSettled([
     billingConfig?.entitlementEnabled ? loadBillingEntitlement(user) : Promise.resolve(null),
-    loadBillingActivity(user)
+    loadBillingActivity(user),
+    loadBillingPayments(user)
   ]);
   if (currentUser?.uid !== user.uid || requestId !== refreshId) return;
 
@@ -166,6 +230,14 @@ async function refreshBillingPage(user, authError = null) {
     error.className = 'billing-history-empty';
     error.textContent = activityResult.reason?.message || 'Billing activity is temporarily unavailable.';
     historyList.append(error);
+  }
+  if (paymentsResult.status === 'fulfilled') renderPayments(paymentsResult.value || []);
+  else {
+    paymentsList.replaceChildren();
+    const error = document.createElement('p');
+    error.className = 'billing-history-empty';
+    error.textContent = paymentsResult.reason?.message || 'Payment history is temporarily unavailable.';
+    paymentsList.append(error);
   }
 
   updatePlanSummary(user);

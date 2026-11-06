@@ -774,3 +774,152 @@ test('subscription checkout, payment verification, and signed webhook lifecycle 
   });
   assert.equal(invalidSignature.status, 400);
 });
+
+test('users can request review for their captured Razorpay payments without issuing refunds', async () => {
+  const paymentId = 'pay_refundrequesttest';
+  const otherPaymentId = 'pay_refundothertest';
+  fakeDatabase.records.set(`billingPayments/${paymentId}`, {
+    uid: 'user-1',
+    providerPaymentId: paymentId,
+    subscriptionId: 'sub_refundtest',
+    planKey: 'monthly',
+    status: 'captured',
+    amount: 9900,
+    currency: 'INR',
+    createdAt: Date.now()
+  });
+  fakeDatabase.records.set(`billingPayments/${otherPaymentId}`, {
+    uid: 'user-2',
+    providerPaymentId: otherPaymentId,
+    subscriptionId: 'sub_otherrefundtest',
+    planKey: 'yearly',
+    status: 'captured',
+    amount: 39900,
+    currency: 'INR',
+    createdAt: Date.now()
+  });
+  fakeDatabase.records.set('billingPayments/payment_admin_test', {
+    uid: 'user-1',
+    providerPaymentId: 'payment_admin_test',
+    planKey: 'monthly',
+    status: 'success',
+    source: 'admin',
+    amount: 9900,
+    currency: 'INR',
+    createdAt: Date.now()
+  });
+
+  const unauthenticated = await request('/api/billing/payments');
+  assert.equal(unauthenticated.status, 401);
+
+  const paymentsResponse = await request('/api/billing/payments', { token: 'valid-test-token' });
+  assert.equal(paymentsResponse.status, 200);
+  const payments = (await paymentsResponse.json()).payments;
+  assert.ok(payments.some(payment => payment.paymentId === paymentId));
+  assert.ok(!payments.some(payment => [otherPaymentId, 'payment_admin_test'].includes(payment.paymentId)));
+
+  const crossAccountRequest = await request('/api/billing/refunds/request', {
+    method: 'POST',
+    token: 'valid-test-token',
+    body: { paymentId: otherPaymentId }
+  });
+  assert.equal(crossAccountRequest.status, 404);
+
+  const adminPaymentRequest = await request('/api/billing/refunds/request', {
+    method: 'POST',
+    token: 'valid-test-token',
+    body: { paymentId: 'payment_admin_test' }
+  });
+  assert.equal(adminPaymentRequest.status, 400);
+
+  const invalidPaymentRequest = await request('/api/billing/refunds/request', {
+    method: 'POST',
+    token: 'valid-test-token',
+    body: { paymentId: 'pay_invalid-id' }
+  });
+  assert.equal(invalidPaymentRequest.status, 400);
+
+  const longReasonRequest = await request('/api/billing/refunds/request', {
+    method: 'POST',
+    token: 'valid-test-token',
+    body: { paymentId, reason: 'x'.repeat(501) }
+  });
+  assert.equal(longReasonRequest.status, 400);
+
+  const requestResponse = await request('/api/billing/refunds/request', {
+    method: 'POST',
+    token: 'valid-test-token',
+    body: { paymentId, reason: 'Unexpected renewal' }
+  });
+  assert.equal(requestResponse.status, 201);
+  assert.deepEqual(await requestResponse.json(), { requested: true, paymentId });
+  const storedRequest = fakeDatabase.records.get(`users/user-1/billingRefundRequests/${paymentId}`);
+  assert.equal(storedRequest.status, 'requested');
+  assert.equal(storedRequest.reason, 'Unexpected renewal');
+  const activityResponse = await request('/api/billing/activity', { token: 'valid-test-token' });
+  const refundActivity = (await activityResponse.json()).activity.find(item => item.title === 'Refund review requested');
+  assert.match(refundActivity.detail, new RegExp(paymentId));
+  assert.match(refundActivity.detail, /Unexpected renewal/);
+
+  const duplicateRequest = await request('/api/billing/refunds/request', {
+    method: 'POST',
+    token: 'valid-test-token',
+    body: { paymentId }
+  });
+  assert.equal(duplicateRequest.status, 409);
+
+  const refreshedPayments = await request('/api/billing/payments', { token: 'valid-test-token' });
+  const refreshedPayment = (await refreshedPayments.json()).payments.find(payment => payment.paymentId === paymentId);
+  assert.equal(refreshedPayment.refundRequest.status, 'requested');
+  assert.equal(fakeDatabase.records.has(`billingRefunds/${paymentId}`), false);
+
+  fakeDatabase.records.delete(`billingPayments/${paymentId}`);
+  fakeDatabase.records.delete(`billingPayments/${otherPaymentId}`);
+  fakeDatabase.records.delete('billingPayments/payment_admin_test');
+  fakeDatabase.records.delete(`users/user-1/billingRefundRequests/${paymentId}`);
+});
+
+test('captured recurring Razorpay webhook payments are recorded for account refund requests', async () => {
+  const subscriptionId = 'sub_recurringrefundtest';
+  const paymentId = 'pay_recurringrefundtest';
+  fakeDatabase.records.set(`billingSubscriptions/${subscriptionId}`, {
+    uid: 'user-1',
+    planKey: 'monthly',
+    planId: 'plan_monthly_test',
+    currency: 'INR',
+    status: 'active'
+  });
+  const event = {
+    id: 'evt_recurring_refund_test',
+    event: 'subscription.charged',
+    payload: {
+      subscription: {
+        entity: {
+          id: subscriptionId,
+          plan_id: 'plan_monthly_test',
+          status: 'active',
+          current_end: Math.floor(Date.now() / 1000) + 3600
+        }
+      },
+      payment: {
+        entity: {
+          id: paymentId,
+          subscription_id: subscriptionId,
+          status: 'captured',
+          amount: 9900,
+          currency: 'INR',
+          created_at: Math.floor(Date.now() / 1000)
+        }
+      }
+    }
+  };
+  const response = await signedWebhook(event);
+  assert.equal(response.status, 200);
+  assert.equal(fakeDatabase.records.get(`billingPayments/${paymentId}`).uid, 'user-1');
+  assert.equal(fakeDatabase.records.get(`billingPayments/${paymentId}`).status, 'captured');
+  assert.equal(fakeDatabase.records.get(`billingPayments/${paymentId}`).amount, 9900);
+
+  fakeDatabase.records.delete(`billingSubscriptions/${subscriptionId}`);
+  fakeDatabase.records.delete(`billingPayments/${paymentId}`);
+  fakeDatabase.records.delete('billingWebhookEvents/evt_recurring_refund_test');
+});

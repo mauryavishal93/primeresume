@@ -133,6 +133,30 @@ test('billing stays disabled until provider, Firebase, terms and refund configur
   assert.equal(billingConfigured({ ...env, RAZORPAY_KEY_SECRET: '' }), false);
 });
 
+test('Razorpay test checkout is limited to explicitly enabled Vercel Preview deployments', () => {
+  const env = {
+    BILLING_ENABLED: 'true',
+    BILLING_TEST_MODE_ENABLED: 'true',
+    VERCEL_ENV: 'preview',
+    FIREBASE_SERVICE_ACCOUNT_JSON: JSON.stringify({
+      type: 'service_account',
+      project_id: 'test-project',
+      client_email: 'billing@test-project.iam.gserviceaccount.com',
+      private_key: 'test-private-key'
+    }),
+    RAZORPAY_KEY_ID: 'rzp_test_example',
+    RAZORPAY_KEY_SECRET: 'test-secret',
+    RAZORPAY_WEBHOOK_SECRET: 'test-webhook',
+    RAZORPAY_PLAN_MONTHLY_ID: 'plan_monthly_test',
+    RAZORPAY_PLAN_YEARLY_ID: 'plan_yearly_test'
+  };
+  assert.equal(billingConfigured(env), true);
+  assert.equal(billingConfigured({ ...env, VERCEL_ENV: 'production' }), false);
+  assert.equal(billingConfigured({ ...env, BILLING_TEST_MODE_ENABLED: 'false' }), false);
+  assert.equal(billingConfigured({ ...env, RAZORPAY_KEY_ID: 'rzp_live_example' }), false);
+  assert.equal(billingConfigured({ ...env, FIREBASE_SERVICE_ACCOUNT_JSON: '' }), false);
+});
+
 test('Firebase Admin entitlement reads can be enabled while checkout remains disabled', () => {
   const env = {
     FIREBASE_SERVICE_ACCOUNT_JSON: JSON.stringify({

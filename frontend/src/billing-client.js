@@ -61,6 +61,18 @@ export async function loadBillingActivity(user) {
   return result.activity;
 }
 
+export async function loadBillingPayments(user) {
+  const result = await billingRequest('payments', user);
+  return result.payments;
+}
+
+export async function requestBillingRefundReview(user, paymentId, reason = '') {
+  return billingRequest('refunds/request', user, {
+    method: 'POST',
+    body: { paymentId, reason }
+  });
+}
+
 export async function loadBillingEntitlement(user) {
   const result = await billingRequest('entitlement', user);
   return result.entitlement;

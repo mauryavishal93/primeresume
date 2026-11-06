@@ -161,10 +161,6 @@ export function entitlementFromSubscription(subscription, fallbackPlan = 'monthl
 
 export function billingConfigured(env = process.env) {
   if (env.BILLING_ENABLED !== 'true'
-    || env.BILLING_TERMS_PUBLISHED !== 'true'
-    || env.BILLING_REFUNDS_PUBLISHED !== 'true'
-    || env.BILLING_TEST_MODE_VERIFIED !== 'true'
-    || env.BILLING_LIVE_LAUNCH_APPROVED !== 'true'
     || ![
       env.RAZORPAY_KEY_ID,
       env.RAZORPAY_KEY_SECRET,
@@ -175,5 +171,16 @@ export function billingConfigured(env = process.env) {
     || !firebaseAdminConfigured(env)) {
     return false;
   }
-  return true;
+
+  const isTestKey = env.RAZORPAY_KEY_ID.startsWith('rzp_test_');
+  if (isTestKey) {
+    return env.VERCEL_ENV === 'preview'
+      && env.BILLING_TEST_MODE_ENABLED === 'true';
+  }
+  if (env.VERCEL_ENV === 'preview') return false;
+
+  return env.BILLING_TERMS_PUBLISHED === 'true'
+    && env.BILLING_REFUNDS_PUBLISHED === 'true'
+    && env.BILLING_TEST_MODE_VERIFIED === 'true'
+    && env.BILLING_LIVE_LAUNCH_APPROVED === 'true';
 }

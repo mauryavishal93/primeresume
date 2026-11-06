@@ -277,6 +277,14 @@
 .billing-history-item p{margin:4px 0 0; color:var(--muted); font-size:12px; line-height:1.5;}
 .billing-history-item time{color:var(--muted); font-size:11px; white-space:nowrap;}
 .billing-history-empty{margin:0; padding:16px; border:1px dashed var(--line); border-radius:12px; color:var(--muted);}
+.billing-payment-list{display:grid;gap:10px;margin-top:16px}
+.billing-payment-item{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:10px;padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+.billing-payment-item strong{font-size:14px}
+.billing-payment-item p{margin:4px 0 0;color:var(--muted);font-size:12px;line-height:1.5}
+.billing-payment-item textarea{grid-column:1/-1;width:100%;min-height:54px;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);font:inherit;font-size:12px;resize:vertical}
+.billing-payment-item .btn{grid-column:2;min-height:40px}
+.billing-payment-item .billing-payment-request-state{grid-column:1/-1}
+.billing-payment-item .btn:disabled{opacity:.55}
 @media(max-width:640px){.billing-plan-summary{align-items:stretch;flex-direction:column;padding:18px 14px}.billing-plan-actions{display:grid;grid-template-columns:1fr}.billing-links{grid-template-columns:1fr}.billing-history-item{grid-template-columns:34px minmax(0,1fr);}.billing-history-item time{grid-column:2;}.billing-history{padding:18px 14px}}
 @media(prefers-reduced-motion:reduce){.billing-link-card,.billing-link-arrow{transition:none}.billing-link-card:hover{transform:none}}
 

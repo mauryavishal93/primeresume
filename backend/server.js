@@ -1567,6 +1567,22 @@ app.post('/api/billing/webhook', async (request, response) => {
         }
 
         transaction.create(eventRef, { event: event.event, subscriptionId, receivedAt: Date.now() });
+        if (payment?.status === 'captured'
+          && typeof payment.id === 'string' && /^pay_[A-Za-z0-9]+$/.test(payment.id)
+          && payment.subscription_id === subscriptionId
+          && Number.isSafeInteger(payment.amount) && payment.amount > 0) {
+          transaction.set(db.doc(`billingPayments/${payment.id}`), {
+            uid: mapping.uid,
+            providerPaymentId: payment.id,
+            subscriptionId,
+            planKey: billingPlanKey,
+            status: 'captured',
+            amount: payment.amount,
+            currency: typeof payment.currency === 'string' ? payment.currency : billingCurrency,
+            source: 'razorpay',
+            createdAt: Number(payment.created_at) > 0 ? Number(payment.created_at) * 1000 : Date.now()
+          }, { merge: true });
+        }
         transaction.set(subscriptionDocument(db, subscriptionId), {
           status: subscription?.status || event.event.replace('subscription.', ''),
           currentEnd: validUntil,
@@ -1649,6 +1665,124 @@ app.get('/api/billing/activity', requireEntitlementConfig, requireFirebaseUser, 
   } catch (error) {
     console.error('Could not load billing activity.', error);
     response.status(500).json({ error: 'Could not load your billing history.' });
+  }
+});
+
+app.get('/api/billing/payments', requireEntitlementConfig, requireFirebaseUser, async (request, response) => {
+  try {
+    const { db } = await getFirebaseAdmin();
+    let payments;
+    let refundRequests;
+    if (db.records instanceof Map) {
+      payments = [...db.records.entries()]
+        .filter(([key, value]) => key.startsWith('billingPayments/')
+          && key.split('/').length === 2 && value.uid === request.user.uid)
+        .map(([key, value]) => ({ id: key.split('/').at(-1), ...value }));
+      refundRequests = [...db.records.entries()]
+        .filter(([key]) => key.startsWith(`users/${request.user.uid}/billingRefundRequests/`))
+        .map(([key, value]) => ({ id: key.split('/').at(-1), ...value }));
+    } else {
+      const [paymentSnapshot, refundSnapshot] = await Promise.all([
+        db.collection('billingPayments').where('uid', '==', request.user.uid).get(),
+        db.collection(`users/${request.user.uid}/billingRefundRequests`).get()
+      ]);
+      payments = (paymentSnapshot.docs || []).map(document => ({ id: document.id, ...document.data() }));
+      refundRequests = (refundSnapshot.docs || []).map(document => ({ id: document.id, ...document.data() }));
+    }
+    const requestsByPayment = new Map(refundRequests.map(item => [item.paymentId || item.id, item]));
+    const eligiblePayments = payments
+      .filter(payment => payment.status === 'captured'
+        && payment.providerPaymentId === payment.id
+        && typeof payment.subscriptionId === 'string'
+        && /^sub_[A-Za-z0-9]+$/.test(payment.subscriptionId))
+      .sort((left, right) => Number(right.createdAt) - Number(left.createdAt))
+      .slice(0, 50)
+      .map(payment => {
+        const refundRequest = requestsByPayment.get(payment.id);
+        return {
+          paymentId: payment.id,
+          planKey: payment.planKey,
+          amount: payment.amount,
+          currency: payment.currency || 'INR',
+          createdAt: payment.createdAt,
+          refundRequest: refundRequest ? {
+            status: refundRequest.status,
+            createdAt: refundRequest.createdAt
+          } : null
+        };
+      });
+    response.json({ payments: eligiblePayments });
+  } catch (error) {
+    console.error('Could not load billing payments.', error);
+    response.status(500).json({ error: 'Could not load your payment history.' });
+  }
+});
+
+app.post('/api/billing/refunds/request', requireEntitlementConfig, requireFirebaseUser, async (request, response) => {
+  const paymentId = typeof request.body?.paymentId === 'string' ? request.body.paymentId.trim() : '';
+  const reason = typeof request.body?.reason === 'string' ? request.body.reason.trim() : '';
+  if (!/^pay_[A-Za-z0-9]+$/.test(paymentId) || reason.length > 500) {
+    response.status(400).json({ error: 'A valid payment ID and a reason under 500 characters are required.' });
+    return;
+  }
+
+  try {
+    const { db } = await getFirebaseAdmin();
+    const paymentRef = db.doc(`billingPayments/${paymentId}`);
+    const refundRequestRef = db.doc(`users/${request.user.uid}/billingRefundRequests/${paymentId}`);
+    let existingRequest = false;
+    let paymentFound = false;
+    await db.runTransaction(async transaction => {
+      const [paymentSnapshot, requestSnapshot] = await Promise.all([
+        transaction.get(paymentRef),
+        transaction.get(refundRequestRef)
+      ]);
+      const payment = paymentSnapshot.data();
+      if (!paymentSnapshot.exists || payment.uid !== request.user.uid
+        || payment.providerPaymentId !== paymentId || payment.status !== 'captured'
+        || typeof payment.subscriptionId !== 'string' || !/^sub_[A-Za-z0-9]+$/.test(payment.subscriptionId)) {
+        return;
+      }
+      paymentFound = true;
+      if (requestSnapshot.exists) {
+        existingRequest = true;
+        return;
+      }
+      const now = Date.now();
+      transaction.create(refundRequestRef, {
+        uid: request.user.uid,
+        paymentId,
+        subscriptionId: payment.subscriptionId,
+        planKey: payment.planKey || null,
+        amount: payment.amount,
+        currency: payment.currency || 'INR',
+        reason,
+        status: 'requested',
+        createdAt: now,
+        updatedAt: now
+      });
+    });
+    if (!paymentFound) {
+      response.status(404).json({ error: 'No eligible captured payment was found for this account.' });
+      return;
+    }
+    if (existingRequest) {
+      response.status(409).json({ error: 'A refund review has already been requested for this payment.' });
+      return;
+    }
+    await recordBillingActivity(db, request.user.uid, {
+      type: 'refund_request',
+      status: 'pending',
+      title: 'Refund review requested',
+      detail: `Review requested for Razorpay payment ${paymentId}.${reason ? ` Reason: ${reason}` : ''}`,
+      planKey: null,
+      currency: null,
+      amount: null
+    });
+    response.status(201).json({ requested: true, paymentId });
+  } catch (error) {
+    console.error('Could not submit refund review request.', error);
+    response.status(500).json({ error: 'Could not submit the refund request. Please retry or contact support.' });
   }
 });
 
