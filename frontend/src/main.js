@@ -1,3 +1,4 @@
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { estimateExperienceYears, GENERIC_ATS_WEIGHTING, weightedScore } from './ats-scoring.js';
 import { buildCoverLetterDraft } from './cover-letter.js';
 import { buildCoverLetterPdf } from './cover-letter-pdf.js';
@@ -1751,7 +1752,7 @@ function showPdfPreview(blob,filename,pageCount,title,previewPages=[]){
  pages.replaceChildren(...previewPages.map((src,index)=>{
   const image=document.createElement('img');
   image.src=src;
-  image.alt=`Resume PDF page ${index+1}`;
+  image.alt=`PDF preview page ${index+1}`;
   image.decoding='async';
   return image;
  }));
@@ -1768,6 +1769,35 @@ function showPdfPreview(blob,filename,pageCount,title,previewPages=[]){
  $('pdfPreviewStatus').textContent=`Text is selectable and searchable. ${pageCount} A4 page${pageCount===1?'':'s'}${trialText}. Review before downloading — the button is ready when you are.`;
  $('downloadPdfPreview').disabled=false;
  $('downloadPdfPreview').textContent='Download PDF';
+}
+async function renderMobilePdfPages(blob,generation){
+ if(!window.matchMedia('(max-width: 600px)').matches)return [];
+ const pdfjs=await import('pdfjs-dist');
+ pdfjs.GlobalWorkerOptions.workerSrc=pdfWorkerUrl;
+ const pdf=await pdfjs.getDocument({data:new Uint8Array(await blob.arrayBuffer())}).promise;
+ const pages=[];
+ try{
+  for(let pageNumber=1;pageNumber<=pdf.numPages;pageNumber++){
+   if(generation!==pdfPreviewGeneration)return [];
+   const page=await pdf.getPage(pageNumber);
+   const viewport=page.getViewport({scale:1.25});
+   const canvas=document.createElement('canvas');
+   canvas.width=Math.ceil(viewport.width);
+   canvas.height=Math.ceil(viewport.height);
+   const context=canvas.getContext('2d');
+   if(!context)throw new Error('Could not prepare the PDF page preview.');
+   try{
+    await page.render({canvasContext:context,viewport}).promise;
+    pages.push(canvas.toDataURL('image/jpeg',.9));
+   }finally{
+    canvas.width=0;
+    canvas.height=0;
+   }
+  }
+  return pages;
+ }finally{
+  await pdf.destroy();
+ }
 }
 function closePdfPreview(){
  pdfPreviewGeneration++;
@@ -2163,7 +2193,10 @@ async function previewCoverLetterPdf(){
   const {jsPDF}=await import('jspdf');
   if(generation!==pdfPreviewGeneration)return;
   const doc=buildCoverLetterPdf(jsPDF,text);
-  showPdfPreview(doc.output('blob'),`${coverLetterFilename()}.pdf`,doc.getNumberOfPages(),'Preview your cover letter PDF');
+  const blob=doc.output('blob');
+  const previewPages=await renderMobilePdfPages(blob,generation);
+  if(generation!==pdfPreviewGeneration)return;
+  showPdfPreview(blob,`${coverLetterFilename()}.pdf`,doc.getNumberOfPages(),'Preview your cover letter PDF',previewPages);
  }catch(error){
   console.error(error);
   if(generation===pdfPreviewGeneration)$('pdfPreviewStatus').textContent=error.message||'Cover letter PDF preview could not be created. Close this window and try again.';
