@@ -49,11 +49,15 @@ export function billingPlanEnvKey(planKey, currency = 'INR') {
   return `RAZORPAY_PLAN_${planKey.toUpperCase()}${currency === 'INR' ? '' : `_${currency}`}_ID`;
 }
 
+function isRazorpayPlanId(value) {
+  return typeof value === 'string' && value.startsWith('plan_') && value.length > 'plan_'.length;
+}
+
 export function billingCurrencyConfigured(currency, env = process.env) {
   return Object.hasOwn(BILLING_CURRENCY_PLANS, currency)
     && Object.keys(BILLING_PLANS).every(planKey => {
       const envKey = billingPlanEnvKey(planKey, currency);
-      return typeof env[envKey] === 'string' && env[envKey].length > 0;
+      return isRazorpayPlanId(env[envKey]);
     });
 }
 
@@ -168,14 +172,21 @@ export function billingConfigured(env = process.env) {
       env.RAZORPAY_PLAN_MONTHLY_ID,
       env.RAZORPAY_PLAN_YEARLY_ID
     ].every(value => typeof value === 'string' && value.length > 0)
+    || ![env.RAZORPAY_PLAN_MONTHLY_ID, env.RAZORPAY_PLAN_YEARLY_ID]
+      .every(isRazorpayPlanId)
     || !firebaseAdminConfigured(env)) {
     return false;
   }
 
   const isTestKey = env.RAZORPAY_KEY_ID.startsWith('rzp_test_');
   if (isTestKey) {
-    return env.VERCEL_ENV === 'preview'
-      && env.BILLING_TEST_MODE_ENABLED === 'true';
+    if (env.VERCEL_ENV === 'preview') {
+      return env.BILLING_TEST_MODE_ENABLED === 'true';
+    }
+
+    const isLocalDevelopment = (env.VERCEL !== '1' && !env.VERCEL_ENV)
+      || (env.VERCEL === '1' && env.VERCEL_ENV === 'development');
+    return isLocalDevelopment && env.BILLING_LOCAL_TEST_MODE_ENABLED === 'true';
   }
   if (env.VERCEL_ENV === 'preview') return false;
 

@@ -121,12 +121,14 @@ test('billing stays disabled until provider, Firebase, terms and refund configur
     RAZORPAY_KEY_ID: 'key_id',
     RAZORPAY_KEY_SECRET: 'secret',
     RAZORPAY_WEBHOOK_SECRET: 'webhook',
-    RAZORPAY_PLAN_MONTHLY_ID: 'monthly',
-    RAZORPAY_PLAN_YEARLY_ID: 'yearly',
-    RAZORPAY_PLAN_MONTHLY_USD_ID: 'monthly_usd',
-    RAZORPAY_PLAN_YEARLY_USD_ID: 'yearly_usd'
+    RAZORPAY_PLAN_MONTHLY_ID: 'plan_monthly',
+    RAZORPAY_PLAN_YEARLY_ID: 'plan_yearly',
+    RAZORPAY_PLAN_MONTHLY_USD_ID: 'plan_monthly_usd',
+    RAZORPAY_PLAN_YEARLY_USD_ID: 'plan_yearly_usd'
   };
   assert.equal(billingConfigured(env), true);
+  assert.equal(billingConfigured({ ...env, RAZORPAY_PLAN_MONTHLY_ID: 'sub_monthly' }), false);
+  assert.equal(billingConfigured({ ...env, RAZORPAY_PLAN_YEARLY_ID: 'sub_yearly' }), false);
   assert.equal(billingConfigured({ ...env, BILLING_REFUNDS_PUBLISHED: 'false' }), false);
   assert.equal(billingConfigured({ ...env, BILLING_TEST_MODE_VERIFIED: 'false' }), false);
   assert.equal(billingConfigured({ ...env, BILLING_LIVE_LAUNCH_APPROVED: 'false' }), false);
@@ -155,6 +157,35 @@ test('Razorpay test checkout is limited to explicitly enabled Vercel Preview dep
   assert.equal(billingConfigured({ ...env, BILLING_TEST_MODE_ENABLED: 'false' }), false);
   assert.equal(billingConfigured({ ...env, RAZORPAY_KEY_ID: 'rzp_live_example' }), false);
   assert.equal(billingConfigured({ ...env, FIREBASE_SERVICE_ACCOUNT_JSON: '' }), false);
+});
+
+test('Razorpay test checkout can be explicitly enabled on localhost only', () => {
+  const env = {
+    BILLING_ENABLED: 'true',
+    BILLING_LOCAL_TEST_MODE_ENABLED: 'true',
+    FIREBASE_SERVICE_ACCOUNT_JSON: JSON.stringify({
+      type: 'service_account',
+      project_id: 'test-project',
+      client_email: 'billing@test-project.iam.gserviceaccount.com',
+      private_key: 'test-private-key'
+    }),
+    RAZORPAY_KEY_ID: 'rzp_test_example',
+    RAZORPAY_KEY_SECRET: 'test-secret',
+    RAZORPAY_WEBHOOK_SECRET: 'test-webhook',
+    RAZORPAY_PLAN_MONTHLY_ID: 'plan_monthly_test',
+    RAZORPAY_PLAN_YEARLY_ID: 'plan_yearly_test'
+  };
+  assert.equal(billingConfigured(env), true);
+  assert.equal(billingConfigured({ ...env, BILLING_LOCAL_TEST_MODE_ENABLED: 'false' }), false);
+  assert.equal(billingConfigured({ ...env, NODE_ENV: 'production' }), true);
+  assert.equal(billingConfigured({ ...env, RAZORPAY_KEY_ID: 'rzp_live_example' }), false);
+  assert.equal(billingConfigured({ ...env, VERCEL: '1', VERCEL_ENV: 'production' }), false);
+  assert.equal(billingConfigured({
+    ...env,
+    VERCEL: '1',
+    VERCEL_ENV: 'preview',
+    BILLING_TEST_MODE_ENABLED: 'false'
+  }), false);
 });
 
 test('Firebase Admin entitlement reads can be enabled while checkout remains disabled', () => {
