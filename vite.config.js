@@ -28,7 +28,8 @@ export default defineConfig({
         pricing: fileURLToPath(new URL('./frontend/pricing.html', import.meta.url)),
         billing: fileURLToPath(new URL('./frontend/billing.html', import.meta.url)),
         terms: fileURLToPath(new URL('./frontend/terms.html', import.meta.url)),
-        refunds: fileURLToPath(new URL('./frontend/refunds.html', import.meta.url))
+        refunds: fileURLToPath(new URL('./frontend/refunds.html', import.meta.url)),
+        support: fileURLToPath(new URL('./frontend/support.html', import.meta.url))
       }
     }
   }
