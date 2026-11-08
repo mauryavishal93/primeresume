@@ -78,6 +78,16 @@ function renderStoredPricing(currency = selectedCurrency) {
   $('#freePrice').setAttribute('aria-busy', 'false');
 }
 
+function useLocalSupportedCurrency(config) {
+  const isLocalHost = ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname);
+  const supportedCurrencies = config.supportedCurrencies || [];
+  if (isLocalHost && config.checkoutEnabled && supportedCurrencies.length
+    && !supportedCurrencies.includes(selectedCurrency)) {
+    selectedCurrency = supportedCurrencies[0];
+    renderStoredPricing(selectedCurrency);
+  }
+}
+
 function updateVoucherControls() {
   const signInRequired = !currentUser;
   const verificationUnavailable = billingConfig?.entitlementEnabled === false;
@@ -193,7 +203,10 @@ async function refreshPricingState(user) {
     return;
   }
   try {
-    if (!billingConfig) billingConfig = await loadBillingConfig();
+    if (!billingConfig) {
+      billingConfig = await loadBillingConfig();
+      useLocalSupportedCurrency(billingConfig);
+    }
     if (billingConfig.entitlementEnabled) entitlement = await loadBillingEntitlement(user);
     if (currentUser?.uid !== user.uid) return;
     updatePurchaseControls();
@@ -331,6 +344,7 @@ $('#pricingVoucherForm').addEventListener('submit', async event => {
 
 loadBillingConfig().then(config => {
   billingConfig = config;
+  useLocalSupportedCurrency(config);
   if (!config.checkoutEnabled) {
     checkoutStatus.textContent = 'Pro checkout is temporarily unavailable. Please try again later.';
   }

@@ -284,6 +284,32 @@ test('billing routes reject unauthenticated and unapproved checkout requests', a
   process.env.BILLING_TEST_MODE_VERIFIED = environment.BILLING_TEST_MODE_VERIFIED;
 });
 
+test('checkout reports a rejected Razorpay Test Mode key pair clearly', async () => {
+  const razorpayRequest = app.locals.razorpayRequest;
+  app.locals.razorpayRequest = async (endpoint, options) => {
+    if (endpoint === '/plans/plan_monthly_test') {
+      const error = new Error('Razorpay request failed with status 401.');
+      error.status = 401;
+      throw error;
+    }
+    return razorpayRequest(endpoint, options);
+  };
+
+  try {
+    const response = await request('/api/billing/subscriptions', {
+      method: 'POST',
+      token: 'fourth-test-token',
+      body: { planKey: 'monthly', currency: 'INR', expectedAmount: 9900 }
+    });
+    const body = await response.json();
+    assert.equal(response.status, 503);
+    assert.match(body.error, /matching Test Mode pair/);
+    assert.match(body.error, /restart the local server/);
+  } finally {
+    app.locals.razorpayRequest = razorpayRequest;
+  }
+});
+
 test('admin pricing stores distinct actual and current values', async () => {
   const save = await request('/api/admin/pricing', {
     method: 'PUT',

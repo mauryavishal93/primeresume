@@ -1,6 +1,6 @@
 .landing-anchor-nav-wrap {
   border-bottom: 1px solid var(--about-line);
-  background: color-mix(in srgb, var(--about-paper) 78%, transparent);
+  background: rgba(255, 255, 255, .78);
 }
 
 .landing-anchor-nav {
@@ -33,7 +33,7 @@
 .landing-anchor-nav a:hover,
 .landing-anchor-nav a:focus-visible {
   border-color: var(--about-line);
-  background: color-mix(in srgb, var(--about-accent) 12%, transparent);
+  background: rgba(115, 132, 255, .12);
   color: var(--about-ink);
 }
 

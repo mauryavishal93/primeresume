@@ -2374,8 +2374,11 @@ app.post('/api/billing/subscriptions', requireBillingConfig, requireFirebaseUser
     });
   } catch (error) {
     console.error('Could not create Razorpay subscription.', error);
-    response.status(error.status === 409 ? 409 : error.status === 400 ? 400 : 502).json({
-      error: error.status === 409
+    const razorpayAuthRejected = error.status === 401;
+    response.status(razorpayAuthRejected ? 503 : error.status === 409 ? 409 : error.status === 400 ? 400 : 502).json({
+      error: razorpayAuthRejected
+        ? 'Razorpay rejected the API credentials. Verify that RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET are a matching Test Mode pair in .env, then restart the local server.'
+        : error.status === 409
         ? error.message
         : error.status === 400
           ? 'The configured payment plan could not be accepted.'
