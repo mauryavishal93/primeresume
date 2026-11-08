@@ -49,15 +49,19 @@ export function billingPlanEnvKey(planKey, currency = 'INR') {
   return `RAZORPAY_PLAN_${planKey.toUpperCase()}${currency === 'INR' ? '' : `_${currency}`}_ID`;
 }
 
+function normalizeEnvString(value) {
+  return typeof value === 'string' ? value.trim() : value;
+}
+
 function isRazorpayPlanId(value) {
-  return typeof value === 'string' && value.startsWith('plan_') && value.length > 'plan_'.length;
+  return typeof value === 'string' && value.trim().startsWith('plan_') && value.trim().length > 'plan_'.length;
 }
 
 export function billingCurrencyConfigured(currency, env = process.env) {
   return Object.hasOwn(BILLING_CURRENCY_PLANS, currency)
     && Object.keys(BILLING_PLANS).every(planKey => {
       const envKey = billingPlanEnvKey(planKey, currency);
-      return isRazorpayPlanId(env[envKey]);
+      return isRazorpayPlanId(normalizeEnvString(env[envKey]));
     });
 }
 
@@ -94,9 +98,10 @@ export function planMatchesRazorpay(plan, expected) {
 }
 
 export function firebaseAdminConfigured(env = process.env) {
-  if (typeof env.FIREBASE_SERVICE_ACCOUNT_JSON !== 'string') return false;
+  const serviceAccountJson = normalizeEnvString(env.FIREBASE_SERVICE_ACCOUNT_JSON);
+  if (typeof serviceAccountJson !== 'string') return false;
   try {
-    const serviceAccount = JSON.parse(env.FIREBASE_SERVICE_ACCOUNT_JSON);
+    const serviceAccount = JSON.parse(serviceAccountJson);
     return serviceAccount.type === 'service_account'
       && typeof serviceAccount.project_id === 'string'
       && typeof serviceAccount.client_email === 'string'
@@ -107,9 +112,10 @@ export function firebaseAdminConfigured(env = process.env) {
 }
 
 export function configuredVouchers(env = process.env) {
-  if (typeof env.PRO_VOUCHERS_JSON !== 'string') return null;
+  const vouchersJson = normalizeEnvString(env.PRO_VOUCHERS_JSON);
+  if (typeof vouchersJson !== 'string') return null;
   try {
-    const vouchers = JSON.parse(env.PRO_VOUCHERS_JSON);
+    const vouchers = JSON.parse(vouchersJson);
     if (!Array.isArray(vouchers) || vouchers.length === 0) return null;
     const codes = new Set();
     for (const voucher of vouchers) {
@@ -134,7 +140,7 @@ export function voucherDocumentId(code) {
 
 export function planKeyForRazorpayPlanId(planId, env = process.env) {
   for (const currency of Object.keys(BILLING_CURRENCY_PLANS)) {
-    const planKey = Object.keys(BILLING_PLANS).find(key => env[billingPlanEnvKey(key, currency)] === planId);
+    const planKey = Object.keys(BILLING_PLANS).find(key => normalizeEnvString(env[billingPlanEnvKey(key, currency)]) === planId);
     if (planKey) return planKey;
   }
   return null;
@@ -142,7 +148,7 @@ export function planKeyForRazorpayPlanId(planId, env = process.env) {
 
 export function currencyForRazorpayPlanId(planId, env = process.env) {
   return Object.keys(BILLING_CURRENCY_PLANS).find(currency => (
-    Object.keys(BILLING_PLANS).some(key => env[billingPlanEnvKey(key, currency)] === planId)
+    Object.keys(BILLING_PLANS).some(key => normalizeEnvString(env[billingPlanEnvKey(key, currency)]) === planId)
   )) || null;
 }
 
@@ -163,35 +169,43 @@ export function entitlementFromSubscription(subscription, fallbackPlan = 'monthl
   };
 }
 
+function parseBoolean(value) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value !== 'string') return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'on';
+}
+
 export function billingConfigured(env = process.env) {
-  if (env.BILLING_ENABLED !== 'true'
-    || ![
-      env.RAZORPAY_KEY_ID,
-      env.RAZORPAY_KEY_SECRET,
-      env.RAZORPAY_WEBHOOK_SECRET,
-      env.RAZORPAY_PLAN_MONTHLY_ID,
-      env.RAZORPAY_PLAN_YEARLY_ID
-    ].every(value => typeof value === 'string' && value.length > 0)
-    || ![env.RAZORPAY_PLAN_MONTHLY_ID, env.RAZORPAY_PLAN_YEARLY_ID]
-      .every(isRazorpayPlanId)
+  const billingEnabled = parseBoolean(normalizeEnvString(env.BILLING_ENABLED));
+  const keyId = normalizeEnvString(env.RAZORPAY_KEY_ID);
+  const keySecret = normalizeEnvString(env.RAZORPAY_KEY_SECRET);
+  const webhookSecret = normalizeEnvString(env.RAZORPAY_WEBHOOK_SECRET);
+  const monthlyPlanId = normalizeEnvString(env.RAZORPAY_PLAN_MONTHLY_ID);
+  const yearlyPlanId = normalizeEnvString(env.RAZORPAY_PLAN_YEARLY_ID);
+
+  if (!billingEnabled
+    || ![keyId, keySecret, webhookSecret, monthlyPlanId, yearlyPlanId]
+      .every(value => typeof value === 'string' && value.length > 0)
+    || ![monthlyPlanId, yearlyPlanId].every(isRazorpayPlanId)
     || !firebaseAdminConfigured(env)) {
     return false;
   }
 
-  const isTestKey = env.RAZORPAY_KEY_ID.startsWith('rzp_test_');
+  const isTestKey = keyId.startsWith('rzp_test_');
   if (isTestKey) {
     if (env.VERCEL_ENV === 'preview') {
-      return env.BILLING_TEST_MODE_ENABLED === 'true';
+      return parseBoolean(normalizeEnvString(env.BILLING_TEST_MODE_ENABLED));
     }
 
     const isLocalDevelopment = (env.VERCEL !== '1' && !env.VERCEL_ENV)
       || (env.VERCEL === '1' && env.VERCEL_ENV === 'development');
-    return isLocalDevelopment && env.BILLING_LOCAL_TEST_MODE_ENABLED === 'true';
+    return isLocalDevelopment && parseBoolean(normalizeEnvString(env.BILLING_LOCAL_TEST_MODE_ENABLED));
   }
   if (env.VERCEL_ENV === 'preview') return false;
 
-  return env.BILLING_TERMS_PUBLISHED === 'true'
-    && env.BILLING_REFUNDS_PUBLISHED === 'true'
-    && env.BILLING_TEST_MODE_VERIFIED === 'true'
-    && env.BILLING_LIVE_LAUNCH_APPROVED === 'true';
+  return parseBoolean(normalizeEnvString(env.BILLING_TERMS_PUBLISHED))
+    && parseBoolean(normalizeEnvString(env.BILLING_REFUNDS_PUBLISHED))
+    && parseBoolean(normalizeEnvString(env.BILLING_TEST_MODE_VERIFIED))
+    && parseBoolean(normalizeEnvString(env.BILLING_LIVE_LAUNCH_APPROVED));
 }

@@ -202,6 +202,52 @@ test('Firebase Admin entitlement reads can be enabled while checkout remains dis
   assert.equal(firebaseAdminConfigured({ FIREBASE_SERVICE_ACCOUNT_JSON: '{invalid' }), false);
 });
 
+test('billing configuration accepts common truthy environment values for checkout flags', () => {
+  const env = {
+    BILLING_ENABLED: 'TRUE',
+    BILLING_TERMS_PUBLISHED: '1',
+    BILLING_REFUNDS_PUBLISHED: 'YES',
+    BILLING_TEST_MODE_VERIFIED: 'on',
+    BILLING_LIVE_LAUNCH_APPROVED: 'true',
+    FIREBASE_SERVICE_ACCOUNT_JSON: JSON.stringify({
+      type: 'service_account',
+      project_id: 'test-project',
+      client_email: 'billing@test-project.iam.gserviceaccount.com',
+      private_key: 'test-private-key'
+    }),
+    RAZORPAY_KEY_ID: 'rzp_live_example',
+    RAZORPAY_KEY_SECRET: 'secret',
+    RAZORPAY_WEBHOOK_SECRET: 'webhook',
+    RAZORPAY_PLAN_MONTHLY_ID: 'plan_monthly',
+    RAZORPAY_PLAN_YEARLY_ID: 'plan_yearly'
+  };
+  assert.equal(billingConfigured(env), true);
+  assert.equal(billingConfigured({ ...env, BILLING_ENABLED: 'FALSE' }), false);
+});
+
+test('billing configuration trims hidden whitespace from Razorpay and Firebase env values', () => {
+  const env = {
+    BILLING_ENABLED: ' true ',
+    BILLING_TERMS_PUBLISHED: ' true ',
+    BILLING_REFUNDS_PUBLISHED: ' true ',
+    BILLING_TEST_MODE_VERIFIED: ' true ',
+    BILLING_LIVE_LAUNCH_APPROVED: ' true ',
+    FIREBASE_SERVICE_ACCOUNT_JSON: ` ${JSON.stringify({
+      type: 'service_account',
+      project_id: 'test-project',
+      client_email: 'billing@test-project.iam.gserviceaccount.com',
+      private_key: 'test-private-key'
+    })} `,
+    RAZORPAY_KEY_ID: ' rzp_live_example ',
+    RAZORPAY_KEY_SECRET: ' secret ',
+    RAZORPAY_WEBHOOK_SECRET: ' webhook ',
+    RAZORPAY_PLAN_MONTHLY_ID: ' plan_monthly ',
+    RAZORPAY_PLAN_YEARLY_ID: ' plan_yearly '
+  };
+  assert.equal(billingConfigured(env), true);
+  assert.equal(planKeyForRazorpayPlanId('plan_monthly', env), 'monthly');
+});
+
 test('voucher configuration validates durations and redemption caps without exposing codes in IDs', () => {
   const env = {
     PRO_VOUCHERS_JSON: JSON.stringify([
