@@ -491,9 +491,9 @@ async function requireAdmin(request, response, next) {
 
 function razorpayConfiguration() {
   return {
-    keyId: process.env.RAZORPAY_KEY_ID,
-    keySecret: process.env.RAZORPAY_KEY_SECRET,
-    webhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET
+    keyId: (process.env.RAZORPAY_KEY_ID || '').trim(),
+    keySecret: (process.env.RAZORPAY_KEY_SECRET || '').trim(),
+    webhookSecret: (process.env.RAZORPAY_WEBHOOK_SECRET || '').trim()
   };
 }
 
@@ -522,8 +522,9 @@ async function razorpayRequest(endpoint, { method = 'GET', body } = {}) {
 
 function providerPlanId(planKey, currency = 'INR', pricing = {}) {
   const envKey = billingPlanEnvKey(planKey, currency);
+  const envValue = envKey ? (process.env[envKey] || '').trim() : '';
   return pricing?.providerPlanIds?.[currency]?.[planKey]
-    || (envKey ? process.env[envKey] : null);
+    || (envValue || null);
 }
 
 function pricingPlanEntry(pricing, planKey, currency) {
@@ -1450,7 +1451,7 @@ app.get('/api/billing/config', async (_request, response) => {
       supportedCurrencies,
       entitlementEnabled: firebaseAdminConfigured(),
       voucherEnabled: firebaseAdminConfigured(),
-      keyId: checkoutEnabled ? process.env.RAZORPAY_KEY_ID : null,
+      keyId: checkoutEnabled ? (process.env.RAZORPAY_KEY_ID || '').trim() || null : null,
       plans: currencyPlans.INR,
       currencyPlans
     });
