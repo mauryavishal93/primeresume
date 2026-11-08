@@ -680,8 +680,17 @@ function calculateDiscount(actualPrice, currentPrice) {
   return Math.max(0, Math.min(100, Math.round(((actualPrice - currentPrice) / actualPrice) * 100)));
 }
 
+function normalizePricingAnnouncement(value) {
+  const text = String(value ?? '')
+    .replace(/<[^>]*>/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return text.slice(0, 240);
+}
+
 function normalizePricingConfig(rawConfig = {}) {
   const providerPlanIds = { INR: {}, USD: {} };
+  const announcement = normalizePricingAnnouncement(rawConfig?.announcement ?? rawConfig?.priceAnnouncement ?? rawConfig?.message ?? rawConfig?.notice);
   const normalizePlan = (planKey, currency) => {
     const basePlan = billingPlan(planKey, currency);
     const rawPlan = pricingPlanEntry(rawConfig, planKey, currency);
@@ -715,6 +724,7 @@ function normalizePricingConfig(rawConfig = {}) {
       monthly: usdMonthly,
       yearly: usdYearly
     },
+    announcement,
     providerPlanIds,
     updatedAt: Date.now()
   };
@@ -1354,6 +1364,7 @@ app.get('/api/admin/pricing', requireFirebaseUser, requireAdmin, async (_request
 
 app.put('/api/admin/pricing', requireFirebaseUser, requireAdmin, async (request, response) => {
   const rawPricing = request.body?.pricing || request.body || {};
+  const announcement = normalizePricingAnnouncement(rawPricing?.announcement ?? rawPricing?.priceAnnouncement ?? rawPricing?.message ?? rawPricing?.notice);
   const defaultPricing = normalizePricingConfig({});
   const requestedPlans = {};
   for (const currency of ['INR', 'USD']) {
@@ -1433,7 +1444,8 @@ app.put('/api/admin/pricing', requireFirebaseUser, requireAdmin, async (request,
         monthly: requestedPlans.USD.monthly,
         yearly: requestedPlans.USD.yearly
       },
-      providerPlanIds
+      providerPlanIds,
+      announcement
     });
     await db.doc('appConfig/pricing').set(pricing, { merge: true });
     response.json({ pricing: publicPricingConfig(pricing) });

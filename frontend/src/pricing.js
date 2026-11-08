@@ -15,6 +15,7 @@ const checkoutStatus = $('#checkoutStatus');
 const monthlyButton = $('#purchaseMonthly');
 const yearlyButton = $('#purchaseYearly');
 const supportDialog = $('#supportDialog');
+const pricingAnnouncement = $('#pricingAnnouncement');
 const voucherSection = $('#pricingVoucherSection');
 const voucherInput = $('#pricingVoucherCode');
 const voucherButton = $('#redeemPricingVoucher');
@@ -59,6 +60,12 @@ function renderStoredPricing(currency = selectedCurrency) {
   const monthlyCurrent = getConfiguredPrice('monthly', planConfig.monthly.price, currency);
   const yearlyActual = getConfiguredActualPrice('yearly', planConfig.yearly.price, currency);
   const yearlyCurrent = getConfiguredPrice('yearly', planConfig.yearly.price, currency);
+
+  const announcement = window.__pricingConfig?.announcement || '';
+  if (pricingAnnouncement) {
+    pricingAnnouncement.textContent = announcement;
+    pricingAnnouncement.hidden = !announcement;
+  }
 
   const renderPlanPrice = (node, currentPrice, actualPrice, suffixLabel) => {
     const discount = actualPrice > currentPrice ? Math.round(((actualPrice - currentPrice) / actualPrice) * 100) : 0;

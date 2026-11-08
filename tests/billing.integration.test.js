@@ -322,6 +322,7 @@ test('admin pricing stores distinct actual and current values', async () => {
     token: 'admin-test-token',
     body: {
       pricing: {
+        announcement: 'Limited-time price drop: launch pricing is now discounted to make Pro more accessible.',
         monthly: { actualPrice: 199, currentPrice: 99 },
         yearly: { actualPrice: 499, currentPrice: 399 },
         USD: {
@@ -339,6 +340,7 @@ test('admin pricing stores distinct actual and current values', async () => {
   assert.equal(saved.pricing.yearly.currentPrice, 399);
   assert.equal(saved.pricing.USD.monthly.currentPrice, 3.67);
   assert.equal(saved.pricing.USD.yearly.currentPrice, 49.37);
+  assert.match(saved.pricing.announcement, /price drop/i);
 
   const load = await request('/api/admin/pricing', { token: 'admin-test-token' });
   const loaded = await load.json();
@@ -348,6 +350,7 @@ test('admin pricing stores distinct actual and current values', async () => {
   assert.equal(loaded.pricing.yearly.currentPrice, 399);
   assert.equal(loaded.pricing.USD.monthly.currentPrice, 3.67);
   assert.equal(loaded.pricing.USD.yearly.currentPrice, 49.37);
+  assert.match(loaded.pricing.announcement, /price drop/i);
 
   const invalidPrice = await request('/api/admin/pricing', {
     method: 'PUT',
