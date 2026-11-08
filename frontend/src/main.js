@@ -746,10 +746,24 @@ function sheetHTML(index,cols){
  }
  return `<div class="sheet-inner">${head}<div class="sections-area">${cols?'<div class="section-columns"><div class="section-column"></div><div class="section-column"></div></div>':''}</div></div><div class="page-number"></div>`;
 }
+function rgbaFromHex(hex,alpha=1){
+ const value=String(hex||'#1f2937').trim();
+ const normalized=value.startsWith('#')?value.slice(1):value;
+ const expanded=normalized.length===3?normalized.split('').map(ch=>ch+ch).join(''):normalized;
+ const safe=expanded.length===6?expanded:'1f2937';
+ const int=Number.parseInt(safe,16);
+ const r=(int>>16)&255;const g=(int>>8)&255;const b=int&255;
+ return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
 function createSheet(index,tmpl,cols){
  const d=state.design,el=document.createElement('article'),set=(k,v)=>el.style.setProperty(k,v);
+ const accent=d.accent||tmpl.accent;
  el.className=`sheet ${tmpl.cls}`;el.dataset.page=String(index+1);
- set('--resume-accent',d.accent||tmpl.accent);set('--resume-font',d.font||'Arial');
+ set('--resume-accent',accent);
+ set('--resume-accent-soft',rgbaFromHex(accent,.12));
+ set('--resume-accent-mid',rgbaFromHex(accent,.28));
+ set('--resume-accent-strong',rgbaFromHex(accent,.56));
+ set('--resume-font',d.font||'Arial');
  set('--resume-size',clamp(d.fontSize,8,24,12)+'px');set('--resume-heading',clamp(d.headingSize,10,28,15)+'px');
  set('--mx',clamp(d.margin,0,100,DEFAULT_MARGIN)+'px');set('--mt',clamp(d.marginY,0,100,DEFAULT_MARGIN)+'px');set('--mb',clamp(d.marginY,0,100,DEFAULT_MARGIN)+'px');
  el.dataset.halign=['left','center','right'].includes(d.headerAlign)?d.headerAlign:'';set('--page-no-h',d.pageNumbers?'26px':'0px');set('--area-pt',index>0?clamp(d.marginY,0,100,DEFAULT_MARGIN)+'px':(tmpl.banner?'16px':'0px'));
@@ -1665,17 +1679,27 @@ function normalizePdfCaptureColors(clonedDocument){
  clonedDocument.querySelectorAll('.sheet .selected').forEach(element=>element.classList.remove('selected'));
  const stripUnsupportedDeclarations=style=>{
   for(const property of [...style]){
-   if(/(?:color-mix|color)\(/i.test(style.getPropertyValue(property)))style.removeProperty(property);
+   const value=style.getPropertyValue(property);
+   if(/(?:color-mix|color\s*\()/i.test(value))style.removeProperty(property);
   }
  };
  const stripUnsupportedColors=rules=>{
   for(const rule of rules){
    if(rule.cssRules)stripUnsupportedColors(rule.cssRules);
    if(rule.style)stripUnsupportedDeclarations(rule.style);
+   if(rule.type===CSSRule.MEDIA)stripUnsupportedColors(rule.cssRules);
   }
  };
  clonedDocument.querySelectorAll('.sheet [style]').forEach(element=>stripUnsupportedDeclarations(element.style));
- for(const stylesheet of clonedDocument.styleSheets)stripUnsupportedColors(stylesheet.cssRules);
+ for(const stylesheet of clonedDocument.styleSheets){
+  try{stripUnsupportedColors(stylesheet.cssRules);}catch(error){console.warn('Could not sanitize PDF capture stylesheet.',error);}
+ }
+ const captureFallback=document.createElement('style');
+ captureFallback.textContent='\
+  .sheet *, .sheet *::before, .sheet *::after { color: inherit !important; background: transparent !important; box-shadow: none !important; border-color: currentColor !important; }\
+  .sheet { color: var(--resume-accent, #1f2937) !important; }\
+';
+ clonedDocument.head.appendChild(captureFallback);
 }
 async function exportPDF(templateId=null){
  const originalState=state,originalSelection=selectedId,originalZoom=zoom;
