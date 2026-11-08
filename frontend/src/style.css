@@ -22,11 +22,11 @@
 /* ===== A4 sheet: ONE margin system =====
    --mx  left/right page margin, --mt/--mb top/bottom page margin.
    Header and body both take their horizontal inset from --mx only, so nothing stacks. */
-.sheets{display:flex;flex-direction:column;align-items:center;gap:24px;min-height:300px;touch-action:pan-x pan-y}
-.sheet{width:794px;height:1122px;flex:0 0 1122px;position:relative;overflow:hidden;background:#fff;border:1px solid #dfe4eb;box-shadow:0 1px 2px rgba(23,37,61,.08),0 5px 10px rgba(23,37,61,.09),0 14px 26px rgba(23,37,61,.11),0 30px 48px rgba(23,37,61,.08);color:#202a3a;transform-origin:top center;font-family:var(--resume-font);--resume-accent:var(--accent);--resume-font:Arial,sans-serif;--resume-size:12px;--resume-heading:15px;--mx:32px;--mt:32px;--mb:32px;--page-no-h:26px;--area-pt:0px;--col-gap:20px;--c1:1.2fr;--c2:.8fr}
+#sheets,.sheets{display:flex;flex-direction:column;align-items:center;gap:24px;min-height:300px;touch-action:pan-x pan-y;background:linear-gradient(180deg,#b8c1cd 0%,#a7b2bf 100%);border-radius:20px;padding:20px 16px 18px;box-shadow:inset 0 1px 0 rgba(255,255,255,.35),inset 0 0 0 1px rgba(71,85,105,.12),0 12px 24px rgba(55,65,81,.12);perspective:1400px}
+.sheet{width:794px;height:1122px;flex:0 0 1122px;position:relative;overflow:hidden;background:#fff;border:1px solid rgba(148,163,184,.65);border-radius:14px;box-shadow:0 22px 44px rgba(15,23,42,.24),0 8px 18px rgba(15,23,42,.16),0 0 0 1px rgba(148,163,184,.22);color:#202a3a;transform:perspective(1200px) translateY(-2px);transform-origin:top center;font-family:var(--resume-font);--resume-accent:var(--accent);--resume-font:Arial,sans-serif;--resume-size:12px;--resume-heading:15px;--mx:32px;--mt:32px;--mb:32px;--page-no-h:26px;--area-pt:0px;--col-gap:20px;--c1:1.2fr;--c2:.8fr}
 .structured-line-enter{animation:structured-page-appear .16s ease-out both}
 @keyframes structured-page-appear{from{opacity:.55}to{opacity:1}}
-.sheet-inner{height:100%;width:100%;padding:0;display:flex;flex-direction:column;overflow:hidden}
+.sheet-inner{height:100%;width:100%;padding:0;display:flex;flex-direction:column;overflow:hidden;border-radius:inherit;box-shadow:inset 0 1px 0 rgba(255,255,255,.8),0 14px 22px rgba(15,23,42,.12)}
 .resume-header{flex:none;margin:var(--mt) var(--mx) 16px;padding:0}
 .name{font-size:31px;line-height:1.15;font-weight:800;letter-spacing:-.6px;color:var(--resume-accent);margin:0 0 5px}
 .headline{font-size:14px;font-weight:600;color:#5c6678;margin-bottom:8px}
