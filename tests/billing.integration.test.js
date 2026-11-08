@@ -2,7 +2,7 @@ import test, { after, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { voucherDocumentId } from '../backend/billing.js';
-import { app } from '../backend/server.js';
+import { adminEmails, app, normalizeAdminEmail } from '../backend/server.js';
 
 const environment = {
   BILLING_ENABLED: 'true',
@@ -10,7 +10,7 @@ const environment = {
   BILLING_REFUNDS_PUBLISHED: 'true',
   BILLING_TEST_MODE_VERIFIED: 'true',
   BILLING_LIVE_LAUNCH_APPROVED: 'true',
-  ADMIN_EMAILS: 'admin@example.com',
+  ADMIN_EMAILS: 'mauryavishal93@gmail.com',
   FIREBASE_SERVICE_ACCOUNT_JSON: JSON.stringify({
     type: 'service_account',
     project_id: 'test-project',
@@ -32,6 +32,12 @@ const environment = {
 const previousEnvironment = Object.fromEntries(
   Object.keys(environment).map(key => [key, process.env[key]])
 );
+
+test('admin email allow list normalizes accidental duplicate @ characters and whitespace', () => {
+  process.env.ADMIN_EMAILS = ' mauryavishal93@@gmail.com , admin@example.com  ';
+  assert.equal(normalizeAdminEmail('mauryavishal93@@gmail.com'), 'mauryavishal93@gmail.com');
+  assert.deepEqual(adminEmails(), ['mauryavishal93@gmail.com', 'admin@example.com']);
+});
 
 function createFakeDatabase() {
   const records = new Map();

@@ -471,10 +471,27 @@ async function loadForumContent(db, kind, cursor, userUid = null) {
   };
 }
 
-function isAdminUser(user) {
+export function normalizeAdminEmail(value) {
+  if (typeof value !== 'string') return '';
+  const cleaned = value.trim().replace(/^['"]+|['"]+$/g, '').replace(/\s+/g, '').toLowerCase().replace(/@+/g, '@');
+  if (!cleaned || (cleaned.match(/@/g) || []).length !== 1) return '';
+  const [localPart, domainPart] = cleaned.split('@');
+  if (!localPart || !domainPart || localPart.includes('..') || domainPart.includes('..')) return '';
+  return `${localPart}@${domainPart}`;
+}
+
+export function adminEmails() {
+  return (process.env.ADMIN_EMAILS || '')
+    .split(/[\n,;]+/)
+    .map(normalizeAdminEmail)
+    .filter(Boolean);
+}
+
+export function isAdminUser(user) {
   if (user?.admin === true || user?.claims?.admin === true) return true;
-  const allowed = (process.env.ADMIN_EMAILS || '').split(',').map(value => value.trim().toLowerCase()).filter(Boolean);
-  return Boolean(user?.email && allowed.includes(user.email.toLowerCase()));
+  const email = normalizeAdminEmail(user?.email || '');
+  if (!email) return false;
+  return adminEmails().includes(email);
 }
 
 async function requireAdmin(request, response, next) {
