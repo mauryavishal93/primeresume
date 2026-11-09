@@ -33,7 +33,7 @@ const loadFirebaseSdk = () => Promise.all([
       import('firebase/firestore')
     ]);
 
-export function createFirebaseCloudClient({ config = firebaseConfig, loadSdk = loadFirebaseSdk } = {}) {
+export function createFirebaseCloudClient({ config = firebaseConfig, loadSdk = loadFirebaseSdk, fetchImpl = globalThis.fetch } = {}) {
   const isConfigured = Object.values(config).every(value => typeof value === 'string' && value.length > 0);
   let servicesPromise;
 
@@ -59,6 +59,77 @@ export function createFirebaseCloudClient({ config = firebaseConfig, loadSdk = l
 
   function editorPreference(firestoreSdk, db, uid) {
     return firestoreSdk.doc(db, 'users', uid, 'preferences', 'resumeEditor');
+  }
+
+  function requireCurrentAccount(auth, uid) {
+    if (!auth.currentUser || auth.currentUser.uid !== uid) {
+      throw new Error('Sign in to the account you want to update.');
+    }
+  }
+
+  function validateAccountProfile(displayName, mobileNumber, photoDataUrl = '') {
+    const name = typeof displayName === 'string' ? displayName.trim() : '';
+    const mobile = typeof mobileNumber === 'string' ? mobileNumber.trim() : null;
+    const photo = typeof photoDataUrl === 'string' ? photoDataUrl : null;
+    if (!name || name.length > 80) throw new Error('Enter a name between 1 and 80 characters.');
+    if (mobile === null || mobile.length > 24 || !/^[+0-9() .-]*$/.test(mobile)
+      || (mobile && (mobile.match(/\d/g) || []).length < 7)
+      || (mobile && (mobile.match(/\d/g) || []).length > 15)) {
+      throw new Error('Enter a valid mobile number with 7 to 15 digits.');
+    }
+    if (photo === null || photo.length > 140000
+      || (photo && !/^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(photo))) {
+      throw new Error('Choose a valid profile image smaller than 100 KB.');
+    }
+    return { name, mobile, photo };
+  }
+
+  async function getAccountProfile(user) {
+    if (!user?.uid) throw new Error('Sign in to view your account details.');
+    const { auth } = await getServices();
+    requireCurrentAccount(auth, user.uid);
+    const token = await getFirebaseIdToken(user);
+    const response = await fetchImpl('/api/account/profile', {
+      headers: { authorization: `Bearer ${token}` },
+      cache: 'no-store'
+    });
+    const profile = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(profile.error || 'Could not load your account details. Please try again.');
+    const { mobileNumber, photoDataUrl = '' } = profile;
+    if (typeof mobileNumber !== 'string' || typeof photoDataUrl !== 'string'
+      || photoDataUrl.length > 140000
+      || (photoDataUrl && !/^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(photoDataUrl))) {
+      throw new Error('Your saved account details are invalid. Contact support for help.');
+    }
+    return { mobileNumber, photoDataUrl };
+  }
+
+  async function saveAccountProfile(user, displayName, mobileNumber, photoDataUrl = '') {
+    if (!user?.uid) throw new Error('Sign in to update your account details.');
+    const profile = validateAccountProfile(displayName, mobileNumber, photoDataUrl);
+    const { auth } = await getServices();
+    requireCurrentAccount(auth, user.uid);
+    const token = await getFirebaseIdToken(user);
+    const response = await fetchImpl('/api/account/profile', {
+      method: 'PUT',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({
+        displayName: profile.name,
+        mobileNumber: profile.mobile,
+        photoDataUrl: profile.photo
+      })
+    });
+    const savedProfile = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(savedProfile.error || 'Could not save your account details. Please try again.');
+    await auth.currentUser.reload();
+    return {
+      name: savedProfile.displayName,
+      mobile: savedProfile.mobileNumber,
+      photo: savedProfile.photoDataUrl
+    };
   }
 
   function observeAuth(callback) {
@@ -231,6 +302,8 @@ export function createFirebaseCloudClient({ config = firebaseConfig, loadSdk = l
     signInWithGoogle,
     signOutUser,
     getFirebaseIdToken,
+    getAccountProfile,
+    saveAccountProfile,
     listResumes,
     getLastWorkedResumeId,
     setLastWorkedResumeId,
@@ -246,6 +319,8 @@ export const observeAuth = defaultClient.observeAuth;
 export const signInWithGoogle = defaultClient.signInWithGoogle;
 export const signOutUser = defaultClient.signOutUser;
 export const getFirebaseIdToken = defaultClient.getFirebaseIdToken;
+export const getAccountProfile = defaultClient.getAccountProfile;
+export const saveAccountProfile = defaultClient.saveAccountProfile;
 export const listResumes = defaultClient.listResumes;
 export const getLastWorkedResumeId = defaultClient.getLastWorkedResumeId;
 export const setLastWorkedResumeId = defaultClient.setLastWorkedResumeId;

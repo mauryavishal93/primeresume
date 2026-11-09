@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="View and update your ResumeOut.com account details.">
+  <title>My account | ResumeOut.com</title>
+  <link rel="icon" type="image/svg+xml" href="/images/resumeout-mark.svg">
+  <link rel="stylesheet" href="/src/about.css">
+  <link rel="stylesheet" href="/src/my-account.css">
+  <script type="module" src="/src/theme.js"></script>
+  <script type="module" src="/src/auth-nav.js"></script>
+  <script type="module" src="/src/my-account.js"></script>
+</head>
+<body class="about-page my-account-page">
+  <header class="about-header">
+    <a class="about-brand" href="/home.html" aria-label="ResumeOut.com home">
+      <img class="about-logo" src="/images/resumeout-mark.svg" alt="" aria-hidden="true">
+      <span class="about-brand-name"><span class="brand-resume">Resume</span><span class="brand-out">Out</span><span class="brand-domain">.com</span></span>
+    </a>
+    <nav class="about-nav" aria-label="Main navigation">
+      <button class="theme-switch" type="button" role="switch" data-theme-toggle aria-checked="false" aria-label="Dark theme">
+        <span class="theme-switch-track" aria-hidden="true"><span class="theme-switch-thumb"></span></span>
+        <span class="theme-switch-label">Dark</span>
+      </button>
+      <div class="auth-actions">
+        <button class="btn google-signin" type="button" data-auth-sign-in><span data-auth-sign-in-label>Sign in with Google</span></button>
+        <button class="btn outline" type="button" data-auth-sign-out hidden>Sign out</button>
+        <span class="auth-status" data-auth-status role="status" aria-live="polite"></span>
+      </div>
+      <a class="btn outline" href="/community.html">Community</a>
+      <a class="btn outline" href="/pricing.html">Plans</a>
+      <a class="btn soft about-editor" href="/editor.html">Open editor</a>
+    </nav>
+  </header>
+
+  <main class="my-account-main">
+    <section class="my-account-card" aria-labelledby="accountTitle">
+      <p class="about-eyebrow">Account settings</p>
+      <h1 id="accountTitle">My account</h1>
+      <p class="my-account-intro">Manage the personal details connected to your ResumeOut.com account.</p>
+      <p class="my-account-status" id="accountStatus" role="status" aria-live="polite">Checking your sign-in…</p>
+      <form id="accountForm" hidden>
+        <div class="my-account-photo-row">
+          <div class="my-account-avatar" id="accountPhotoPreview" aria-label="Profile photo">U</div>
+          <div class="my-account-photo-controls">
+            <label class="my-account-photo-button" for="accountPhoto">Add profile photo</label>
+            <input id="accountPhoto" name="photo" type="file" accept="image/jpeg,image/png,image/webp">
+            <button class="my-account-remove-photo" id="removeAccountPhoto" type="button" hidden>Remove photo</button>
+            <small>JPG, PNG, or WebP. Images are resized before saving.</small>
+          </div>
+        </div>
+        <fieldset id="accountFields" disabled>
+          <label class="my-account-field" for="accountName">
+            <span>Name</span>
+            <input id="accountName" name="name" type="text" maxlength="80" autocomplete="name" required>
+          </label>
+          <label class="my-account-field" for="accountEmail">
+            <span>Email address</span>
+            <input id="accountEmail" name="email" type="email" autocomplete="email" readonly aria-describedby="emailHelp">
+            <small id="emailHelp">Your sign-in email cannot be changed here.</small>
+          </label>
+          <label class="my-account-field" for="accountMobile">
+            <span>Mobile number <span class="my-account-optional">(optional)</span></span>
+            <input id="accountMobile" name="mobile" type="tel" maxlength="24" autocomplete="tel" inputmode="tel" placeholder="+1 555 123 4567">
+            <small>Include your country code if you want to.</small>
+          </label>
+        </fieldset>
+        <div class="my-account-actions">
+          <button class="btn primary" id="saveAccount" type="submit" disabled>Save changes</button>
+        </div>
+      </form>
+      <p class="my-account-signin" id="accountSignIn" hidden>Sign in with Google to view and edit your account details.</p>
+    </section>
+  </main>
+</body>
+</html>

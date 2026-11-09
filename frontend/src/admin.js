@@ -702,8 +702,15 @@ $('#save-pricing-config').addEventListener('click', async () => {
     renderPricingConfig(result.pricing || result);
     $('#pricing-config-status').textContent = 'Saved';
   } catch (error) {
-    $('#pricing-config-status').textContent = 'Failed';
-    await alertModern({ title: 'Could not save pricing', message: error.message, variant: 'error' });
+    const reason = error instanceof Error ? error.message : String(error);
+    const cleanReason = reason.replace(/\s*No pricing changes were published\.\s*$/, '').trim();
+    const finalReason = cleanReason.replace(/^Could not create or verify Razorpay plans\.\s*/, '').trim();
+    $('#pricing-config-status').textContent = finalReason || 'Pricing update failed';
+    await alertModern({
+      title: 'Razorpay pricing check failed',
+      message: finalReason || 'The pricing update could not be published. Please review the Razorpay account settings and try again.',
+      variant: 'default'
+    });
   } finally {
     saveButton.disabled = false;
   }
@@ -805,8 +812,19 @@ async function openUserDetail(uid) {
     const entitlement = details.entitlement || {};
     const activation = entitlement.billingPlan === 'voucher' ? `Voucher${details.voucher?.code ? ` · ${details.voucher.code}` : ''}` : entitlement.source === 'admin' ? `Admin · ${entitlement.billingPlan || 'Pro'}` : entitlement.planId === 'pro' ? `${entitlement.billingPlan || 'Pro'} plan` : 'Free';
     const payments = (details.payments || []).map(payment => `<li><strong>${escapeHtml(payment.id)}</strong><span>${escapeHtml(payment.status || 'unknown')} · ${formatMoney(payment.amount, payment.currency || 'INR')}</span><small>${payment.createdAt ? new Date(payment.createdAt).toLocaleString() : 'Date unavailable'}</small></li>`).join('');
+    const accessHistory = (details.accessHistory || []).map(record => {
+      const plan = record.planKey === 'yearly' ? 'Pro Yearly' : record.planKey === 'monthly' ? 'Pro Monthly' : 'Pro Voucher';
+      const validity = record.validUntil
+        ? `${record.validFrom ? new Date(record.validFrom).toLocaleString() : 'Start date unavailable'} – ${new Date(record.validUntil).toLocaleString()}`
+        : 'Validity unavailable';
+      const amount = Number(record.amount) > 0
+        ? formatMoney(record.amount, record.currency || 'INR')
+        : 'No charge';
+      const payment = record.paymentId ? ` · Payment ${record.paymentId}` : '';
+      return `<li><strong>${escapeHtml(plan)} · ${escapeHtml(record.paymentMode || record.source || 'unknown')} · ${escapeHtml(amount)}</strong><span>${escapeHtml(record.status || 'unknown')} · ${escapeHtml(validity)}</span><small>Subscription ${escapeHtml(record.subscriptionId || '—')}${escapeHtml(payment)}</small></li>`;
+    }).join('');
     const activity = (details.activity || []).map(item => `<li><strong>${escapeHtml(item.title || item.type || 'Billing activity')}</strong><span>${escapeHtml(item.detail || item.message || '')}</span><small>${item.occurredAt || item.createdAt ? new Date(item.occurredAt || item.createdAt).toLocaleString() : 'Date unavailable'}</small></li>`).join('');
-    $('#detail-body').innerHTML = `<div class="detail-summary"><article><span>Account ID</span><strong>${escapeHtml(uid)}</strong></article><article><span>Email</span><strong>${escapeHtml(details.email || 'Not available')}</strong></article><article><span>Account created</span><strong>${details.createdAt ? new Date(details.createdAt).toLocaleString() : 'Not available'}</strong></article><article><span>Current activation</span><strong>${escapeHtml(activation)}</strong></article><article><span>Pro expires</span><strong>${entitlement.validUntil ? new Date(entitlement.validUntil).toLocaleString() : '—'}</strong></article><article><span>Total paid</span><strong>${formatMoneyByCurrency(details.paidAmountByCurrency || { INR: details.paidAmount })}</strong></article></div><div class="detail-columns"><section><h3>Payment history</h3><ul class="detail-list">${payments || '<li class="empty">No payments recorded.</li>'}</ul></section><section><h3>Pro & billing activity</h3><ul class="detail-list">${activity || '<li class="empty">No activity recorded.</li>'}</ul></section></div>`;
+    $('#detail-body').innerHTML = `<div class="detail-summary"><article><span>Account ID</span><strong>${escapeHtml(uid)}</strong></article><article><span>Email</span><strong>${escapeHtml(details.email || 'Not available')}</strong></article><article><span>Account created</span><strong>${details.createdAt ? new Date(details.createdAt).toLocaleString() : 'Not available'}</strong></article><article><span>Current activation</span><strong>${escapeHtml(activation)}</strong></article><article><span>Pro expires</span><strong>${entitlement.validUntil ? new Date(entitlement.validUntil).toLocaleString() : '—'}</strong></article><article><span>Total paid</span><strong>${formatMoneyByCurrency(details.paidAmountByCurrency || { INR: details.paidAmount })}</strong></article></div><div class="detail-columns"><section><h3>Subscription & voucher access history</h3><ul class="detail-list">${accessHistory || '<li class="empty">No access history recorded.</li>'}</ul></section><section><h3>Payment history</h3><ul class="detail-list">${payments || '<li class="empty">No payments recorded.</li>'}</ul></section><section><h3>Pro & billing activity</h3><ul class="detail-list">${activity || '<li class="empty">No activity recorded.</li>'}</ul></section></div>`;
   } catch (error) { $('#detail-body').innerHTML = `<p class="detail-error">${escapeHtml(error.message)}</p>`; }
 }
 $('#close-detail').addEventListener('click', () => $('#user-detail').close());

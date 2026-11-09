@@ -1,7 +1,8 @@
-import { cloudConfigured, googleSignInErrorMessage, observeAuth, signInWithGoogle, signOutUser } from './firebase-cloud.js';
+import { cloudConfigured, getAccountProfile, googleSignInErrorMessage, observeAuth, signInWithGoogle, signOutUser } from './firebase-cloud.js';
 import { loadBillingConfig, loadBillingEntitlement } from './billing-client.js';
 import { canUseFeature, FEATURE_IDS } from './plan-access.js';
 import { confirmModern } from './modern-modal.js';
+import { setAccountAvatar } from './account-avatar.js';
 
 const nav = document.querySelector('.about-nav');
 const signInButton = document.querySelector('[data-auth-sign-in]');
@@ -62,8 +63,9 @@ function createAccountMenu() {
   profile.append(largeAvatar, identity);
   panel.append(profile);
 
-  const cloudLink = addMenuItem(panel, 'a', 'account-menu-item', 'My cloud resumes', '/editor.html?open=cloud');
-  cloudLink.hidden = true;
+  const accountLink = addMenuItem(panel, 'a', 'account-menu-item', 'My account', '/my-account.html');
+  accountLink.hidden = true;
+  if (location.pathname === '/my-account.html') accountLink.setAttribute('aria-current', 'page');
   const myPostsLink = addMenuItem(panel, 'a', 'account-menu-item', 'My posts', '/my-posts.html');
   myPostsLink.hidden = true;
   if (location.pathname === '/my-posts.html') myPostsLink.setAttribute('aria-current', 'page');
@@ -128,10 +130,22 @@ function createAccountMenu() {
     }
   });
 
-  return { menu, summary, avatar, largeAvatar, name, email, about, billingLink, cloudLink, myPostsLink };
+  return { menu, summary, avatar, largeAvatar, name, email, about, accountLink, billingLink, myPostsLink };
 }
 
 const accountMenu = createAccountMenu();
+
+window.addEventListener('account-profile-updated', event => {
+  const { uid, displayName, photoDataUrl } = event.detail || {};
+  if (!accountMenu || !currentUser || currentUser.uid !== uid) return;
+  const accountName = displayName || currentUser.email?.split('@')[0] || 'Google user';
+  const initial = Array.from(accountName)[0]?.toLocaleUpperCase() || 'U';
+  accountMenu.name.textContent = accountName;
+  accountMenu.summary.setAttribute('aria-label', `Account menu for ${accountName}`);
+  const photo = photoDataUrl || currentUser.photoURL || '';
+  setAccountAvatar(accountMenu.avatar, initial, photo);
+  setAccountAvatar(accountMenu.largeAvatar, initial, photo);
+});
 
 function updateProBadge(entitlement) {
   const hasPro = canUseFeature(FEATURE_IDS.ALL_TEMPLATES, entitlement);
@@ -179,8 +193,8 @@ function updateAuthControls(user, error) {
       accountMenu.avatar.textContent = 'G';
       accountMenu.largeAvatar.textContent = 'G';
       accountMenu.summary.setAttribute('aria-label', 'Account menu');
+      accountMenu.accountLink.hidden = true;
       accountMenu.myPostsLink.hidden = true;
-      accountMenu.cloudLink.hidden = true;
     }
     if (signOutButton) signOutButton.hidden = true;
     return;
@@ -203,28 +217,44 @@ function updateAuthControls(user, error) {
   if (status) status.textContent = user ? `Signed in as ${user.email || user.displayName || 'Google user'}.` : 'You are signed out.';
   if (accountMenu) {
     accountMenu.menu.hidden = false;
-    accountMenu.cloudLink.hidden = !user;
     accountMenu.myPostsLink.hidden = !user;
     if (user) {
       const accountName = user.displayName?.trim() || user.email?.split('@')[0] || 'Google user';
       const initial = Array.from(accountName)[0]?.toLocaleUpperCase() || 'U';
       accountMenu.avatar.textContent = initial;
       accountMenu.largeAvatar.textContent = initial;
+      setAccountAvatar(accountMenu.avatar, initial, user.photoURL || '');
+      setAccountAvatar(accountMenu.largeAvatar, initial, user.photoURL || '');
       accountMenu.name.textContent = accountName;
       accountMenu.email.textContent = user.email || '';
       accountMenu.summary.setAttribute('aria-label', `Account menu for ${accountName}`);
+      accountMenu.accountLink.hidden = false;
       if (location.pathname === '/about.html') accountMenu.about.setAttribute('aria-current', 'page');
       else accountMenu.about.removeAttribute('aria-current');
       if (location.pathname === '/billing.html') accountMenu.billingLink.setAttribute('aria-current', 'page');
       else accountMenu.billingLink.removeAttribute('aria-current');
       if (location.pathname === '/my-posts.html') accountMenu.myPostsLink.setAttribute('aria-current', 'page');
       else accountMenu.myPostsLink.removeAttribute('aria-current');
+      if (location.pathname === '/my-account.html') accountMenu.accountLink.setAttribute('aria-current', 'page');
+      else accountMenu.accountLink.removeAttribute('aria-current');
+      const accountUid = user.uid;
+      void getAccountProfile(user).then(profile => {
+        if (currentUser?.uid !== accountUid || !accountMenu) return;
+        const photo = profile.photoDataUrl || user.photoURL || '';
+        setAccountAvatar(accountMenu.avatar, initial, photo);
+        setAccountAvatar(accountMenu.largeAvatar, initial, photo);
+      }).catch(profileError => {
+        if (currentUser?.uid === accountUid) console.error('Could not load the account profile image.', profileError);
+      });
     } else {
       accountMenu.name.textContent = 'Guest';
       accountMenu.email.textContent = '';
       accountMenu.avatar.textContent = 'G';
       accountMenu.largeAvatar.textContent = 'G';
+      setAccountAvatar(accountMenu.avatar, 'G');
+      setAccountAvatar(accountMenu.largeAvatar, 'G');
       accountMenu.summary.setAttribute('aria-label', 'Account menu');
+      accountMenu.accountLink.hidden = true;
       accountMenu.myPostsLink.hidden = true;
     }
   }

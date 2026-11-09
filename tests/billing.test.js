@@ -7,6 +7,7 @@ import {
   billingPlanEnvKey,
   BILLING_CURRENCY_PLANS,
   BILLING_PLANS,
+  billingCheckoutConfigured,
   billingConfigured,
   configuredVouchers,
   entitlementFromSubscription,
@@ -129,6 +130,11 @@ test('billing stays disabled until provider, Firebase, terms and refund configur
   assert.equal(billingConfigured(env), true);
   assert.equal(billingConfigured({ ...env, RAZORPAY_PLAN_MONTHLY_ID: 'sub_monthly' }), false);
   assert.equal(billingConfigured({ ...env, RAZORPAY_PLAN_YEARLY_ID: 'sub_yearly' }), false);
+  assert.equal(billingCheckoutConfigured({
+    ...env,
+    RAZORPAY_PLAN_MONTHLY_ID: 'sub_monthly',
+    RAZORPAY_PLAN_YEARLY_ID: ''
+  }), true);
   assert.equal(billingConfigured({ ...env, BILLING_REFUNDS_PUBLISHED: 'false' }), false);
   assert.equal(billingConfigured({ ...env, BILLING_TEST_MODE_VERIFIED: 'false' }), false);
   assert.equal(billingConfigured({ ...env, BILLING_LIVE_LAUNCH_APPROVED: 'false' }), false);

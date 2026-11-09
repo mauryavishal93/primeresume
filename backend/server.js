@@ -8,11 +8,12 @@ import {
   billingPlanEnvKey,
   BILLING_CURRENCY_PLANS,
   BILLING_PLANS,
-  billingConfigured,
+  billingCheckoutConfigured,
   configuredVouchers,
   currencyForRazorpayPlanId,
   entitlementFromSubscription,
   firebaseAdminConfigured,
+  isRazorpayPlanId,
   planKeyForRazorpayPlanId,
   planMatchesRazorpay,
   validRazorpaySignature,
@@ -44,7 +45,7 @@ app.use((request, response, next) => {
 });
 
 function requireBillingConfig(_request, response, next) {
-  if (!billingConfigured()) {
+  if (!billingCheckoutConfigured()) {
     response.status(503).json({ error: 'Paid plans are not configured on this server yet.' });
     return;
   }
@@ -530,8 +531,10 @@ async function razorpayRequest(endpoint, { method = 'GET', body } = {}) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new Error(`Razorpay request failed with status ${response.status}.`);
+    const providerDetail = data?.error?.description || data?.error?.code || data?.message || `HTTP ${response.status}`;
+    const error = new Error(`Razorpay request failed with status ${response.status}: ${providerDetail}.`);
     error.status = response.status;
+    error.providerDetail = providerDetail;
     throw error;
   }
   return data;
@@ -540,8 +543,18 @@ async function razorpayRequest(endpoint, { method = 'GET', body } = {}) {
 function providerPlanId(planKey, currency = 'INR', pricing = {}) {
   const envKey = billingPlanEnvKey(planKey, currency);
   const envValue = envKey ? (process.env[envKey] || '').trim() : '';
-  return pricing?.providerPlanIds?.[currency]?.[planKey]
-    || (envValue || null);
+  const planId = pricing?.providerPlanIds?.[currency]?.[planKey] || envValue;
+  return isRazorpayPlanId(planId) ? planId : null;
+}
+
+function providerSubscriptionId(planKey, currency = 'INR') {
+  const envKey = billingPlanEnvKey(planKey, currency);
+  const envValue = envKey ? (process.env[envKey] || '').trim() : '';
+  return /^sub_[A-Za-z0-9]+$/.test(envValue) ? envValue : null;
+}
+
+function providerPlanReferenceExists(planKey, currency, pricing) {
+  return Boolean(providerPlanId(planKey, currency, pricing) || providerSubscriptionId(planKey, currency));
 }
 
 function pricingPlanEntry(pricing, planKey, currency) {
@@ -558,13 +571,25 @@ function pricedBillingPlan(planKey, currency, pricing) {
 async function verifiedProviderPlan(planKey, currency = 'INR', pricing = {}) {
   const expected = pricedBillingPlan(planKey, currency, pricing);
   if (!expected) return null;
-  const planId = providerPlanId(planKey, currency, pricing);
-  if (!planId) {
-    throw new Error(`The Razorpay ${currency} ${planKey} plan is not configured.`);
+  let resolvedPlanId = providerPlanId(planKey, currency, pricing);
+  if (!resolvedPlanId) {
+    const subscriptionId = providerSubscriptionId(planKey, currency);
+    if (!subscriptionId) {
+      throw new Error(`The Razorpay ${currency} ${planKey} plan is not configured.`);
+    }
+    const subscription = await razorpayRequest(`/subscriptions/${encodeURIComponent(subscriptionId)}`);
+    resolvedPlanId = subscription?.plan_id;
+    if (!isRazorpayPlanId(resolvedPlanId)) {
+      const error = new Error(`The configured Razorpay ${currency} ${planKey} subscription does not reference a valid plan.`);
+      error.status = 503;
+      throw error;
+    }
   }
-  const plan = await razorpayRequest(`/plans/${encodeURIComponent(planId)}`);
+  const plan = await razorpayRequest(`/plans/${encodeURIComponent(resolvedPlanId)}`);
   if (!planMatchesRazorpay(plan, expected)) {
-    throw new Error(`The Razorpay ${currency} ${planKey} plan does not match the configured price and billing interval.`);
+    const error = new Error(`The Razorpay ${currency} ${planKey} plan does not match the configured price and billing interval.`);
+    error.status = 503;
+    throw error;
   }
   return plan;
 }
@@ -621,8 +646,7 @@ function schedulePendingVouchers(pendingVouchers, startsAt) {
 function publicEntitlement(data) {
   const validUntil = Number(data?.validUntil) || 0;
   const pendingVouchers = Array.isArray(data?.pendingVouchers) ? data.pendingVouchers : [];
-  const hasLiveSubscription = Boolean(data?.subscriptionId) || data?.status === 'active';
-  const status = hasLiveSubscription || validUntil > Date.now() ? 'active' : 'inactive';
+  const status = data?.planId === 'pro' && validUntil > Date.now() ? 'active' : 'inactive';
   return {
     planId: data?.planId || 'free',
     billingPlan: data?.billingPlan || null,
@@ -700,7 +724,7 @@ function normalizePricingConfig(rawConfig = {}) {
     const defaultPlanId = requestedCurrentPrice * 100 === basePlan.amount
       ? providerPlanId(planKey, currency)
       : null;
-    const planId = typeof requestedPlanId === 'string' && requestedPlanId
+    const planId = isRazorpayPlanId(requestedPlanId)
       ? requestedPlanId
       : defaultPlanId;
     const currentPrice = planId ? requestedCurrentPrice : basePlan.amount / 100;
@@ -746,30 +770,60 @@ async function loadPricingConfigFromStore() {
   }
 }
 
+async function findExistingMatchingProviderPlan(planKey, currency, amount) {
+  const basePlan = billingPlan(planKey, currency);
+  if (!basePlan) return null;
+  try {
+    const plans = await razorpayRequest('/plans');
+    const items = Array.isArray(plans?.items) ? plans.items : [];
+    const match = items.find(plan => plan?.item?.amount === amount
+      && plan?.item?.currency === currency
+      && plan?.period === basePlan.period
+      && plan?.interval === basePlan.interval);
+    if (!match) return null;
+    const verified = await razorpayRequest(`/plans/${encodeURIComponent(match.id)}`);
+    if (!planMatchesRazorpay(verified, { ...basePlan, amount })) {
+      return null;
+    }
+    return verified.id;
+  } catch {
+    return null;
+  }
+}
+
 async function createVerifiedProviderPlan(planKey, currency, amount) {
   const basePlan = billingPlan(planKey, currency);
   const expected = { ...basePlan, amount };
-  const created = await razorpayRequest('/plans', {
-    method: 'POST',
-    body: {
-      period: basePlan.period,
-      interval: basePlan.interval,
-      item: {
-        name: `ResumeOut.com ${basePlan.label}`,
-        amount,
-        currency,
-        description: `${basePlan.label} recurring subscription`
+  const existing = await findExistingMatchingProviderPlan(planKey, currency, amount);
+  if (existing) return existing;
+
+  try {
+    const created = await razorpayRequest('/plans', {
+      method: 'POST',
+      body: {
+        period: basePlan.period,
+        interval: basePlan.interval,
+        item: {
+          name: `ResumeOut.com ${basePlan.label}`,
+          amount,
+          currency,
+          description: `${basePlan.label} recurring subscription`
+        }
       }
+    });
+    if (typeof created?.id !== 'string' || !/^plan_[A-Za-z0-9]+$/.test(created.id)) {
+      throw new Error(`Razorpay did not return a valid ${currency} ${planKey} plan ID.`);
     }
-  });
-  if (typeof created?.id !== 'string' || !/^plan_[A-Za-z0-9]+$/.test(created.id)) {
-    throw new Error(`Razorpay did not return a valid ${currency} ${planKey} plan ID.`);
+    const verified = await razorpayRequest(`/plans/${encodeURIComponent(created.id)}`);
+    if (!planMatchesRazorpay(verified, expected)) {
+      throw new Error(`The new Razorpay ${currency} ${planKey} plan failed amount or interval verification.`);
+    }
+    return verified.id;
+  } catch (error) {
+    const fallback = await findExistingMatchingProviderPlan(planKey, currency, amount);
+    if (fallback) return fallback;
+    throw error;
   }
-  const verified = await razorpayRequest(`/plans/${encodeURIComponent(created.id)}`);
-  if (!planMatchesRazorpay(verified, expected)) {
-    throw new Error(`The new Razorpay ${currency} ${planKey} plan failed amount or interval verification.`);
-  }
-  return verified.id;
 }
 
 app.get('/api/health', (_request, response) => {
@@ -784,6 +838,7 @@ app.get('/api/health', (_request, response) => {
 });
 
 app.use('/api/billing/webhook', express.raw({ type: 'application/json', limit: '256kb' }));
+app.use('/api/account/profile', express.json({ limit: '160kb' }));
 app.use(express.json({ limit: '32kb' }));
 
 app.use('/api/forum', (_request, response, next) => {
@@ -794,6 +849,66 @@ app.use('/api/forum', (_request, response, next) => {
 app.use('/api/admin/forum', (_request, response, next) => {
   response.set('Cache-Control', 'no-store');
   next();
+});
+
+app.get('/api/account/profile', requireFirebaseUser, async (request, response) => {
+  response.set('Cache-Control', 'no-store');
+  try {
+    const { db } = await getFirebaseAdmin();
+    const snapshot = await db.doc(`users/${request.user.uid}/profile/account`).get();
+    if (!snapshot.exists) {
+      response.json({ mobileNumber: '', photoDataUrl: '' });
+      return;
+    }
+    const { mobileNumber, photoDataUrl = '' } = snapshot.data();
+    if (typeof mobileNumber !== 'string' || typeof photoDataUrl !== 'string'
+      || photoDataUrl.length > 140000
+      || (photoDataUrl && !/^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(photoDataUrl))) {
+      response.status(500).json({ error: 'Your saved account details are invalid. Contact support for help.' });
+      return;
+    }
+    response.json({ mobileNumber, photoDataUrl });
+  } catch (error) {
+    console.error('Could not load the account profile.', error);
+    response.status(500).json({ error: 'Could not load your account details. Please try again.' });
+  }
+});
+
+app.put('/api/account/profile', requireFirebaseUser, async (request, response) => {
+  response.set('Cache-Control', 'no-store');
+  const displayName = typeof request.body?.displayName === 'string' ? request.body.displayName.trim() : '';
+  const mobileNumber = typeof request.body?.mobileNumber === 'string' ? request.body.mobileNumber.trim() : null;
+  const photoDataUrl = typeof request.body?.photoDataUrl === 'string' ? request.body.photoDataUrl : null;
+  if (!displayName || displayName.length > 80) {
+    response.status(400).json({ error: 'Enter a name between 1 and 80 characters.' });
+    return;
+  }
+  if (mobileNumber === null || mobileNumber.length > 24 || !/^[+0-9() .-]*$/.test(mobileNumber)
+    || (mobileNumber && (mobileNumber.match(/\d/g) || []).length < 7)
+    || (mobileNumber && (mobileNumber.match(/\d/g) || []).length > 15)) {
+    response.status(400).json({ error: 'Enter a valid mobile number with 7 to 15 digits.' });
+    return;
+  }
+  if (photoDataUrl === null || photoDataUrl.length > 140000
+    || (photoDataUrl && !/^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(photoDataUrl))) {
+    response.status(400).json({ error: 'Choose a valid profile image smaller than 100 KB.' });
+    return;
+  }
+  try {
+    const { auth, db } = await getFirebaseAdmin();
+    await Promise.all([
+      auth.updateUser(request.user.uid, { displayName }),
+      db.doc(`users/${request.user.uid}/profile/account`).set({
+        mobileNumber,
+        photoDataUrl,
+        updatedAt: new Date()
+      })
+    ]);
+    response.json({ displayName, mobileNumber, photoDataUrl });
+  } catch (error) {
+    console.error('Could not save the account profile.', error);
+    response.status(500).json({ error: 'Could not save your account details. Please try again.' });
+  }
 });
 
 app.get('/api/forum/activity', requireFirebaseUser, async (request, response) => {
@@ -1451,17 +1566,20 @@ app.put('/api/admin/pricing', requireFirebaseUser, requireAdmin, async (request,
     response.json({ pricing: publicPricingConfig(pricing) });
   } catch (error) {
     console.error('Could not create, verify, or save regional pricing.', error);
-    response.status(502).json({ error: 'Could not create or verify Razorpay plans. No pricing changes were published.' });
+    const detail = error?.providerDetail || error?.message || 'Razorpay rejected the pricing update.';
+    response.status(502).json({
+      error: `Could not create or verify Razorpay plans. ${detail} No pricing changes were published.`
+    });
   }
 });
 
 app.get('/api/billing/config', async (_request, response) => {
-  const checkoutEnabled = billingConfigured();
+  const checkoutEnabled = billingCheckoutConfigured();
   try {
     const pricing = await loadPricingConfigFromStore();
     const supportedCurrencies = Object.keys(BILLING_CURRENCY_PLANS)
       .filter(currency => checkoutEnabled
-        && Object.keys(BILLING_PLANS).every(planKey => providerPlanId(planKey, currency, pricing)));
+        && Object.keys(BILLING_PLANS).every(planKey => providerPlanReferenceExists(planKey, currency, pricing)));
     const currencyPlans = Object.fromEntries(Object.entries(BILLING_CURRENCY_PLANS).map(([currency, plans]) => [
       currency,
       Object.fromEntries(Object.entries(plans).map(([key, plan]) => {
@@ -1491,7 +1609,7 @@ app.get('/api/billing/config', async (_request, response) => {
 });
 
 app.post('/api/billing/webhook', async (request, response) => {
-    if (!billingConfigured()
+    if (!billingCheckoutConfigured()
       || !validWebhookSignature(request.body, request.get('x-razorpay-signature'), process.env.RAZORPAY_WEBHOOK_SECRET)) {
       response.status(400).json({ error: 'Invalid webhook signature.' });
       return;
@@ -1536,6 +1654,9 @@ app.post('/api/billing/webhook', async (request, response) => {
       const eventRef = db.collection('billingWebhookEvents').doc(eventId);
       const entitlementRef = userEntitlementDocument(db, mapping.uid);
       const checkoutRef = userCheckoutDocument(db, mapping.uid);
+      const eventPaymentId = typeof payment?.id === 'string' && /^pay_[A-Za-z0-9]+$/.test(payment.id)
+        ? payment.id
+        : null;
       await db.runTransaction(async transaction => {
         const duplicate = await transaction.get(eventRef);
         if (duplicate.exists) return;
@@ -1598,9 +1719,12 @@ app.post('/api/billing/webhook', async (request, response) => {
 
         transaction.create(eventRef, { event: event.event, subscriptionId, receivedAt: Date.now() });
         if (payment?.status === 'captured'
-          && typeof payment.id === 'string' && /^pay_[A-Za-z0-9]+$/.test(payment.id)
+          && eventPaymentId
           && payment.subscription_id === subscriptionId
           && Number.isSafeInteger(payment.amount) && payment.amount > 0) {
+          const paymentCreatedAt = Number(payment.created_at) > 0
+            ? Number(payment.created_at) * 1000
+            : Date.now();
           transaction.set(db.doc(`billingPayments/${payment.id}`), {
             uid: mapping.uid,
             providerPaymentId: payment.id,
@@ -1609,8 +1733,23 @@ app.post('/api/billing/webhook', async (request, response) => {
             status: 'captured',
             amount: payment.amount,
             currency: typeof payment.currency === 'string' ? payment.currency : billingCurrency,
+            paymentMode: payment.method || subscription?.payment_method || 'unknown',
             source: 'razorpay',
-            createdAt: Number(payment.created_at) > 0 ? Number(payment.created_at) * 1000 : Date.now()
+            createdAt: paymentCreatedAt
+          }, { merge: true });
+          transaction.set(db.doc(`billingAccessHistory/${payment.id}`), {
+            uid: mapping.uid,
+            subscriptionId,
+            planKey: billingPlanKey,
+            validFrom: paymentCreatedAt,
+            validUntil: validUntil || null,
+            paymentId: payment.id,
+            paymentMode: payment.method || subscription?.payment_method || 'unknown',
+            amount: payment.amount,
+            currency: typeof payment.currency === 'string' ? payment.currency : billingCurrency,
+            status: isPaidThrough ? 'active' : 'paid',
+            source: 'razorpay',
+            createdAt: paymentCreatedAt
           }, { merge: true });
         }
         transaction.set(subscriptionDocument(db, subscriptionId), {
@@ -1830,6 +1969,90 @@ app.get('/api/billing/entitlement', requireEntitlementConfig, requireFirebaseUse
         if (data !== current) transaction.set(entitlementRef, data);
       });
     }
+    if (data.billingPlan !== 'voucher' && publicEntitlement(data).status !== 'active') {
+      const checkoutSnapshot = await userCheckoutDocument(db, request.user.uid).get();
+      const checkoutSubscriptionId = typeof checkoutSnapshot.data()?.subscriptionId === 'string'
+        ? checkoutSnapshot.data().subscriptionId.trim()
+        : '';
+      let subscriptionId = typeof data.subscriptionId === 'string' && data.subscriptionId
+        ? data.subscriptionId
+        : checkoutSubscriptionId;
+      let mappingSnapshot = subscriptionId
+        ? await subscriptionDocument(db, subscriptionId).get()
+        : null;
+
+      if (!mappingSnapshot?.exists) {
+        const userSubscriptions = await db.collection(subscriptionCollection)
+          .where('uid', '==', request.user.uid)
+          .get();
+        const latestSubscription = (userSubscriptions.docs || [])
+          .map(document => ({ id: document.id, ...(document.data() || {}) }))
+          .filter(subscription => subscription.uid === request.user.uid)
+          .sort((left, right) => Number(right.createdAt) - Number(left.createdAt))[0];
+        if (latestSubscription) {
+          subscriptionId = latestSubscription.id;
+          mappingSnapshot = {
+            exists: true,
+            data: () => latestSubscription
+          };
+        }
+      }
+
+      const mapping = mappingSnapshot?.data() || {};
+      if (mappingSnapshot?.exists
+        && mapping.uid === request.user.uid
+        && /^sub_[A-Za-z0-9]+$/.test(subscriptionId)
+        && Object.hasOwn(BILLING_PLANS, mapping.planKey)
+        && isRazorpayPlanId(mapping.planId)) {
+        let providerStatus = mapping.status;
+        let validUntil = Number(mapping.currentEnd) || 0;
+        let paidThrough = ['active', 'cancelled', 'completed'].includes(providerStatus)
+          && validUntil > Date.now();
+        let providerPlanMatches = true;
+        if (!paidThrough) {
+          const subscription = await razorpayRequest(`/subscriptions/${encodeURIComponent(subscriptionId)}`);
+          providerStatus = subscription.status;
+          validUntil = Number(subscription.current_end) * 1000;
+          paidThrough = ['active', 'cancelled', 'completed'].includes(providerStatus)
+            && Number.isFinite(validUntil)
+            && validUntil > Date.now();
+          providerPlanMatches = subscription.id === subscriptionId && subscription.plan_id === mapping.planId;
+        }
+        if (paidThrough && providerPlanMatches) {
+          const nextEntitlement = {
+            ...data,
+            planId: 'pro',
+            billingPlan: mapping.planKey,
+            currency: mapping.currency || 'INR',
+            status: 'active',
+            source: 'server-verified',
+            validUntil,
+            subscriptionId,
+            cancelAtCycleEnd: providerStatus !== 'active'
+              || data.cancelAtCycleEnd === true
+              || mapping.cancelAtCycleEnd === true,
+            updatedAt: Date.now()
+          };
+          await db.runTransaction(async transaction => {
+            transaction.set(entitlementRef, nextEntitlement);
+            transaction.set(subscriptionDocument(db, subscriptionId), {
+              status: providerStatus,
+              currentEnd: validUntil,
+              updatedAt: Date.now()
+            }, { merge: true });
+            transaction.set(userCheckoutDocument(db, request.user.uid), {
+              subscriptionId,
+              planKey: mapping.planKey,
+              currency: mapping.currency || 'INR',
+              status: providerStatus,
+              currentEnd: validUntil,
+              updatedAt: Date.now()
+            }, { merge: true });
+          });
+          data = nextEntitlement;
+        }
+      }
+    }
     const entitlement = publicEntitlement(data);
     if (!entitlement.subscriptionId && entitlement.billingPlan !== 'voucher') {
       const checkoutSnapshot = await userCheckoutDocument(db, request.user.uid).get();
@@ -1841,7 +2064,11 @@ app.get('/api/billing/entitlement', requireEntitlementConfig, requireFirebaseUse
     response.json({ entitlement });
   } catch (error) {
     console.error('Could not load billing entitlement.', error);
-    response.status(500).json({ error: 'Could not load your plan status.' });
+    response.status(error.status >= 500 ? 502 : 500).json({
+      error: error.status >= 500
+        ? 'Could not confirm your subscription with Razorpay. Please retry shortly.'
+        : 'Could not load your plan status.'
+    });
   }
 });
 
@@ -1901,6 +2128,7 @@ app.post('/api/billing/vouchers/redeem', requireEntitlementConfig, requireFireba
       const currentValidUntil = Number(currentEntitlement.validUntil) || 0;
       const hasActiveAccess = currentValidUntil > now;
       queued = hasActiveAccess;
+      const durationMs = voucher.durationDays * 24 * 60 * 60 * 1000;
       const redeemedCount = Number(voucherSnapshot.data()?.redeemedCount) || 0;
       if (redeemedCount >= voucher.maxRedemptions) {
         const error = new Error('That voucher has reached its redemption limit.');
@@ -1915,9 +2143,14 @@ app.post('/api/billing/vouchers/redeem', requireEntitlementConfig, requireFireba
         ? schedulePendingVouchers([...pendingVouchers, newVoucher], currentValidUntil)
         : [];
       const activationQueue = hasActiveAccess ? nextPendingVouchers : [...pendingVouchers, newVoucher];
-      const validUntil = hasActiveAccess
-        ? currentValidUntil
-        : now + activationQueue.reduce((total, item) => total + item.durationDays * 24 * 60 * 60 * 1000, 0);
+      const priorVoucherDuration = pendingVouchers.reduce(
+        (total, item) => total + item.durationDays * 24 * 60 * 60 * 1000,
+        0
+      );
+      const validFrom = hasActiveAccess
+        ? currentValidUntil + priorVoucherDuration
+        : now + priorVoucherDuration;
+      const validUntil = validFrom + durationMs;
       transaction.set(voucherRef, {
         redeemedCount: redeemedCount + 1,
         updatedAt: now
@@ -1931,6 +2164,21 @@ app.post('/api/billing/vouchers/redeem', requireEntitlementConfig, requireFireba
         }, { merge: true });
       }
       transaction.create(userVoucherRef, { redeemedAt: now });
+      transaction.set(db.doc(`billingAccessHistory/voucher_${voucherId}_${voucherDocumentId(request.user.uid)}`), {
+        uid: request.user.uid,
+        subscriptionId: null,
+        planKey: 'voucher',
+        validFrom,
+        validUntil,
+        paymentId: null,
+        paymentMode: 'voucher',
+        amount: 0,
+        currency: null,
+        status: queued ? 'scheduled' : 'active',
+        source: 'voucher',
+        voucherId,
+        createdAt: now
+      });
       if (hasActiveAccess) {
         transaction.set(entitlementRef, {
           pendingVouchers: nextPendingVouchers,
@@ -2111,14 +2359,19 @@ app.get('/api/admin/users/:uid', requireFirebaseUser, requireAdmin, async (reque
     const uid = request.params.uid;
     let authRecord = null;
     try { authRecord = await auth.getUser(uid); } catch {}
-    const [entitlementSnapshot, paymentsSnapshot, activitySnapshot] = await Promise.all([
+    const [entitlementSnapshot, paymentsSnapshot, activitySnapshot, accessHistorySnapshot] = await Promise.all([
       db.doc(`users/${uid}/billing/entitlement`).get(),
       typeof db.collection === 'function' ? db.collection('billingPayments').get().catch(() => ({ docs: [] })) : Promise.resolve({ docs: [] }),
-      typeof db.collection === 'function' ? db.collection(`users/${uid}/billingActivity`).get().catch(() => ({ docs: [] })) : Promise.resolve({ docs: [] })
+      typeof db.collection === 'function' ? db.collection(`users/${uid}/billingActivity`).get().catch(() => ({ docs: [] })) : Promise.resolve({ docs: [] }),
+      typeof db.collection === 'function' ? db.collection('billingAccessHistory').get().catch(() => ({ docs: [] })) : Promise.resolve({ docs: [] })
     ]);
     const entitlement = entitlementSnapshot.exists ? entitlementSnapshot.data() : null;
     const payments = (paymentsSnapshot.docs || []).map(document => ({ id: document.id, ...(document.data() || {}) })).filter(payment => payment.uid === uid);
     const activity = (activitySnapshot.docs || []).map(document => ({ id: document.id, ...(document.data() || {}) })).sort((a, b) => Number(b.occurredAt || b.createdAt || 0) - Number(a.occurredAt || a.createdAt || 0));
+    const accessHistory = (accessHistorySnapshot.docs || [])
+      .map(document => ({ id: document.id, ...(document.data() || {}) }))
+      .filter(record => record.uid === uid)
+      .sort((left, right) => Number(right.createdAt) - Number(left.createdAt));
     let voucher = null;
     if (entitlement?.voucherId) {
       const voucherSnapshot = await db.doc(`adminVouchers/${entitlement.voucherId}`).get();
@@ -2138,7 +2391,7 @@ app.get('/api/admin/users/:uid', requireFirebaseUser, requireAdmin, async (reque
     const paidAmount = paidAmountByCurrency.INR || 0;
     response.json({
       uid, email: authRecord?.email || '', name: authRecord?.displayName || '', photoURL: authRecord?.photoURL || '', createdAt: authRecord?.metadata?.creationTime || null,
-      entitlement, voucher, payments, activity, paidAmount, paidAmountByCurrency
+      entitlement, voucher, payments, accessHistory, activity, paidAmount, paidAmountByCurrency
     });
   } catch (error) {
     console.error('Admin user detail failed.', error);
@@ -2159,19 +2412,36 @@ app.post('/api/admin/users/:uid/pro', requireFirebaseUser, requireAdmin, async (
   }
   try {
     const { db } = await getFirebaseAdmin();
-    const validUntil = Date.now() + durationDays * 86400000;
+    const grantedAt = Date.now();
+    const validUntil = grantedAt + durationDays * 86400000;
     await db.doc(`users/${uid}/billing/entitlement`).set({
       planId: 'pro', billingPlan: plan, status: 'active', source: 'admin', validUntil,
-      subscriptionId: null, cancelAtCycleEnd: false, updatedAt: Date.now()
+      subscriptionId: null, cancelAtCycleEnd: false, updatedAt: grantedAt
     }, { merge: true });
     const paid = amount > 0;
     const paymentId = paid ? transactionId : `FREE-${randomUUID().slice(0, 8).toUpperCase()}`;
     await db.doc(`billingPayments/${paymentId}`).set({
       uid, providerPaymentId: paymentId, planKey: plan, status: paid ? 'success' : 'free', amount,
-      currency: 'INR', source: 'admin', createdAt: Date.now(), grantedBy: request.user.uid
+      currency: 'INR', paymentMode: paid ? 'manual' : 'admin',
+      source: 'admin', createdAt: grantedAt, grantedBy: request.user.uid
     }, { merge: true });
+    await db.doc(`billingAccessHistory/admin_${randomUUID()}`).set({
+      uid,
+      subscriptionId: null,
+      planKey: plan,
+      validFrom: grantedAt,
+      validUntil,
+      paymentId: paid ? paymentId : null,
+      paymentMode: paid ? 'manual' : 'admin',
+      amount,
+      currency: 'INR',
+      status: 'active',
+      source: 'admin',
+      createdAt: grantedAt,
+      grantedBy: request.user.uid
+    });
     await db.doc(`users/${uid}/billingActivity/${randomUUID()}`).set({
-      type: 'admin_pro_granted', plan, amount, status: paid ? 'success' : 'free', createdAt: Date.now(), occurredAt: Date.now(),
+      type: 'admin_pro_granted', plan, amount, status: paid ? 'success' : 'free', createdAt: grantedAt, occurredAt: grantedAt,
       transactionId: paymentId, title: paid ? 'Paid Pro access granted by admin' : 'Free Pro access granted by admin',
       detail: paid ? `${paymentId} · ₹${(amount / 100).toLocaleString('en-IN')}` : 'Free activation · no payment collected',
       message: `Pro access granted by administrator for ${plan === 'yearly' ? '1 year' : '1 month'}.`
@@ -2275,7 +2545,7 @@ app.post('/api/billing/subscriptions', requireBillingConfig, requireFirebaseUser
     const { db } = await getFirebaseAdmin();
     const pricingSnapshot = await db.doc('appConfig/pricing').get();
     const pricing = normalizePricingConfig(pricingSnapshot.exists ? pricingSnapshot.data() : {});
-    if (!providerPlanId(planKey, currency, pricing)) {
+    if (!providerPlanReferenceExists(planKey, currency, pricing)) {
       response.status(503).json({ error: `Razorpay ${currency} subscriptions are not configured on this server yet.` });
       return;
     }
@@ -2346,19 +2616,56 @@ app.post('/api/billing/subscriptions', requireBillingConfig, requireFirebaseUser
       return { requestId, reused: false };
     });
     if (checkout.reused) {
-      const reusedSubscription = await subscriptionDocument(db, checkout.subscriptionId).get();
-      const reusedRecord = reusedSubscription.data() || {};
-      const reusedAmount = Number(reusedRecord.amount);
-      response.json({
-        subscriptionId: checkout.subscriptionId,
-        keyId: process.env.RAZORPAY_KEY_ID,
-        plan: {
-          ...plan,
-          amount: Number.isSafeInteger(reusedAmount) && reusedAmount > 0 ? reusedAmount : plan.amount
-        },
-        reused: true
-      });
-      return;
+      const reusedProviderSubscription = await razorpayRequest(
+        `/subscriptions/${encodeURIComponent(checkout.subscriptionId)}`
+      );
+      if (reusedProviderSubscription.status !== 'created') {
+        if (['cancelled', 'completed', 'expired'].includes(reusedProviderSubscription.status)) {
+          await db.runTransaction(async transaction => {
+            const currentCheckout = await transaction.get(checkoutRef);
+            if (!currentCheckout.exists
+              || currentCheckout.data()?.subscriptionId !== checkout.subscriptionId) {
+              const error = new Error('The saved checkout changed. Refresh the Plans page and retry.');
+              error.status = 409;
+              throw error;
+            }
+            transaction.set(checkoutRef, {
+              requestId,
+              planKey,
+              currency,
+              status: 'creating',
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+              subscriptionId: null,
+              currentEnd: 0
+            });
+          });
+        } else {
+          const error = new Error(
+            `The existing Razorpay subscription is ${reusedProviderSubscription.status || 'not ready'} and cannot be checked out again.`
+          );
+          error.status = 409;
+          throw error;
+        }
+      } else if (reusedProviderSubscription.plan_id !== providerPlan.id) {
+        const error = new Error('The saved subscription does not match the current plan. Refresh the Plans page and retry.');
+        error.status = 409;
+        throw error;
+      } else {
+        const reusedSubscription = await subscriptionDocument(db, checkout.subscriptionId).get();
+        const reusedRecord = reusedSubscription.data() || {};
+        const reusedAmount = Number(reusedRecord.amount);
+        response.json({
+          subscriptionId: checkout.subscriptionId,
+          keyId: process.env.RAZORPAY_KEY_ID,
+          plan: {
+            ...plan,
+            amount: Number.isSafeInteger(reusedAmount) && reusedAmount > 0 ? reusedAmount : plan.amount
+          },
+          reused: true
+        });
+        return;
+      }
     }
 
     const created = await razorpayRequest('/subscriptions', {
@@ -2405,15 +2712,19 @@ app.post('/api/billing/subscriptions', requireBillingConfig, requireFirebaseUser
   } catch (error) {
     console.error('Could not create Razorpay subscription.', error);
     const razorpayAuthRejected = error.status === 401;
-    response.status(razorpayAuthRejected ? 503 : error.status === 409 ? 409 : error.status === 400 ? 400 : 502).json({
-      error: razorpayAuthRejected
-        ? 'Razorpay rejected the API credentials. Verify that RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET are a matching Test Mode pair in .env, then restart the local server.'
-        : error.status === 409
+    const status = razorpayAuthRejected ? 503 : error.status === 409 ? 409 : error.status === 400 ? 400 : error.status === 503 ? 503 : 502;
+    const message = razorpayAuthRejected
+      ? 'Razorpay rejected the API credentials. Verify that RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET are a matching Test Mode pair in .env, then restart the local server.'
+      : error.status === 409
         ? error.message
-        : error.status === 400
-          ? 'The configured payment plan could not be accepted.'
-          : 'Could not start checkout. Please retry or contact support.'
-    });
+        : error.providerDetail
+          ? `Razorpay rejected the configured ${currency} ${planKey} subscription: ${error.providerDetail}`
+          : error.status === 400
+            ? 'The configured payment plan could not be accepted.'
+            : error.status === 503 && error.message
+              ? error.message
+              : 'Could not start checkout. Please retry or contact support.';
+    response.status(status).json({ error: message });
   }
 });
 
@@ -2469,7 +2780,7 @@ app.post('/api/billing/verify', requireBillingConfig, requireFirebaseUser, async
     }
 
     const entitlement = entitlementFromSubscription(subscription, mapping.planKey);
-    if (subscription.status === 'active' && payment.status === 'captured' && entitlement?.status === 'active') {
+    if (payment.status === 'captured' && entitlement?.status === 'active') {
       entitlement.currency = currency;
       await db.runTransaction(async transaction => {
         transaction.set(mappingRef, {
@@ -2489,11 +2800,26 @@ app.post('/api/billing/verify', requireBillingConfig, requireFirebaseUser, async
           subscriptionId: razorpaySubscriptionId,
           cancelAtCycleEnd: false
         });
+        transaction.set(db.doc(`billingAccessHistory/${razorpayPaymentId}`), {
+          uid: request.user.uid,
+          subscriptionId: razorpaySubscriptionId,
+          planKey: mapping.planKey,
+          validFrom: Number(payment.created_at) > 0 ? Number(payment.created_at) * 1000 : Date.now(),
+          validUntil: entitlement.validUntil,
+          paymentId: razorpayPaymentId,
+          paymentMode: payment.method || subscription.payment_method || 'unknown',
+          amount: expectedAmount,
+          currency,
+          status: 'active',
+          source: 'razorpay',
+          createdAt: Number(payment.created_at) > 0 ? Number(payment.created_at) * 1000 : Date.now()
+        }, { merge: true });
       });
       await db.doc(`billingPayments/${razorpayPaymentId}`).set({
         uid: request.user.uid, providerPaymentId: razorpayPaymentId, subscriptionId: razorpaySubscriptionId,
         planKey: mapping.planKey, status: 'captured', amount: expectedAmount,
-        currency, createdAt: Date.now()
+        currency, paymentMode: payment.method || subscription.payment_method || 'unknown',
+        createdAt: Number(payment.created_at) > 0 ? Number(payment.created_at) * 1000 : Date.now()
       }, { merge: true });
       await recordBillingActivity(db, request.user.uid, {
         type: 'payment', status: 'success', title: 'Subscription payment verified',
@@ -2675,6 +3001,17 @@ app.post('/api/billing/change-plan', requireBillingConfig, requireFirebaseUser, 
     });
     response.json({ scheduled: true, scheduledPlan: 'yearly', scheduledAt: currentEnd });
   } catch (error) {
+    const yearlySwitchRequiresCancellation = error.status === 400
+      && /only offers can be updated for subscriptions when payment mode is domestic card/i
+        .test(error.providerDetail || error.message || '');
+    if (yearlySwitchRequiresCancellation) {
+      console.warn('Razorpay does not support changing a domestic-card subscription plan.');
+      response.status(409).json({
+        code: 'YEARLY_SWITCH_REQUIRES_CANCELLATION',
+        error: 'Razorpay does not allow changing an active domestic-card subscription from monthly to yearly. Your current plan is unchanged. You can stop monthly renewal at period end, then start a yearly plan after your access expires.'
+      });
+      return;
+    }
     console.error('Could not schedule the yearly plan change.', error);
     response.status(error.status === 409 ? 409 : error.status === 400 ? 400 : 502).json({
       error: error.status === 409

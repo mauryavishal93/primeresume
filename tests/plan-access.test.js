@@ -50,6 +50,17 @@ test('new resume templates stay behind existing Pro entitlement controls', () =>
   }
 });
 
+test('editor refreshes its Pro title as soon as the signed-in account is known', () => {
+  const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
+  const accountRefresh = source.match(/async function updateCloudAccount\(user,error\)\{[\s\S]*?\n\}/)?.[0] || '';
+  assert.match(source, /document\.title=isPro\?`\$\{baseDocumentTitle\} \| Pro`:baseDocumentTitle/);
+  assert.match(source, /if\(badge\)badge\.hidden=!isPro/);
+  assert.match(readFileSync(new URL('../frontend/editor.html', import.meta.url), 'utf8'), /id="proBrandBadge"[^>]*hidden>Pro<\/span>/);
+  assert.match(source, /async function refreshEditorBillingStatus\(user,generation\)/);
+  assert.ok(accountRefresh.indexOf('void refreshEditorBillingStatus(user,generation)')
+    < accountRefresh.indexOf('await listResumes(user.uid)'));
+});
+
 test('new resume templates have dedicated editor markup and styles', () => {
   const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
   for (const [templateId, styleName, markupClass] of [
@@ -89,6 +100,19 @@ test('essential Free features are included and future Pro features remain unavai
     assert.equal(PRICING_FEATURES.find(feature => feature.label === label)?.free, 'Included');
   }
   assert.equal(PRICING_FEATURES.find(feature => feature.label === 'Tailored resume versions')?.pro, 'Not available yet');
+});
+
+test('pricing comparison renders included and unavailable features as accessible status icons', () => {
+  const source = readFileSync(new URL('../frontend/src/pricing.js', import.meta.url), 'utf8');
+  const styles = readFileSync(new URL('../frontend/src/pricing.css', import.meta.url), 'utf8');
+  assert.match(source, /value === 'Included' \|\| value\.startsWith\('Not available'\)/);
+  assert.match(source, /aria-label', available \? 'Included' : 'Not available'/);
+  assert.match(source, /feature-status-included/);
+  assert.match(source, /feature-status-unavailable/);
+  assert.match(styles, /\.feature-status-included\{color:#20c77a\}/);
+  assert.match(styles, /\.feature-status-unavailable\{color:#f05b68\}/);
+  assert.match(styles, /:root\[data-theme=light\] \.feature-status-included\{color:#13834e\}/);
+  assert.match(styles, /:root\[data-theme=light\] \.feature-status-unavailable\{color:#c62836\}/);
 });
 
 test('pro features reject missing, client-claimed, inactive, expired, or incomplete entitlements', () => {
@@ -182,22 +206,42 @@ test('subscription management buttons are hidden unless the user is signed in', 
   assert.match(styles, /\.billing-plan-actions \.btn\[hidden\]\{display:none!important\}/);
 });
 
+test('all pricing plan actions use the same button dimensions and shape', () => {
+  const styles = readFileSync(new URL('../frontend/src/pricing.css', import.meta.url), 'utf8');
+  assert.match(styles, /\.plan-action\{width:100%;min-height:54px;margin-top:auto;padding:14px 20px;justify-content:center;border-radius:10px;font-weight:750\}/);
+  assert.match(styles, /\.plan-card \.plan-action:is\(#purchaseMonthly,#purchaseYearly\)\{min-height:54px;padding:14px 20px;border:1px solid transparent;border-radius:10px;color:#fff;font-weight:750/);
+});
+
+test('unsupported Razorpay yearly changes offer an explicit end-of-cycle cancellation fallback', () => {
+  const billingSource = readFileSync(new URL('../frontend/src/billing.js', import.meta.url), 'utf8');
+  const clientSource = readFileSync(new URL('../frontend/src/billing-client.js', import.meta.url), 'utf8');
+  assert.match(clientSource, /if \(typeof result\.code === 'string'\) error\.code = result\.code/);
+  assert.match(billingSource, /error\.code === 'YEARLY_SWITCH_REQUIRES_CANCELLATION'/);
+  assert.match(billingSource, /No yearly subscription or charge will be created now/);
+  assert.match(billingSource, /await cancelBillingSubscription\(currentUser, entitlement\.subscriptionId\)/);
+});
+
+test('Community and My Posts pages provide an Editor navigation button', () => {
+  for (const page of ['community.html', 'my-posts.html']) {
+    const html = readFileSync(new URL(`../frontend/${page}`, import.meta.url), 'utf8');
+    assert.match(html, /<a class="btn soft about-editor" href="\/editor\.html">Open editor<\/a>/, page);
+    assert.doesNotMatch(html, /href="\/home\.html">Home<\/a>/, page);
+  }
+});
+
 test('all site pages use the ResumeOut icon and styled text wordmark', () => {
-  const pages = [
-    'home.html', 'index.html', 'about.html', 'admin.html', 'billing.html',
-    'editor.html', 'pricing.html', 'privacy.html', 'refunds.html', 'terms.html',
-    'community.html', 'my-posts.html', 'resume-wizard.html'
-  ];
+  const pages = readdirSync(new URL('../frontend/', import.meta.url))
+    .filter(page => page.endsWith('.html'));
   for (const page of pages) {
     const html = readFileSync(new URL(`../frontend/${page}`, import.meta.url), 'utf8');
-    assert.match(html, /rel="icon"[^>]+resumeout-mark\.svg/, page);
+    assert.match(html, /<link rel="icon" type="image\/svg\+xml" href="\/images\/resumeout-mark\.svg">/, page);
     assert.match(html, /<img class="(?:about-logo|logo)" src="\/images\/resumeout-mark\.svg"/, page);
     assert.match(html, /class="brand-resume">Resume<\/span>/, page);
     assert.match(html, /class="brand-out">Out<\/span>/, page);
     assert.match(html, /class="brand-domain">\.com<\/span>/, page);
   }
   const editor = readFileSync(new URL('../frontend/editor.html', import.meta.url), 'utf8');
-  assert.doesNotMatch(editor, /id="proBrandBadge"/);
+  assert.match(editor, /class="pro-brand-badge" id="proBrandBadge" aria-label="Pro plan" hidden>Pro<\/span>/);
   const styles = [
     readFileSync(new URL('../frontend/src/about.css', import.meta.url), 'utf8'),
     readFileSync(new URL('../frontend/src/style.css', import.meta.url), 'utf8')
@@ -337,6 +381,64 @@ test('billing and Plans pages expose voucher entry and label sample codes as exa
   assert.match(pricingHtml, /id="pricingVoucherCode"/);
   assert.match(pricingSource, /redeemBillingVoucher\(currentUser, code\)/);
   assert.match(pricingSource, /result\.queued/);
+});
+
+test('subscription checkout lets the Razorpay plan determine its payment currency', () => {
+  const pricingSource = readFileSync(new URL('../frontend/src/pricing.js', import.meta.url), 'utf8');
+  const checkoutOptions = pricingSource.match(/new window\.Razorpay\(\{[\s\S]*?\n    \}\);/)?.[0] || '';
+  assert.match(checkoutOptions, /subscription_id: created\.subscriptionId/);
+  assert.doesNotMatch(checkoutOptions, /currency\s*:/);
+  assert.match(pricingSource, /Razorpay checkout failed: \$\{details\}/);
+  assert.match(pricingSource, /failure\.code[\s\S]*failure\.description[\s\S]*failure\.reason[\s\S]*failure\.step/);
+});
+
+test('Razorpay checkout shows status-specific success, pending, and failure popups', () => {
+  const pricingSource = readFileSync(new URL('../frontend/src/pricing.js', import.meta.url), 'utf8');
+  assert.match(pricingSource, /import \{ alertModern, confirmModern \} from '\.\/modern-modal\.js'/);
+  assert.match(pricingSource, /title: 'Payment successful'/);
+  assert.match(pricingSource, /title: result\.pending \? 'Payment successful — activation pending' : 'Payment verification pending'/);
+  assert.match(pricingSource, /title: 'Payment verification issue'/);
+  assert.match(pricingSource, /title: 'Payment failed'/);
+  assert.match(pricingSource, /authentication_failed:/);
+  assert.match(pricingSource, /insufficient_funds:/);
+  assert.match(pricingSource, /GATEWAY_ERROR/);
+  assert.match(pricingSource, /SERVER_ERROR/);
+  assert.match(pricingSource, /void alertModern\(\{\s*\.\.\.failureMessage/);
+});
+
+test('closing Razorpay checkout shows a modern cancellation popup without duplicating payment outcomes', () => {
+  const pricingSource = readFileSync(new URL('../frontend/src/pricing.js', import.meta.url), 'utf8');
+  assert.match(pricingSource, /let paymentOutcomeReceived = false/);
+  assert.match(pricingSource, /handler: async checkoutResponse => \{\s*paymentOutcomeReceived = true/);
+  assert.match(pricingSource, /ondismiss: \(\) => \{\s*if \(paymentOutcomeReceived\) return/);
+  assert.match(pricingSource, /title: 'Payment cancelled'/);
+  assert.match(pricingSource, /You closed Razorpay checkout before completing the payment/);
+  assert.match(pricingSource, /paymentOutcomeReceived = true;\s*const failure = event\.error/);
+});
+
+test('successful subscription checkout refreshes Pro access and shows its expiry date', () => {
+  const pricingSource = readFileSync(new URL('../frontend/src/pricing.js', import.meta.url), 'utf8');
+  assert.match(pricingSource, /await refreshPricingState\(checkoutUser\)/);
+  assert.doesNotMatch(pricingSource, /refreshBillingState/);
+  assert.match(pricingSource, /Pro access is active\$\{validity\}/);
+  assert.match(pricingSource, /new Date\(validUntil\)\.toLocaleDateString\('en-IN'\)/);
+});
+
+test('active subscribers see their plan and can manage billing even when checkout is unavailable', () => {
+  const pricingSource = readFileSync(new URL('../frontend/src/pricing.js', import.meta.url), 'utf8');
+  const purchaseControls = pricingSource.match(/function updatePurchaseControls\(\) \{[\s\S]*?\n\}/)?.[0] || '';
+  assert.ok(purchaseControls.indexOf('if (active)') < purchaseControls.indexOf('else if (!checkoutReady)'));
+  assert.match(purchaseControls, /monthlyButton\.textContent = 'Manage billing'/);
+  assert.match(purchaseControls, /yearlyButton\.textContent = entitlement\.scheduledPlan === 'yearly'/);
+  assert.match(purchaseControls, /'Switch to yearly'/);
+  assert.match(purchaseControls, /monthlyButton\.disabled = false/);
+  assert.match(purchaseControls, /yearlyButton\.disabled = entitlement\.scheduledPlan === 'yearly'/);
+  assert.match(purchaseControls, /Your active plan: Pro \$\{planLabel\}/);
+  assert.match(purchaseControls, /monthlyBadge\.textContent = 'Active plan'/);
+  assert.match(purchaseControls, /yearlyBadge\.textContent = activePlan === 'yearly' \? 'Active plan' : 'Scheduled'/);
+  assert.match(pricingSource, /async function scheduleYearlySwitch\(\)/);
+  assert.match(pricingSource, /scheduleBillingPlanChange\(currentUser, 'yearly'\)/);
+  assert.match(pricingSource, /entitlement\?\.status === 'active'[\s\S]*?window\.location\.assign\('\/billing\.html'\)/);
 });
 
 test('Firestore rules restrict the lifetime Pro-template trial to two owner-only increments', () => {

@@ -20,9 +20,11 @@ export async function parseBillingResponse(response) {
     }
   }
   if (!response.ok) {
-    throw new Error(typeof result.error === 'string' && result.error
+    const error = new Error(typeof result.error === 'string' && result.error
       ? result.error
       : `Billing request failed (HTTP ${response.status}).`);
+    if (typeof result.code === 'string') error.code = result.code;
+    throw error;
   }
   return result;
 }

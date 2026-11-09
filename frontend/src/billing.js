@@ -11,7 +11,7 @@ import {
 import { cloudConfigured, observeAuth } from './firebase-cloud.js';
 import { PLAN_CONFIG } from './plan-access.js';
 import { formatCurrencyPrice } from './pricing-currency.js';
-import { confirmModern } from './modern-modal.js';
+import { alertModern, confirmModern } from './modern-modal.js';
 
 const $ = selector => document.querySelector(selector);
 const accountStatus = $('#billingAccountStatus');
@@ -319,6 +319,41 @@ yearlyButton.addEventListener('click', async () => {
     await refreshBillingPage(currentUser);
   } catch (error) {
     billingStatus.textContent = error.message || 'Could not schedule the yearly plan.';
+    if (error.code === 'YEARLY_SWITCH_REQUIRES_CANCELLATION') {
+      const cancelMonthly = await confirmModern({
+        title: 'Stop monthly renewal instead?',
+        message: `Razorpay does not support switching this domestic-card subscription directly to yearly. Your monthly plan is unchanged. If you continue, monthly renewal will stop at the end of this period (${date}); Pro remains active through then, and you will need to start yearly from the Plans page after it expires. No yearly subscription or charge will be created now.`,
+        confirmText: 'Stop monthly renewal',
+        variant: 'danger'
+      });
+      if (cancelMonthly) {
+        try {
+          await cancelBillingSubscription(currentUser, entitlement.subscriptionId);
+          await refreshBillingPage(currentUser);
+          billingStatus.textContent = `Monthly renewal is stopped. Pro remains active through ${date}; start yearly from the Plans page after access expires.`;
+          await alertModern({
+            title: 'Monthly renewal stopped',
+            message: `Your current Pro access continues through ${date}. Start the yearly plan from the Plans page after it expires.`,
+            confirmText: 'OK'
+          });
+        } catch (cancelError) {
+          billingStatus.textContent = cancelError.message || 'Could not stop monthly renewal.';
+          await alertModern({
+            title: 'Could not stop monthly renewal',
+            message: cancelError.message || 'Your monthly plan remains unchanged. Please retry or contact support.',
+            confirmText: 'OK',
+            variant: 'error'
+          });
+        }
+      }
+    } else {
+      await alertModern({
+        title: 'Could not switch to yearly',
+        message: error.message || 'Could not schedule the yearly plan. Your current monthly subscription remains unchanged.',
+        confirmText: 'OK',
+        variant: 'error'
+      });
+    }
     yearlyButton.disabled = false;
   }
 });

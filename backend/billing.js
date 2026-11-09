@@ -53,8 +53,8 @@ function normalizeEnvString(value) {
   return typeof value === 'string' ? value.trim() : value;
 }
 
-function isRazorpayPlanId(value) {
-  return typeof value === 'string' && value.trim().startsWith('plan_') && value.trim().length > 'plan_'.length;
+export function isRazorpayPlanId(value) {
+  return typeof value === 'string' && /^plan_[A-Za-z0-9_-]+$/.test(value.trim());
 }
 
 export function billingCurrencyConfigured(currency, env = process.env) {
@@ -176,18 +176,15 @@ function parseBoolean(value) {
   return normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'on';
 }
 
-export function billingConfigured(env = process.env) {
+export function billingCheckoutConfigured(env = process.env) {
   const billingEnabled = parseBoolean(normalizeEnvString(env.BILLING_ENABLED));
   const keyId = normalizeEnvString(env.RAZORPAY_KEY_ID);
   const keySecret = normalizeEnvString(env.RAZORPAY_KEY_SECRET);
   const webhookSecret = normalizeEnvString(env.RAZORPAY_WEBHOOK_SECRET);
-  const monthlyPlanId = normalizeEnvString(env.RAZORPAY_PLAN_MONTHLY_ID);
-  const yearlyPlanId = normalizeEnvString(env.RAZORPAY_PLAN_YEARLY_ID);
 
   if (!billingEnabled
-    || ![keyId, keySecret, webhookSecret, monthlyPlanId, yearlyPlanId]
+    || ![keyId, keySecret, webhookSecret]
       .every(value => typeof value === 'string' && value.length > 0)
-    || ![monthlyPlanId, yearlyPlanId].every(isRazorpayPlanId)
     || !firebaseAdminConfigured(env)) {
     return false;
   }
@@ -208,4 +205,11 @@ export function billingConfigured(env = process.env) {
     && parseBoolean(normalizeEnvString(env.BILLING_REFUNDS_PUBLISHED))
     && parseBoolean(normalizeEnvString(env.BILLING_TEST_MODE_VERIFIED))
     && parseBoolean(normalizeEnvString(env.BILLING_LIVE_LAUNCH_APPROVED));
+}
+
+export function billingConfigured(env = process.env) {
+  const monthlyPlanId = normalizeEnvString(env.RAZORPAY_PLAN_MONTHLY_ID);
+  const yearlyPlanId = normalizeEnvString(env.RAZORPAY_PLAN_YEARLY_ID);
+  return billingCheckoutConfigured(env)
+    && [monthlyPlanId, yearlyPlanId].every(isRazorpayPlanId);
 }

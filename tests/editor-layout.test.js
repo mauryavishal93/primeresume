@@ -61,18 +61,28 @@ test('mobile editor provides view tabs and shows one full-width panel above the 
   const html = readFileSync(new URL('../frontend/editor.html', import.meta.url), 'utf8');
   const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
   assert.match(html, /class="mobile-editor-nav"[^>]*aria-label="Mobile editor views"/);
-  for (const panel of ['resume', 'templates', 'sections', 'design']) {
+  for (const panel of ['resume', 'templates', 'design']) {
     assert.match(html, new RegExp(`class="mobile-editor-tab"[^>]*data-mobile-panel="${panel}"`));
   }
+  assert.doesNotMatch(html, /data-mobile-panel="sections"/);
   assert.match(source, /function setMobilePanel\(panel\)/);
   assert.match(source, /document\.querySelectorAll\('\.mobile-editor-tab'\)\.forEach/);
   assert.match(source, /if\(next!=='resume'\)\{leftCollapsed=false;collapsed=false;applyPanels\(\)\}/);
   assert.match(source, /function fitMobileZoom\(\)/);
   assert.match(source, /fitMobileZoom\(\);\s*updateBrowserPersistenceUI\(\)/);
   assert.match(styles, /grid-template-areas:"mobile-panel" "mobile-canvas"/);
+  assert.match(styles, /\.mobile-editor-nav\{display:grid;grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
   assert.match(styles, /#layout\[data-mobile-panel=resume\] #leftPanel,#layout\[data-mobile-panel=resume\] #rightPanel/);
   assert.match(styles, /#layout\[data-mobile-panel=design\] #leftPanel\{display:none\}/);
   assert.match(styles, /#importResumeBtn svg\{width:16px;height:16px;flex:0 0 16px/);
+});
+
+test('mobile resume canvas aligns A4 pages and fits them below the desktop zoom floor', () => {
+  const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
+  assert.match(styles, /#sheets,\.sheets\{width:100%;height:auto;min-height:auto;align-items:flex-start;overflow-x:auto;overflow-y:visible;padding:12px\}/);
+  assert.match(source, /const root=\$\('sheets'\),style=getComputedStyle\(root\),width=root\.clientWidth-parseFloat\(style\.paddingLeft\)-parseFloat\(style\.paddingRight\)/);
+  assert.match(source, /const fitted=Math\.max\(\.3,Math\.min\(1,width\/PAGE_W\)\)/);
+  assert.match(source, /matches \? \.3 : \.45/);
 });
 
 test('editor account menu links to Community and My posts', () => {
@@ -97,6 +107,39 @@ test('editor account menu links to Community and My posts', () => {
   assert.match(accountMenu, /id="myPostsLink"[^>]*hidden/);
   assert.match(source, /\$\('myPostsLink'\)\.hidden=true/);
   assert.match(source, /\$\('myPostsLink'\)\.hidden=!user/);
+});
+
+test('shared account menus omit cloud resumes while the editor keeps its own control', () => {
+  const sharedAuth = readFileSync(new URL('../frontend/src/auth-nav.js', import.meta.url), 'utf8');
+  const editor = readFileSync(new URL('../frontend/editor.html', import.meta.url), 'utf8');
+  assert.doesNotMatch(sharedAuth, /My cloud resumes|cloudLink/);
+  assert.match(editor, /id="cloudResumesBtn"[^>]*>My cloud resumes<\/button>/);
+});
+
+test('mobile editor header grid rules do not reposition links inside the account dropdown', () => {
+  assert.match(styles, /\.topbar>#aboutLink\{grid-area:about\}/);
+  assert.doesNotMatch(styles, /(?:^|})#aboutLink\{grid-area:about\}/);
+  assert.match(styles, /\.topbar>\[data-theme-toggle\]\{grid-area:theme;width:100%\}/);
+  assert.match(styles, /width:min\(300px,calc\(100vw - 32px\)\)/);
+});
+
+test('mobile editor gives header actions readable, touch-friendly rows', () => {
+  const html = readFileSync(new URL('../frontend/editor.html', import.meta.url), 'utf8');
+  assert.match(html, /id="editorCommunityLink" href="\/community\.html">Community<\/a>/);
+  assert.match(styles, /grid-template-areas:"brand brand brand docname docname account" "cloud cloud cloud cloud cloud cloud" "import import import pdf pdf pdf" "cover cover community community plans plans"/);
+  assert.match(styles, /\.topbar>\.btn,.topbar>#plansLink\{width:100%;min-width:0;min-height:40px;padding:7px 5px;font-size:12px\}/);
+  assert.match(styles, /\.topbar #editorCommunityLink\{grid-area:community\}/);
+  assert.match(styles, /@media\(max-width:360px\)\{\.topbar #coverLetterBtn,.topbar #editorCommunityLink,.topbar #plansLink\{padding-right:3px;padding-left:3px;font-size:11px\}\}/);
+});
+
+test('mobile editor places the resume name immediately before the account icon', () => {
+  assert.match(styles, /@media\(max-width:520px\)\{[\s\S]*?grid-template-columns:repeat\(6,minmax\(0,1fr\)\);grid-template-areas:"brand brand brand docname docname account" "cloud cloud cloud cloud cloud cloud"/);
+  assert.match(styles, /\.topbar \.docname\{grid-area:docname;width:100%;min-width:0;padding:6px 4px;font-size:11px\}/);
+});
+
+test('mobile editor brand gives the Pro badge room beside the resume name', () => {
+  assert.match(styles, /grid-template-areas:"brand brand brand docname docname account"/);
+  assert.match(styles, /@media\(max-width:520px\)\{\.topbar \.brand\{gap:7px\}/);
 });
 
 test('resume editing tools collapse vertically on mobile only', () => {
