@@ -543,7 +543,10 @@ async function razorpayRequest(endpoint, { method = 'GET', body } = {}) {
 function providerPlanId(planKey, currency = 'INR', pricing = {}) {
   const envKey = billingPlanEnvKey(planKey, currency);
   const envValue = envKey ? (process.env[envKey] || '').trim() : '';
-  const planId = pricing?.providerPlanIds?.[currency]?.[planKey] || envValue;
+  const hasSavedCurrencyPlans = pricing?.providerPlanIds
+    && Object.hasOwn(pricing.providerPlanIds, currency);
+  const planId = pricing?.providerPlanIds?.[currency]?.[planKey]
+    || (hasSavedCurrencyPlans ? '' : envValue);
   return isRazorpayPlanId(planId) ? planId : null;
 }
 
@@ -721,13 +724,15 @@ function normalizePricingConfig(rawConfig = {}) {
     const actualPrice = normalizePlanPrice(rawPlan?.actualPrice, basePlan.amount / 100);
     const requestedCurrentPrice = normalizePlanPrice(rawPlan?.currentPrice, basePlan.amount / 100);
     const requestedPlanId = rawConfig?.providerPlanIds?.[currency]?.[planKey];
-    const defaultPlanId = requestedCurrentPrice * 100 === basePlan.amount
+    const hasSavedCurrencyPlans = rawConfig?.providerPlanIds
+      && Object.hasOwn(rawConfig.providerPlanIds, currency);
+    const defaultPlanId = !hasSavedCurrencyPlans && requestedCurrentPrice * 100 === basePlan.amount
       ? providerPlanId(planKey, currency)
       : null;
     const planId = isRazorpayPlanId(requestedPlanId)
       ? requestedPlanId
       : defaultPlanId;
-    const currentPrice = planId ? requestedCurrentPrice : basePlan.amount / 100;
+    const currentPrice = requestedCurrentPrice;
     if (planId) providerPlanIds[currency][planKey] = planId;
     return {
       actualPrice,
@@ -824,6 +829,12 @@ async function createVerifiedProviderPlan(planKey, currency, amount) {
     if (fallback) return fallback;
     throw error;
   }
+}
+
+function isUnsupportedRazorpayCurrency(error) {
+  const providerDetail = typeof error?.providerDetail === 'string' ? error.providerDetail : '';
+  const message = error instanceof Error ? error.message : '';
+  return /currency provided is not supported/i.test(`${providerDetail} ${message}`);
 }
 
 app.get('/api/health', (_request, response) => {
@@ -1522,32 +1533,40 @@ app.put('/api/admin/pricing', requireFirebaseUser, requireAdmin, async (request,
     const storedSnapshot = await db.doc('appConfig/pricing').get();
     const previousPricing = normalizePricingConfig(storedSnapshot.exists ? storedSnapshot.data() : {});
     const providerPlanIds = { INR: {}, USD: {} };
+    const unavailableCurrencies = [];
 
     for (const currency of ['INR', 'USD']) {
-      for (const planKey of Object.keys(BILLING_PLANS)) {
-        const requested = requestedPlans[currency][planKey];
-        const basePlan = billingPlan(planKey, currency);
-        const previousPlan = pricingPlanEntry(previousPricing, planKey, currency);
-        const previousPlanId = providerPlanId(planKey, currency, previousPricing);
-        const envPlanId = providerPlanId(planKey, currency);
-        let planId;
+      try {
+        for (const planKey of Object.keys(BILLING_PLANS)) {
+          const requested = requestedPlans[currency][planKey];
+          const basePlan = billingPlan(planKey, currency);
+          const previousPlan = pricingPlanEntry(previousPricing, planKey, currency);
+          const previousPlanId = providerPlanId(planKey, currency, previousPricing);
+          const envPlanId = providerPlanId(planKey, currency);
+          let planId;
 
-        if (previousPlanId && Math.round(previousPlan.currentPrice * 100) === requested.amount) {
-          planId = previousPlanId;
-        } else if (envPlanId && requested.amount === basePlan.amount) {
-          planId = envPlanId;
-        } else {
-          planId = await createVerifiedProviderPlan(planKey, currency, requested.amount);
-        }
+          if (previousPlanId && Math.round(previousPlan.currentPrice * 100) === requested.amount) {
+            planId = previousPlanId;
+          } else if (envPlanId && requested.amount === basePlan.amount) {
+            planId = envPlanId;
+          } else {
+            planId = await createVerifiedProviderPlan(planKey, currency, requested.amount);
+          }
 
-        const verified = await razorpayRequest(`/plans/${encodeURIComponent(planId)}`);
-        if (!planMatchesRazorpay(verified, requested)) {
-          response.status(400).json({
-            error: `The configured Razorpay ${currency} ${planKey} plan does not match the requested checkout price.`
-          });
-          return;
+          const verified = await razorpayRequest(`/plans/${encodeURIComponent(planId)}`);
+          if (!planMatchesRazorpay(verified, requested)) {
+            response.status(400).json({
+              error: `The configured Razorpay ${currency} ${planKey} plan does not match the requested checkout price.`
+            });
+            return;
+          }
+          providerPlanIds[currency][planKey] = planId;
         }
-        providerPlanIds[currency][planKey] = planId;
+      } catch (error) {
+        if (!isUnsupportedRazorpayCurrency(error)) throw error;
+        providerPlanIds[currency] = {};
+        unavailableCurrencies.push(currency);
+        console.warn(`Razorpay does not support ${currency}; saving pricing without enabling ${currency} checkout.`);
       }
     }
 
@@ -1563,7 +1582,13 @@ app.put('/api/admin/pricing', requireFirebaseUser, requireAdmin, async (request,
       announcement
     });
     await db.doc('appConfig/pricing').set(pricing, { merge: true });
-    response.json({ pricing: publicPricingConfig(pricing) });
+    response.json({
+      pricing: publicPricingConfig(pricing),
+      unavailableCurrencies,
+      warnings: unavailableCurrencies.map(currency => (
+        `Pricing was saved, but Razorpay does not support ${currency}; ${currency} checkout is disabled.`
+      ))
+    });
   } catch (error) {
     console.error('Could not create, verify, or save regional pricing.', error);
     const detail = error?.providerDetail || error?.message || 'Razorpay rejected the pricing update.';

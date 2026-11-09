@@ -584,6 +584,7 @@ test('admin regional prices create verified Razorpay plans and charge the config
     current_end: Math.floor(Date.now() / 1000) + 3600,
     notes: { plan_key: 'monthly', currency: 'USD' }
   };
+  providerSubscriptions.set('sub_test1', providerSubscription);
   const signature = createHmac('sha256', environment.RAZORPAY_KEY_SECRET)
     .update('sub_test1|pay_test1')
     .digest('hex');
@@ -606,6 +607,7 @@ test('admin regional prices create verified Razorpay plans and charge the config
   fakeDatabase.records.delete('users/user-3/billing/entitlement');
   fakeDatabase.records.delete('billingPayments/pay_test1');
   providerSubscription = null;
+  providerSubscriptions.delete('sub_test1');
   nextSubscriptionId = 0;
 
   const restore = await request('/api/admin/pricing', {
@@ -623,6 +625,67 @@ test('admin regional prices create verified Razorpay plans and charge the config
     }
   });
   assert.equal(restore.status, 200);
+});
+
+test('admin pricing saves supported currencies when Razorpay rejects USD currency', async () => {
+  const razorpayRequest = app.locals.razorpayRequest;
+  app.locals.razorpayRequest = async (endpoint, options) => {
+    if (endpoint === '/plans' && options?.method === 'POST' && options.body?.item?.currency === 'USD') {
+      const error = new Error('Razorpay request failed with status 400: Currency provided is not supported.');
+      error.status = 400;
+      error.providerDetail = 'Currency provided is not supported';
+      throw error;
+    }
+    return razorpayRequest(endpoint, options);
+  };
+
+  try {
+    const save = await request('/api/admin/pricing', {
+      method: 'PUT',
+      token: 'admin-test-token',
+      body: {
+        pricing: {
+          monthly: { actualPrice: 149, currentPrice: 109 },
+          yearly: { actualPrice: 499, currentPrice: 399 },
+          USD: {
+            monthly: { actualPrice: 4.5, currentPrice: 4.25 },
+            yearly: { actualPrice: 59.99, currentPrice: 49.37 }
+          }
+        }
+      }
+    });
+    const saved = await save.json();
+    assert.equal(save.status, 200, JSON.stringify(saved));
+    assert.equal(saved.pricing.monthly.currentPrice, 109);
+    assert.equal(saved.pricing.USD.monthly.currentPrice, 4.25);
+    assert.deepEqual(saved.unavailableCurrencies, ['USD']);
+    assert.match(saved.warnings[0], /USD checkout is disabled/);
+
+    const stored = fakeDatabase.records.get('appConfig/pricing');
+    assert.ok(stored.providerPlanIds.INR.monthly);
+    assert.deepEqual(stored.providerPlanIds.USD, {});
+    const configResponse = await request('/api/billing/config');
+    const config = await configResponse.json();
+    assert.ok(config.supportedCurrencies.includes('INR'));
+    assert.ok(!config.supportedCurrencies.includes('USD'));
+  } finally {
+    app.locals.razorpayRequest = razorpayRequest;
+    const restore = await request('/api/admin/pricing', {
+      method: 'PUT',
+      token: 'admin-test-token',
+      body: {
+        pricing: {
+          monthly: { actualPrice: 199, currentPrice: 99 },
+          yearly: { actualPrice: 499, currentPrice: 399 },
+          USD: {
+            monthly: { actualPrice: 4.5, currentPrice: 3.67 },
+            yearly: { actualPrice: 59.99, currentPrice: 49.37 }
+          }
+        }
+      }
+    });
+    assert.equal(restore.status, 200);
+  }
 });
 
 test('international checkout selects the server-verified USD Razorpay plan', async () => {
@@ -658,6 +721,7 @@ test('international checkout selects the server-verified USD Razorpay plan', asy
     current_end: Math.floor(Date.now() / 1000) + 3600,
     notes: { plan_key: 'monthly', currency: 'USD' }
   };
+  providerSubscriptions.set('sub_test1', providerSubscription);
   const signature = createHmac('sha256', environment.RAZORPAY_KEY_SECRET)
     .update('sub_test1|pay_test1')
     .digest('hex');
@@ -679,6 +743,7 @@ test('international checkout selects the server-verified USD Razorpay plan', asy
   fakeDatabase.records.delete('users/user-3/billing/entitlement');
   fakeDatabase.records.delete('billingPayments/pay_test1');
   providerSubscription = null;
+  providerSubscriptions.delete('sub_test1');
   nextSubscriptionId = 0;
 });
 
@@ -871,6 +936,7 @@ test('subscription checkout, payment verification, and signed webhook lifecycle 
     current_end: endOfPeriod,
     notes: { plan_key: 'monthly' }
   };
+  providerSubscriptions.set('sub_test1', providerSubscription);
   const signature = createHmac('sha256', environment.RAZORPAY_KEY_SECRET)
     .update('sub_test1|pay_test1')
     .digest('hex');
@@ -909,6 +975,7 @@ test('subscription checkout, payment verification, and signed webhook lifecycle 
   assert.ok(adminUserDetails.accessHistory.some(item => item.paymentId === 'pay_test1'));
   assert.ok(adminUserDetails.accessHistory.some(item => item.source === 'voucher' && item.paymentMode === 'voucher'));
   providerSubscription = { ...providerSubscription, status: 'active' };
+  providerSubscriptions.set('sub_test1', providerSubscription);
   fakeDatabase.records.delete('users/user-1/billing/entitlement');
   fakeDatabase.records.delete('users/user-1/billing/checkout');
   const reconciledEntitlementResponse = await request('/api/billing/entitlement', { token: 'valid-test-token' });
@@ -1001,6 +1068,7 @@ test('subscription checkout, payment verification, and signed webhook lifecycle 
     status: 'expired',
     current_end: Math.floor(Date.now() / 1000) - 1
   };
+  providerSubscriptions.set('sub_test1', providerSubscription);
   assert.equal((await signedWebhook(expiredEvent)).status, 200);
   assert.equal(fakeDatabase.records.get('users/user-1/billing/entitlement').planId, 'free');
   const expiredEntitlementResponse = await request('/api/billing/entitlement', { token: 'valid-test-token' });

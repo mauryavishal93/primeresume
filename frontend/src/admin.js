@@ -700,7 +700,15 @@ $('#save-pricing-config').addEventListener('click', async () => {
       })
     });
     renderPricingConfig(result.pricing || result);
-    $('#pricing-config-status').textContent = 'Saved';
+    const warnings = Array.isArray(result.warnings) ? result.warnings.filter(value => typeof value === 'string') : [];
+    $('#pricing-config-status').textContent = warnings.length ? 'Saved · some currencies unavailable' : 'Saved';
+    if (warnings.length) {
+      await alertModern({
+        title: 'Pricing saved with limited currencies',
+        message: warnings.join('\n'),
+        variant: 'default'
+      });
+    }
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     const cleanReason = reason.replace(/\s*No pricing changes were published\.\s*$/, '').trim();
