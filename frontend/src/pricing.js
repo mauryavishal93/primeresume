@@ -93,10 +93,29 @@ function renderStoredPricing(currency = selectedCurrency) {
   const yearlyActual = getConfiguredActualPrice('yearly', planConfig.yearly.price, currency);
   const yearlyCurrent = getConfiguredPrice('yearly', planConfig.yearly.price, currency);
 
-  const announcement = window.__pricingConfig?.announcement || '';
+  const announcement = typeof window.__pricingConfig?.announcement === 'string'
+    ? window.__pricingConfig.announcement
+    : '';
   if (pricingAnnouncement) {
-    pricingAnnouncement.textContent = announcement;
-    pricingAnnouncement.hidden = !announcement;
+    const label = pricingAnnouncement.querySelector('.pricing-announcement-label');
+    const copy = pricingAnnouncement.querySelector('.pricing-announcement-copy');
+    const discountBadge = pricingAnnouncement.querySelector('.pricing-announcement-discount');
+    const trimmedAnnouncement = announcement.trim();
+    const limitedTimeOffer = /^\s*limited\s+time\s+offer\b/i.test(trimmedAnnouncement);
+    const discountMatch = trimmedAnnouncement.match(/\bsave\s+(\d{1,3})\s*%(?:[.!?]+)?/i);
+    const message = trimmedAnnouncement
+      .replace(/^\s*limited\s+time\s+offer[.!:\s-]*/i, '')
+      .replace(/\s*(?:&|and)?\s*save\s+\d{1,3}\s*%(?:[.!?]+)?/i, '')
+      .replace(/\s+([.!?])/g, '$1')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+
+    label.textContent = limitedTimeOffer ? 'LIMITED-TIME OFFER' : 'SPECIAL PRICING';
+    copy.textContent = message;
+    discountBadge.textContent = discountMatch ? `SAVE ${discountMatch[1]}%` : '';
+    discountBadge.hidden = !discountMatch;
+    copy.hidden = !message;
+    pricingAnnouncement.hidden = !trimmedAnnouncement;
   }
 
   const renderPlanPrice = (node, currentPrice, actualPrice, suffixLabel) => {
