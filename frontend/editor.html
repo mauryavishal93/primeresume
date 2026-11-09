@@ -14,7 +14,7 @@ if (location.hostname.toLowerCase() === 'buildmyportfolio.onrender.com') {
 </head>
 <body>
 <header class="topbar">
- <a class="brand" href="/home.html" aria-label="ResumeOut.com home"><img class="logo" src="/images/resumeout-mark.svg" alt="" aria-hidden="true"><span class="brand-name"><span class="brand-resume">Resume</span><span class="brand-out">Out</span><span class="brand-domain">.com</span></span></a>
+ <a class="brand" href="/home.html" aria-label="ResumeOut.com home"><img class="logo" src="/images/resumeout-mark.svg" alt="" aria-hidden="true"><span class="brand-name"><span class="brand-resume">Resume</span><span class="brand-out">Out</span><span class="brand-domain">.com</span></span><span class="pro-brand-badge" id="proBrandBadge" aria-label="Pro plan" hidden>Pro</span></a>
  <input id="docName" class="docname" aria-label="Project name" value="Untitled resume">
  <div class="spacer"></div>
  <div class="browser-persistence" id="browserPersistence" hidden>
@@ -40,7 +40,7 @@ if (location.hostname.toLowerCase() === 'buildmyportfolio.onrender.com') {
   <span>Import resume</span>
  </button>
  <button class="btn outline" id="coverLetterBtn">Cover letter</button>
- <a class="btn outline" href="/community.html">Community</a>
+ <a class="btn outline" id="editorCommunityLink" href="/community.html">Community</a>
  <a class="btn outline" id="plansLink" href="/pricing.html">Plans</a>
  <button class="btn primary" id="pdfBtn">Export PDF</button>
  <details class="account-menu" id="accountMenu">
@@ -52,6 +52,7 @@ if (location.hostname.toLowerCase() === 'buildmyportfolio.onrender.com') {
     <span class="account-avatar account-avatar-large" id="accountAvatarLarge" aria-hidden="true">U</span>
     <span class="account-menu-identity"><strong id="accountUserName">User</strong><span id="accountUserEmail"></span></span>
    </div>
+   <a class="account-menu-item" id="myAccountLink" href="/my-account.html" hidden>My account</a>
    <button class="account-menu-item" id="cloudResumesBtn" type="button" hidden>My cloud resumes</button>
    <a class="account-menu-item" id="myPostsLink" href="/my-posts.html" hidden>My posts</a>
    <a class="account-menu-item" href="/billing.html">Billing</a>
@@ -68,7 +69,6 @@ if (location.hostname.toLowerCase() === 'buildmyportfolio.onrender.com') {
 <nav class="mobile-editor-nav" aria-label="Mobile editor views">
  <button class="mobile-editor-tab" type="button" data-mobile-panel="resume" aria-pressed="true">Resume</button>
  <button class="mobile-editor-tab" type="button" data-mobile-panel="templates" aria-pressed="false">Templates</button>
- <button class="mobile-editor-tab" type="button" data-mobile-panel="sections" aria-pressed="false">Sections</button>
  <button class="mobile-editor-tab" type="button" data-mobile-panel="design" aria-pressed="false">Design</button>
 </nav>
 <div class="modal-bg" id="cloudModalBg" aria-hidden="true">

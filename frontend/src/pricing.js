@@ -3,14 +3,46 @@ import {
   loadBillingConfig,
   loadBillingEntitlement,
   redeemBillingVoucher,
+  scheduleBillingPlanChange,
   verifyBillingCheckout
 } from './billing-client.js';
 import { cloudConfigured, observeAuth, signInWithGoogle } from './firebase-cloud.js';
+import { alertModern, confirmModern } from './modern-modal.js';
 import { PLAN_CONFIG, PRICING_FEATURES } from './plan-access.js';
 import { formatCurrencyPrice, preferredPricingCurrency } from './pricing-currency.js';
 
 const $ = selector => document.querySelector(selector);
 const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+function razorpayFailureMessage(failure) {
+  const reason = typeof failure.reason === 'string' ? failure.reason.toLowerCase() : '';
+  const code = typeof failure.code === 'string' ? failure.code.toUpperCase() : '';
+  const step = typeof failure.step === 'string' ? failure.step.toLowerCase() : '';
+  const explanations = {
+    authentication_failed: 'Bank authentication could not be completed. Retry and approve the payment in your bank app or OTP screen.',
+    card_declined: 'Your bank declined the card. Try another card or contact your bank.',
+    insufficient_funds: 'The payment method has insufficient funds. Try another payment method.',
+    international_transaction_not_allowed: 'Your payment method does not allow this transaction. Contact your bank or try another method.',
+    transaction_limit_exceeded: 'The payment exceeds your bank or payment-method limit. Try another method or contact your bank.',
+    card_expired: 'The card has expired. Use a valid card or another payment method.',
+    payment_failed: 'The payment provider could not complete this transaction. Retry or use another payment method.'
+  };
+  const explanation = explanations[reason]
+    || (step.includes('authentication')
+      ? explanations.authentication_failed
+      : code === 'GATEWAY_ERROR'
+        ? 'The payment gateway did not complete the request. Please retry in a moment.'
+        : code === 'SERVER_ERROR'
+          ? 'Razorpay is temporarily unavailable. Please retry in a moment.'
+          : 'Razorpay could not complete the payment. Please retry or use another payment method.');
+  const details = [failure.code, failure.description, failure.reason, failure.step]
+    .filter(value => typeof value === 'string' && value.trim())
+    .join(' — ');
+  return {
+    title: 'Payment failed',
+    message: details ? `${explanation}\n\nRazorpay details: ${details}` : explanation
+  };
+}
+
 const checkoutStatus = $('#checkoutStatus');
 const monthlyButton = $('#purchaseMonthly');
 const yearlyButton = $('#purchaseYearly');
@@ -151,7 +183,19 @@ for (const feature of PRICING_FEATURES) {
   for (const value of [feature.label, feature.free, feature.pro]) {
     const cell = document.createElement(row.children.length ? 'td' : 'th');
     if (cell.tagName === 'TH') cell.scope = 'row';
-    cell.textContent = value;
+    if (value === 'Included' || value.startsWith('Not available')) {
+      const available = value === 'Included';
+      const indicator = document.createElement('span');
+      indicator.className = `feature-status ${available ? 'feature-status-included' : 'feature-status-unavailable'}`;
+      indicator.setAttribute('role', 'img');
+      indicator.setAttribute('aria-label', available ? 'Included' : 'Not available');
+      indicator.innerHTML = available
+        ? '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10.5 4 4 8-9"/></svg>'
+        : '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15"/></svg>';
+      cell.append(indicator);
+    } else {
+      cell.textContent = value;
+    }
     row.append(cell);
   }
   tableBody.append(row);
@@ -168,7 +212,32 @@ function updatePurchaseControls() {
   monthlyButton.disabled = true;
   yearlyButton.disabled = true;
 
-  if (!checkoutReady) {
+  if (active) {
+    monthlyButton.textContent = 'Manage billing';
+    const canSwitchToYearly = activePlan === 'monthly'
+      && entitlement.scheduledPlan !== 'yearly'
+      && checkoutReady;
+    yearlyButton.textContent = entitlement.scheduledPlan === 'yearly'
+      ? 'Yearly scheduled'
+      : canSwitchToYearly
+        ? 'Switch to yearly'
+        : 'Manage billing';
+    monthlyButton.disabled = false;
+    yearlyButton.disabled = entitlement.scheduledPlan === 'yearly';
+    const validUntil = Number(entitlement.validUntil);
+    const validity = Number.isFinite(validUntil) && validUntil > 0
+      ? ` through ${new Date(validUntil).toLocaleDateString('en-IN')}`
+      : '';
+    const planLabel = activePlan === 'monthly'
+      ? 'Monthly'
+      : activePlan === 'yearly'
+        ? 'Yearly'
+        : 'Pro';
+    const scheduledChange = entitlement.scheduledPlan === 'yearly'
+      ? ` Yearly billing is scheduled${entitlement.scheduledAt ? ` for ${new Date(entitlement.scheduledAt).toLocaleDateString('en-IN')}` : ''}.`
+      : '';
+    checkoutStatus.textContent = `Your active plan: Pro ${planLabel}${validity}.${scheduledChange}`;
+  } else if (!checkoutReady) {
     monthlyButton.textContent = 'Coming soon';
     yearlyButton.textContent = 'Coming soon';
     checkoutStatus.textContent = billingConfig?.checkoutEnabled
@@ -179,9 +248,6 @@ function updatePurchaseControls() {
     yearlyButton.textContent = 'Sign in to purchase yearly';
     monthlyButton.disabled = false;
     yearlyButton.disabled = false;
-  } else if (active) {
-    monthlyButton.textContent = 'Manage billing';
-    yearlyButton.textContent = 'Manage billing';
   } else {
     monthlyButton.textContent = 'Start monthly subscription';
     yearlyButton.textContent = 'Start yearly subscription';
@@ -191,11 +257,12 @@ function updatePurchaseControls() {
 
   const monthlyBadge = $('#monthlyPlanBadge');
   const yearlyBadge = $('#yearlyPlanBadge');
-  monthlyBadge.textContent = 'Active';
+  const yearlyScheduled = active && entitlement.scheduledPlan === 'yearly';
+  monthlyBadge.textContent = 'Active plan';
   monthlyBadge.hidden = activePlan !== 'monthly';
-  yearlyBadge.textContent = 'Active';
-  yearlyBadge.classList.remove('scheduled');
-  yearlyBadge.hidden = activePlan !== 'yearly';
+  yearlyBadge.textContent = activePlan === 'yearly' ? 'Active plan' : 'Scheduled';
+  yearlyBadge.classList.toggle('scheduled', yearlyScheduled);
+  yearlyBadge.hidden = activePlan !== 'yearly' && !yearlyScheduled;
 
 }
 
@@ -223,6 +290,50 @@ async function refreshPricingState(user) {
     checkoutStatus.textContent = error.message;
     updatePurchaseControls();
     updateVoucherControls();
+  }
+}
+
+async function scheduleYearlySwitch() {
+  if (!currentUser || entitlement?.status !== 'active' || entitlement.billingPlan !== 'monthly'
+    || entitlement.scheduledPlan === 'yearly' || !billingConfig?.checkoutEnabled) {
+    return;
+  }
+  const date = entitlement.validUntil
+    ? new Date(entitlement.validUntil).toLocaleDateString('en-IN')
+    : 'the end of your current monthly period';
+  const currency = entitlement.currency === 'USD' ? 'USD' : 'INR';
+  const amount = Number(billingConfig.currencyPlans?.[currency]?.yearly?.amount);
+  const price = Number.isSafeInteger(amount) && amount > 0
+    ? amount / 100
+    : PLAN_CONFIG.pro.currencies[currency].yearly.price;
+  if (!await confirmModern({
+    title: 'Switch to yearly?',
+    message: `Your monthly access continues through ${date}. Yearly billing will start then at ${formatCurrencyPrice(price, currency)}/year.`,
+    confirmText: 'Switch to yearly'
+  })) return;
+
+  yearlyButton.disabled = true;
+  checkoutStatus.textContent = 'Scheduling your yearly plan…';
+  try {
+    const result = await scheduleBillingPlanChange(currentUser, 'yearly');
+    await refreshPricingState(currentUser);
+    const scheduledDate = new Date(result.scheduledAt).toLocaleDateString('en-IN');
+    checkoutStatus.textContent = `Your active plan remains monthly. Yearly billing is scheduled for ${scheduledDate}.`;
+    await alertModern({
+      title: 'Yearly plan scheduled',
+      message: `Your monthly access continues until ${scheduledDate}. Yearly billing will begin after that.`,
+      confirmText: 'OK'
+    });
+  } catch (error) {
+    console.error('Could not schedule the yearly plan switch.', error);
+    checkoutStatus.textContent = error.message || 'Could not schedule the yearly plan.';
+    yearlyButton.disabled = false;
+    await alertModern({
+      title: 'Could not switch to yearly',
+      message: error.message || 'The yearly plan could not be scheduled. Your current monthly subscription remains unchanged.',
+      confirmText: 'OK',
+      variant: 'error'
+    });
   }
 }
 
@@ -256,50 +367,115 @@ async function startCheckout(planKey) {
     const planConfig = PLAN_CONFIG.pro.currencies[selectedCurrency];
     const expectedAmount = Math.round(getConfiguredPrice(planKey, planConfig[planKey].price, selectedCurrency) * 100);
     const created = await createBillingSubscription(checkoutUser, planKey, selectedCurrency, expectedAmount);
+    let paymentOutcomeReceived = false;
     const checkout = new window.Razorpay({
       key: created.keyId,
       subscription_id: created.subscriptionId,
       name: 'ResumeOut.com',
       description: `${created.plan.label} subscription`,
-      currency: created.plan.currency,
       prefill: {
         name: checkoutUser.displayName || '',
         email: checkoutUser.email || ''
       },
       theme: { color: '#5146e5' },
       handler: async checkoutResponse => {
+        paymentOutcomeReceived = true;
         checkoutStatus.textContent = 'Verifying your payment with Razorpay…';
         try {
           const result = await verifyBillingCheckout(checkoutUser, checkoutResponse);
+          let confirmedEntitlement = result.entitlement?.status === 'active'
+            ? result.entitlement
+            : null;
           if (result.entitlement?.status === 'active') {
-            checkoutStatus.textContent = 'Payment verified. Pro access is active on your signed-in account.';
+            entitlement = result.entitlement;
+            updatePurchaseControls();
+            updateVoucherControls();
           } else {
             checkoutStatus.textContent = result.message || 'Payment verified. Waiting for Razorpay to activate the subscription.';
             for (let attempt = 0; attempt < 5; attempt += 1) {
               await delay(2000);
               const updatedEntitlement = await loadBillingEntitlement(checkoutUser);
               if (updatedEntitlement?.status === 'active') {
-                checkoutStatus.textContent = 'Payment verified. Pro access is active on your signed-in account.';
+                confirmedEntitlement = updatedEntitlement;
+                entitlement = updatedEntitlement;
                 break;
               }
             }
           }
-          await refreshBillingState(checkoutUser);
+          await refreshPricingState(checkoutUser);
+          if (entitlement?.status !== 'active' && confirmedEntitlement) {
+            entitlement = confirmedEntitlement;
+            updatePurchaseControls();
+            updateVoucherControls();
+          }
+          if (entitlement?.status === 'active') {
+            const validUntil = Number(entitlement.validUntil);
+            const validity = Number.isFinite(validUntil) && validUntil > 0
+              ? ` through ${new Date(validUntil).toLocaleDateString('en-IN')}`
+              : '';
+            const message = `Payment successful. Pro access is active${validity}.`;
+            checkoutStatus.textContent = message;
+            await alertModern({
+              title: 'Payment successful',
+              message,
+              confirmText: 'Continue'
+            });
+          } else {
+            const message = result.message
+              || 'Razorpay verified your payment. Pro access will appear as soon as the subscription is activated.';
+            checkoutStatus.textContent = message;
+            await alertModern({
+              title: result.pending ? 'Payment successful — activation pending' : 'Payment verification pending',
+              message,
+              confirmText: 'OK'
+            });
+          }
         } catch (error) {
           console.error('Payment verification request failed.', error);
-          checkoutStatus.textContent = `${error.message} If your payment completed, it will be reconciled through Razorpay.`;
+          const message = `${error.message} If your payment completed, it will be reconciled through Razorpay.`;
+          checkoutStatus.textContent = message;
+          await alertModern({
+            title: 'Payment verification issue',
+            message,
+            confirmText: 'OK',
+            variant: 'error'
+          });
         }
       },
       modal: {
         ondismiss: () => {
+          if (paymentOutcomeReceived) return;
           checkoutStatus.textContent = 'Checkout closed. No purchase was confirmed by this page.';
           updatePurchaseControls();
+          void alertModern({
+            title: 'Payment cancelled',
+            message: 'You closed Razorpay checkout before completing the payment. No payment was confirmed, and no Pro access was activated.',
+            confirmText: 'OK'
+          });
         }
       }
     });
     checkout.on('payment.failed', event => {
-      console.error('Razorpay reported a failed payment.', event.error);
-      checkoutStatus.textContent = 'Razorpay could not complete this payment. No Pro access was activated.';
+      paymentOutcomeReceived = true;
+      const failure = event.error || {};
+      console.error('Razorpay reported a failed payment.', {
+        code: failure.code,
+        description: failure.description,
+        reason: failure.reason,
+        step: failure.step
+      });
+      const details = [failure.code, failure.description, failure.reason, failure.step]
+        .filter(value => typeof value === 'string' && value.trim())
+        .join(' — ');
+      const failureMessage = razorpayFailureMessage(failure);
+      checkoutStatus.textContent = details
+        ? `Razorpay checkout failed: ${details}`
+        : failureMessage.message;
+      void alertModern({
+        ...failureMessage,
+        confirmText: 'Try again',
+        variant: 'error'
+      });
     });
     checkout.open();
     checkoutStatus.textContent = 'Complete the payment in the Razorpay checkout window.';
@@ -307,15 +483,28 @@ async function startCheckout(planKey) {
     console.error('Could not start Razorpay checkout.', error);
     checkoutStatus.textContent = error.message;
     updatePurchaseControls();
+    await alertModern({
+      title: 'Could not start checkout',
+      message: error.message || 'Razorpay checkout could not be started. Please try again.',
+      confirmText: 'OK',
+      variant: 'error'
+    });
   }
 }
 
 monthlyButton.addEventListener('click', () => entitlement?.status === 'active'
   ? window.location.assign('/billing.html')
   : startCheckout('monthly'));
-yearlyButton.addEventListener('click', () => entitlement?.status === 'active'
-  ? window.location.assign('/billing.html')
-  : startCheckout('yearly'));
+yearlyButton.addEventListener('click', () => {
+  if (entitlement?.status === 'active' && entitlement.billingPlan === 'monthly') {
+    return scheduleYearlySwitch();
+  }
+  if (entitlement?.status === 'active') {
+    window.location.assign('/billing.html');
+    return;
+  }
+  return startCheckout('yearly');
+});
 
 $('#pricingVoucherForm').addEventListener('submit', async event => {
   event.preventDefault();

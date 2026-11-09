@@ -9,7 +9,9 @@ function createFakeFirebase({ popupError = null, signOutError = null } = {}) {
   const auth = {
     currentUser: {
       uid: 'user-1',
-      getIdToken: async () => 'firebase-token'
+      displayName: 'Existing Name',
+      getIdToken: async () => 'firebase-token',
+      reload: async () => {}
     }
   };
   let authObserver;
@@ -77,9 +79,21 @@ function createFakeFirebase({ popupError = null, signOutError = null } = {}) {
     serverTimestamp: () => ({ toMillis: () => 1_700_000_000_000 }),
     deleteDoc: async ref => { records.delete(ref.key); }
   };
+  const fetchImpl = async (_url, options) => {
+    const key = 'users/user-1/profile/account';
+    const record = records.get(key) || { mobileNumber: '', photoDataUrl: '' };
+    if (options.method === 'PUT') {
+      const body = JSON.parse(options.body);
+      Object.assign(auth.currentUser, { displayName: body.displayName });
+      records.set(key, { mobileNumber: body.mobileNumber, photoDataUrl: body.photoDataUrl });
+      return { ok: true, json: async () => body };
+    }
+    return { ok: true, json: async () => record };
+  };
   const client = createFirebaseCloudClient({
     config: { projectId: 'test-project' },
-    loadSdk: async () => [appSdk, authSdk, firestoreSdk]
+    loadSdk: async () => [appSdk, authSdk, firestoreSdk],
+    fetchImpl
   });
   return {
     client,
@@ -129,6 +143,32 @@ test('Firebase sign-out errors are surfaced and the same client can retry', asyn
   firebase.setSignOutError(null);
   await firebase.client.signOutUser();
   assert.equal(firebase.signedOut, true);
+});
+
+test('account profile reads and writes mobile privately and updates only the signed-in display name', async () => {
+  const firebase = createFakeFirebase();
+  const user = firebase.auth.currentUser;
+
+  assert.deepEqual(await firebase.client.getAccountProfile(user), { mobileNumber: '', photoDataUrl: '' });
+  const photoDataUrl = 'data:image/jpeg;base64,/9j/2Q==';
+  assert.deepEqual(await firebase.client.saveAccountProfile(user, 'Updated Name', '+1 (415) 555-0134', photoDataUrl), {
+    name: 'Updated Name',
+    mobile: '+1 (415) 555-0134',
+    photo: photoDataUrl
+  });
+  assert.equal(user.displayName, 'Updated Name');
+  assert.deepEqual(await firebase.client.getAccountProfile(user), {
+    mobileNumber: '+1 (415) 555-0134',
+    photoDataUrl
+  });
+  assert.ok(firebase.records.has('users/user-1/profile/account'));
+  assert.equal(firebase.records.get('users/user-1/profile/account').mobileNumber, '+1 (415) 555-0134');
+  assert.equal(firebase.records.get('users/user-1/profile/account').photoDataUrl, photoDataUrl);
+
+  await assert.rejects(firebase.client.getAccountProfile({ uid: 'someone-else' }), /Sign in to the account/);
+  await assert.rejects(firebase.client.saveAccountProfile(user, '  ', '1234567'), /Enter a name/);
+  await assert.rejects(firebase.client.saveAccountProfile(user, 'Valid Name', '123'), /valid mobile number/);
+  await assert.rejects(firebase.client.saveAccountProfile(user, 'Valid Name', '', 'data:image/svg+xml;base64,abc'), /valid profile image/);
 });
 
 test('Google sign-in reports actionable Firebase configuration and domain errors', () => {

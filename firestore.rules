@@ -40,6 +40,24 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    match /users/{userId}/profile/account {
+      allow get: if request.auth != null && request.auth.uid == userId;
+      allow list: if false;
+
+      allow create, update: if request.auth != null
+        && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly(['mobileNumber', 'photoDataUrl', 'updatedAt'])
+        && request.resource.data.mobileNumber is string
+        && request.resource.data.mobileNumber.size() <= 24
+        && request.resource.data.mobileNumber.matches('^[+0-9() .-]*$')
+        && request.resource.data.photoDataUrl is string
+        && request.resource.data.photoDataUrl.size() <= 140000
+        && request.resource.data.photoDataUrl.matches('^data:image/jpeg;base64,[A-Za-z0-9+/]+=*$|^$')
+        && request.resource.data.updatedAt is timestamp;
+
+      allow delete: if false;
+    }
+
     match /users/{userId}/trial/proTemplateDownloads {
       allow get: if request.auth != null && request.auth.uid == userId;
       allow list: if false;

@@ -26,7 +26,7 @@
 .plan-duration,.checkout-status{color:#dfc58d;font-size:12px}
 .plan-card ul{display:grid;gap:10px;margin:12px 0 24px;padding-left:20px;color:#dce6f4}
 .plan-card li::marker{color:#b89456}
-.plan-action{width:100%;margin-top:auto;justify-content:center}
+.plan-action{width:100%;min-height:54px;margin-top:auto;padding:14px 20px;justify-content:center;border-radius:10px;font-weight:750}
 .plan-card .plan-action:is(#purchaseMonthly,#purchaseYearly){min-height:54px;padding:14px 20px;border:1px solid transparent;border-radius:10px;color:#fff;font-weight:750;box-shadow:0 9px 20px rgba(10,105,155,.25);transition:transform .18s ease,box-shadow .18s ease,filter .18s ease}
 #purchaseMonthly.plan-action{background:linear-gradient(110deg,#1678c8,#087e91)}
 #purchaseYearly.plan-action{background:linear-gradient(110deg,#138c75,#16a47f);box-shadow:0 9px 20px rgba(10,135,103,.24)}
@@ -63,6 +63,11 @@
 .pricing-table thead th{background:rgba(30,125,217,.14);color:#f3f8ff}
 .pricing-table tbody th{color:#e4edf8;font-weight:700}
 .pricing-table tbody td{color:#c0cde0}
+.feature-status{display:inline-grid;width:24px;height:24px;place-items:center;vertical-align:middle}
+.feature-status svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round}
+.feature-status-included{color:#20c77a}
+.feature-status-unavailable{color:#f05b68}
+.feature-status[role=img]{font-size:0}
 .pricing-table tbody tr:last-child>*{border-bottom:0}
 .pricing-terms{margin-top:28px}
 .pricing-links{display:flex;flex-wrap:wrap;gap:14px 22px;margin-top:18px}
@@ -97,6 +102,8 @@
 :root[data-theme=light] .pricing-table thead th{background:#eef6ff;color:#202a3a}
 :root[data-theme=light] .pricing-table tbody th{color:#1b2434}
 :root[data-theme=light] .pricing-table tbody td{color:#4e596b}
+:root[data-theme=light] .feature-status-included{color:#13834e}
+:root[data-theme=light] .feature-status-unavailable{color:#c62836}
 :root[data-theme=light] .pricing-links a{color:#14766f}
 @media(max-width:900px){.plan-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.plan-card:first-child{grid-column:1/-1}}
 @media(max-width:700px){.pricing-hero{margin:8px auto 28px}.plan-cards{grid-template-columns:1fr}.plan-card:first-child{grid-column:auto}.plan-card{padding:22px}.pricing-comparison{margin-top:36px}}

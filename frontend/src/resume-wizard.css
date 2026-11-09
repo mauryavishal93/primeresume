@@ -556,36 +556,6 @@
     padding: 12px;
   }
 
-  .about-header {
-    display: flex;
-    height: 64px;
-    min-height: 64px;
-    flex-wrap: nowrap;
-    padding: 8px 12px;
-  }
-
-  .about-brand {
-    gap: 7px;
-    margin-left: 0;
-    font-size: 14px;
-  }
-
-  .about-brand .about-logo {
-    width: 28px;
-    height: 28px;
-  }
-
-  .about-brand-name {
-    font-size: 15px;
-  }
-
-  .about-nav {
-    width: auto;
-    flex: 0 0 auto;
-    flex-wrap: nowrap;
-    margin-left: auto;
-  }
-
   .about-nav .theme-switch-label {
     display: none;
   }

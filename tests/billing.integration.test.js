@@ -56,6 +56,16 @@ function createFakeDatabase() {
   const db = {
     collection: name => ({
       doc: id => reference(`${name}/${id || `generated-${records.size + 1}`}`),
+      where: (field, operator, value) => ({
+        get: async () => ({
+          docs: [...records.entries()]
+            .filter(([key, data]) => key.startsWith(`${name}/`)
+              && key.split('/').length === 2
+              && operator === '=='
+              && data[field] === value)
+            .map(([key, data]) => ({ id: key.split('/').at(-1), data: () => data }))
+        })
+      }),
       get: async () => ({
         docs: [...records.entries()]
           .filter(([key]) => key.startsWith(`${name}/`) && key.split('/').length === 2)
@@ -83,6 +93,7 @@ let server;
 let origin;
 let fakeDatabase;
 let providerSubscription;
+const providerSubscriptions = new Map();
 let nextSubscriptionId = 0;
 let nextDynamicPlanId = 0;
 const dynamicProviderPlans = new Map();
@@ -142,11 +153,29 @@ before(async () => {
     }
     if (endpoint === '/subscriptions' && method === 'POST') {
       nextSubscriptionId += 1;
-      return {
+      const subscription = {
         id: `sub_test${nextSubscriptionId}`,
         plan_id: body.plan_id,
         status: 'created'
       };
+      providerSubscriptions.set(subscription.id, subscription);
+      return subscription;
+    }
+    if (endpoint === '/subscriptions/sub_monthlyreference') {
+      return { id: 'sub_monthlyreference', plan_id: 'plan_monthly_test', status: 'created' };
+    }
+    if (endpoint === '/subscriptions/sub_monthlymismatch') {
+      return { id: 'sub_monthlymismatch', plan_id: 'plan_yearly_test', status: 'created' };
+    }
+    const subscriptionMatch = endpoint.match(/^\/subscriptions\/([^/]+)$/);
+    if (subscriptionMatch && providerSubscriptions.has(subscriptionMatch[1])) {
+      const subscription = providerSubscriptions.get(subscriptionMatch[1]);
+      if (method === 'PATCH') {
+        const updatedSubscription = { ...subscription, ...body, has_scheduled_changes: true };
+        providerSubscriptions.set(subscriptionMatch[1], updatedSubscription);
+        return updatedSubscription;
+      }
+      return subscription;
     }
     if (endpoint === '/subscriptions/sub_test1') return providerSubscription;
     if (endpoint === '/payments/pay_test1') {
@@ -157,6 +186,8 @@ before(async () => {
         id: 'pay_test1',
         subscription_id: 'sub_test1',
         status: 'captured',
+        method: 'upi',
+        created_at: Math.floor(Date.now() / 1000),
         amount: providerPlan?.item.amount
           ?? (providerSubscription?.plan_id === 'plan_monthly_usd_test' ? 367 : 9900),
         currency: providerPlan?.item.currency
@@ -290,6 +321,112 @@ test('billing routes reject unauthenticated and unapproved checkout requests', a
   process.env.BILLING_TEST_MODE_VERIFIED = environment.BILLING_TEST_MODE_VERIFIED;
 });
 
+test('active monthly subscribers can schedule yearly billing at the end of their current period', async () => {
+  const subscriptionId = 'sub_switchyearly';
+  const validUntil = Date.now() + 30 * 24 * 60 * 60 * 1000;
+  const subscription = {
+    id: subscriptionId,
+    plan_id: 'plan_monthly_test',
+    status: 'active',
+    current_end: Math.floor(validUntil / 1000),
+    payment_method: 'card'
+  };
+  providerSubscriptions.set(subscriptionId, subscription);
+  fakeDatabase.records.set(`billingSubscriptions/${subscriptionId}`, {
+    uid: 'user-4',
+    planKey: 'monthly',
+    planId: 'plan_monthly_test',
+    currency: 'INR'
+  });
+  fakeDatabase.records.set('users/user-4/billing/entitlement', {
+    planId: 'pro',
+    billingPlan: 'monthly',
+    currency: 'INR',
+    validUntil,
+    subscriptionId
+  });
+
+  try {
+    const response = await request('/api/billing/change-plan', {
+      method: 'POST',
+      token: 'fourth-test-token',
+      body: { planKey: 'yearly' }
+    });
+
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    assert.equal(result.scheduled, true);
+    assert.equal(result.scheduledPlan, 'yearly');
+    assert.equal(result.scheduledAt, Math.floor(validUntil / 1000) * 1000);
+    assert.equal(providerSubscriptions.get(subscriptionId).has_scheduled_changes, true);
+    assert.equal(fakeDatabase.records.get(`billingSubscriptions/${subscriptionId}`).pendingPlanKey, 'yearly');
+    assert.equal(fakeDatabase.records.get('users/user-4/billing/entitlement').scheduledPlan, 'yearly');
+  } finally {
+    providerSubscriptions.delete(subscriptionId);
+    fakeDatabase.records.delete(`billingSubscriptions/${subscriptionId}`);
+    fakeDatabase.records.delete('users/user-4/billing/entitlement');
+    fakeDatabase.records.delete('users/user-4/billing/checkout');
+  }
+});
+
+test('unsupported domestic-card plan changes preserve the current subscription and return a guided fallback', async () => {
+  const subscriptionId = 'sub_switchdomestic';
+  const validUntil = Date.now() + 30 * 24 * 60 * 60 * 1000;
+  const subscription = {
+    id: subscriptionId,
+    plan_id: 'plan_monthly_test',
+    status: 'active',
+    current_end: Math.floor(validUntil / 1000),
+    payment_method: 'card'
+  };
+  const originalRazorpayRequest = app.locals.razorpayRequest;
+  providerSubscriptions.set(subscriptionId, subscription);
+  fakeDatabase.records.set(`billingSubscriptions/${subscriptionId}`, {
+    uid: 'user-4',
+    planKey: 'monthly',
+    planId: 'plan_monthly_test',
+    currency: 'INR'
+  });
+  fakeDatabase.records.set('users/user-4/billing/entitlement', {
+    planId: 'pro',
+    billingPlan: 'monthly',
+    currency: 'INR',
+    validUntil,
+    subscriptionId
+  });
+  app.locals.razorpayRequest = async (endpoint, options = {}) => {
+    if (endpoint === `/subscriptions/${subscriptionId}` && options.method === 'PATCH') {
+      const error = new Error('Razorpay request failed with status 400: Only offers can be updated for subscriptions when payment mode is domestic card.');
+      error.status = 400;
+      error.providerDetail = 'Only offers can be updated for subscriptions when payment mode is domestic card.';
+      throw error;
+    }
+    return originalRazorpayRequest(endpoint, options);
+  };
+
+  try {
+    const response = await request('/api/billing/change-plan', {
+      method: 'POST',
+      token: 'fourth-test-token',
+      body: { planKey: 'yearly' }
+    });
+
+    assert.equal(response.status, 409);
+    const result = await response.json();
+    assert.equal(result.code, 'YEARLY_SWITCH_REQUIRES_CANCELLATION');
+    assert.match(result.error, /Your current plan is unchanged/);
+    assert.equal(providerSubscriptions.get(subscriptionId).has_scheduled_changes, undefined);
+    assert.equal(fakeDatabase.records.get(`billingSubscriptions/${subscriptionId}`).pendingPlanKey, null);
+    assert.equal(fakeDatabase.records.get('users/user-4/billing/entitlement').scheduledPlan, null);
+  } finally {
+    app.locals.razorpayRequest = originalRazorpayRequest;
+    providerSubscriptions.delete(subscriptionId);
+    fakeDatabase.records.delete(`billingSubscriptions/${subscriptionId}`);
+    fakeDatabase.records.delete('users/user-4/billing/entitlement');
+    fakeDatabase.records.delete('users/user-4/billing/checkout');
+  }
+});
+
 test('checkout reports a rejected Razorpay Test Mode key pair clearly', async () => {
   const razorpayRequest = app.locals.razorpayRequest;
   app.locals.razorpayRequest = async (endpoint, options) => {
@@ -408,6 +545,18 @@ test('admin regional prices create verified Razorpay plans and charge the config
   assert.equal(dynamicBillingConfig.currencyPlans.INR.monthly.amount, 10900);
   assert.equal(dynamicBillingConfig.currencyPlans.USD.monthly.amount, 425);
   assert.ok(dynamicBillingConfig.supportedCurrencies.includes('USD'));
+
+  const configuredMonthlyPlanId = process.env.RAZORPAY_PLAN_MONTHLY_ID;
+  process.env.RAZORPAY_PLAN_MONTHLY_ID = 'sub_not_a_plan_id';
+  try {
+    const configWithSubscriptionId = await request('/api/billing/config');
+    const configWithSubscriptionIdBody = await configWithSubscriptionId.json();
+    assert.equal(configWithSubscriptionIdBody.checkoutEnabled, true);
+    assert.ok(configWithSubscriptionIdBody.supportedCurrencies.includes('INR'));
+    assert.ok(configWithSubscriptionIdBody.supportedCurrencies.includes('USD'));
+  } finally {
+    process.env.RAZORPAY_PLAN_MONTHLY_ID = configuredMonthlyPlanId;
+  }
 
   const stalePriceCheckout = await request('/api/billing/subscriptions', {
     method: 'POST',
@@ -603,6 +752,13 @@ test('public vouchers are available to every signed-in account and queue during 
   assert.equal(entitlement.billingPlan, 'voucher');
   assert.equal(entitlement.source, 'server-verified');
   assert.ok(entitlement.validUntil > Date.now());
+  const voucherHistoryId = `voucher_${voucherDocumentId('WELCOME30')}_${voucherDocumentId('user-1')}`;
+  const voucherHistory = fakeDatabase.records.get(`billingAccessHistory/${voucherHistoryId}`);
+  assert.equal(voucherHistory.planKey, 'voucher');
+  assert.equal(voucherHistory.paymentMode, 'voucher');
+  assert.equal(voucherHistory.paymentId, null);
+  assert.equal(voucherHistory.validFrom <= Date.now(), true);
+  assert.equal(voucherHistory.validUntil, entitlement.validUntil);
 
   const secondAccount = await request('/api/billing/vouchers/redeem', {
     method: 'POST',
@@ -629,6 +785,11 @@ test('public vouchers are available to every signed-in account and queue during 
   assert.equal(queued.queued, true);
   assert.equal(queued.entitlement.pendingVoucherCount, 1);
   assert.equal(queued.entitlement.pendingVoucherStartAt, entitlement.validUntil);
+  const queuedVoucherHistoryId = `voucher_${voucherDocumentId('LIMITED7')}_${voucherDocumentId('user-1')}`;
+  const queuedVoucherHistory = fakeDatabase.records.get(`billingAccessHistory/${queuedVoucherHistoryId}`);
+  assert.equal(queuedVoucherHistory.status, 'scheduled');
+  assert.equal(queuedVoucherHistory.validFrom, entitlement.validUntil);
+  assert.equal(queuedVoucherHistory.validUntil, entitlement.validUntil + 7 * 86400000);
 
   const firstLimited = await request('/api/billing/vouchers/redeem', {
     method: 'POST',
@@ -706,7 +867,7 @@ test('subscription checkout, payment verification, and signed webhook lifecycle 
   providerSubscription = {
     id: 'sub_test1',
     plan_id: 'plan_monthly_test',
-    status: 'active',
+    status: 'authenticated',
     current_end: endOfPeriod,
     notes: { plan_key: 'monthly' }
   };
@@ -723,8 +884,44 @@ test('subscription checkout, payment verification, and signed webhook lifecycle 
     }
   });
   assert.equal(verified.status, 200);
-  assert.equal((await verified.json()).entitlement.planId, 'pro');
+  const verifiedBody = await verified.json();
+  assert.equal(verifiedBody.entitlement.planId, 'pro');
+  assert.equal(verifiedBody.entitlement.status, 'active');
+  assert.equal(verifiedBody.entitlement.validUntil, endOfPeriod * 1000);
   assert.equal(fakeDatabase.records.get('users/user-1/billing/entitlement').status, 'active');
+  assert.equal(
+    fakeDatabase.records.get('users/user-1/billing/entitlement').validUntil,
+    endOfPeriod * 1000
+  );
+  assert.equal(
+    fakeDatabase.records.get('users/user-1/billing/entitlement').subscriptionId,
+    'sub_test1'
+  );
+  const verifiedAccessHistory = fakeDatabase.records.get('billingAccessHistory/pay_test1');
+  assert.equal(verifiedAccessHistory.subscriptionId, 'sub_test1');
+  assert.equal(verifiedAccessHistory.planKey, 'monthly');
+  assert.equal(verifiedAccessHistory.paymentId, 'pay_test1');
+  assert.equal(verifiedAccessHistory.paymentMode, 'upi');
+  assert.equal(verifiedAccessHistory.validUntil, endOfPeriod * 1000);
+  const adminUserDetailsResponse = await request('/api/admin/users/user-1', { token: 'admin-test-token' });
+  assert.equal(adminUserDetailsResponse.status, 200);
+  const adminUserDetails = await adminUserDetailsResponse.json();
+  assert.ok(adminUserDetails.accessHistory.some(item => item.paymentId === 'pay_test1'));
+  assert.ok(adminUserDetails.accessHistory.some(item => item.source === 'voucher' && item.paymentMode === 'voucher'));
+  providerSubscription = { ...providerSubscription, status: 'active' };
+  fakeDatabase.records.delete('users/user-1/billing/entitlement');
+  fakeDatabase.records.delete('users/user-1/billing/checkout');
+  const reconciledEntitlementResponse = await request('/api/billing/entitlement', { token: 'valid-test-token' });
+  assert.equal(reconciledEntitlementResponse.status, 200);
+  const reconciledEntitlement = (await reconciledEntitlementResponse.json()).entitlement;
+  assert.equal(reconciledEntitlement.status, 'active');
+  assert.equal(reconciledEntitlement.planId, 'pro');
+  assert.equal(reconciledEntitlement.billingPlan, 'monthly');
+  assert.equal(reconciledEntitlement.validUntil, endOfPeriod * 1000);
+  assert.equal(
+    fakeDatabase.records.get('users/user-1/billing/entitlement').subscriptionId,
+    'sub_test1'
+  );
   fakeDatabase.records.set('users/user-1/billing/entitlement', {
     ...fakeDatabase.records.get('users/user-1/billing/entitlement'),
     pendingVouchers: [{ voucherId: 'queued-webhook-test', durationDays: 7, startsAt: Date.now() + 3_600_000 }]
@@ -733,7 +930,7 @@ test('subscription checkout, payment verification, and signed webhook lifecycle 
   const activatedEvent = {
     id: 'evt_activation_1',
     event: 'subscription.activated',
-    payload: { subscription: { entity: providerSubscription } }
+    payload: { subscription: { entity: { ...providerSubscription, status: 'active' } } }
   };
   assert.equal((await signedWebhook(activatedEvent)).status, 200);
   assert.equal((await signedWebhook(activatedEvent)).status, 200);
@@ -799,8 +996,15 @@ test('subscription checkout, payment verification, and signed webhook lifecycle 
       }
     }
   };
+  providerSubscription = {
+    ...providerSubscription,
+    status: 'expired',
+    current_end: Math.floor(Date.now() / 1000) - 1
+  };
   assert.equal((await signedWebhook(expiredEvent)).status, 200);
   assert.equal(fakeDatabase.records.get('users/user-1/billing/entitlement').planId, 'free');
+  const expiredEntitlementResponse = await request('/api/billing/entitlement', { token: 'valid-test-token' });
+  assert.equal((await expiredEntitlementResponse.json()).entitlement.status, 'inactive');
 
   const invalidSignature = await fetch(`${origin}/api/billing/webhook`, {
     method: 'POST',
@@ -808,6 +1012,132 @@ test('subscription checkout, payment verification, and signed webhook lifecycle 
     body: JSON.stringify(activatedEvent)
   });
   assert.equal(invalidSignature.status, 400);
+});
+
+test('checkout resolves a configured subscription ID to its verified recurring plan', async () => {
+  const configuredMonthlyPlanId = process.env.RAZORPAY_PLAN_MONTHLY_ID;
+  const pricingRecord = 'appConfig/pricing';
+  const hadPricingRecord = fakeDatabase.records.has(pricingRecord);
+  const previousPricing = fakeDatabase.records.get(pricingRecord);
+  process.env.RAZORPAY_PLAN_MONTHLY_ID = 'sub_monthlyreference';
+  fakeDatabase.records.set(pricingRecord, {
+    monthly: { actualPrice: 99, currentPrice: 99 },
+    yearly: { actualPrice: 399, currentPrice: 399 }
+  });
+  try {
+    const configResponse = await request('/api/billing/config');
+    const config = await configResponse.json();
+    assert.equal(config.checkoutEnabled, true);
+    assert.ok(config.supportedCurrencies.includes('INR'), JSON.stringify(config));
+
+    const checkoutResponse = await request('/api/billing/subscriptions', {
+      method: 'POST',
+      token: 'fourth-test-token',
+      body: { planKey: 'monthly', currency: 'INR', expectedAmount: 9900 }
+    });
+    const checkout = await checkoutResponse.json();
+    assert.equal(checkoutResponse.status, 201, JSON.stringify(checkout));
+    assert.equal(fakeDatabase.records.get(`billingSubscriptions/${checkout.subscriptionId}`).planId, 'plan_monthly_test');
+
+    process.env.RAZORPAY_PLAN_MONTHLY_ID = 'sub_monthlymismatch';
+    const mismatchResponse = await request('/api/billing/subscriptions', {
+      method: 'POST',
+      token: 'fourth-test-token',
+      body: { planKey: 'monthly', currency: 'INR', expectedAmount: 9900 }
+    });
+    const mismatch = await mismatchResponse.json();
+    assert.equal(mismatchResponse.status, 503);
+    assert.match(mismatch.error, /does not match the configured price and billing interval/);
+  } finally {
+    process.env.RAZORPAY_PLAN_MONTHLY_ID = configuredMonthlyPlanId;
+    if (hadPricingRecord) fakeDatabase.records.set(pricingRecord, previousPricing);
+    else fakeDatabase.records.delete(pricingRecord);
+  }
+});
+
+test('checkout replaces expired subscriptions and does not reopen authorized subscriptions', async () => {
+  const checkoutKey = 'users/user-4/billing/checkout';
+  const expiredId = 'sub_expiredcheckout';
+  const authorizedId = 'sub_authorizedcheckout';
+  const previousCheckout = fakeDatabase.records.get(checkoutKey);
+  const previousExpired = fakeDatabase.records.get(`billingSubscriptions/${expiredId}`);
+  const previousAuthorized = fakeDatabase.records.get(`billingSubscriptions/${authorizedId}`);
+  let replacementId;
+  fakeDatabase.records.set(checkoutKey, {
+    subscriptionId: expiredId,
+    planKey: 'monthly',
+    currency: 'INR',
+    status: 'created',
+    createdAt: Date.now(),
+    updatedAt: Date.now()
+  });
+  fakeDatabase.records.set(`billingSubscriptions/${expiredId}`, { amount: 9900 });
+  fakeDatabase.records.set(`billingSubscriptions/${authorizedId}`, { amount: 9900 });
+  providerSubscriptions.set(expiredId, {
+    id: expiredId,
+    plan_id: 'plan_monthly_test',
+    status: 'expired'
+  });
+  providerSubscriptions.set(authorizedId, {
+    id: authorizedId,
+    plan_id: 'plan_monthly_test',
+    status: 'authenticated'
+  });
+
+  try {
+    const expiredCheckout = await request('/api/billing/subscriptions', {
+      method: 'POST',
+      token: 'fourth-test-token',
+      body: { planKey: 'monthly', currency: 'INR', expectedAmount: 9900 }
+    });
+    const expiredBody = await expiredCheckout.json();
+    assert.equal(expiredCheckout.status, 201, JSON.stringify(expiredBody));
+    assert.notEqual(expiredBody.subscriptionId, expiredId);
+    replacementId = expiredBody.subscriptionId;
+
+    const retriedCheckout = await request('/api/billing/subscriptions', {
+      method: 'POST',
+      token: 'fourth-test-token',
+      body: { planKey: 'monthly', currency: 'INR', expectedAmount: 9900 }
+    });
+    const retriedBody = await retriedCheckout.json();
+    assert.equal(retriedCheckout.status, 200, JSON.stringify(retriedBody));
+    assert.equal(retriedBody.subscriptionId, replacementId);
+
+    fakeDatabase.records.set(checkoutKey, {
+      subscriptionId: authorizedId,
+      planKey: 'monthly',
+      currency: 'INR',
+      status: 'created',
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    });
+    const authorizedCheckout = await request('/api/billing/subscriptions', {
+      method: 'POST',
+      token: 'fourth-test-token',
+      body: { planKey: 'monthly', currency: 'INR', expectedAmount: 9900 }
+    });
+    const authorizedBody = await authorizedCheckout.json();
+    assert.equal(authorizedCheckout.status, 409);
+    assert.match(authorizedBody.error, /authenticated/);
+    assert.equal(
+      fakeDatabase.records.get(checkoutKey).subscriptionId,
+      authorizedId
+    );
+  } finally {
+    providerSubscriptions.delete(expiredId);
+    providerSubscriptions.delete(authorizedId);
+    if (replacementId) {
+      providerSubscriptions.delete(replacementId);
+      fakeDatabase.records.delete(`billingSubscriptions/${replacementId}`);
+    }
+    if (previousCheckout) fakeDatabase.records.set(checkoutKey, previousCheckout);
+    else fakeDatabase.records.delete(checkoutKey);
+    if (previousExpired) fakeDatabase.records.set(`billingSubscriptions/${expiredId}`, previousExpired);
+    else fakeDatabase.records.delete(`billingSubscriptions/${expiredId}`);
+    if (previousAuthorized) fakeDatabase.records.set(`billingSubscriptions/${authorizedId}`, previousAuthorized);
+    else fakeDatabase.records.delete(`billingSubscriptions/${authorizedId}`);
+  }
 });
 
 test('users can request review for their captured Razorpay payments without issuing refunds', async () => {
@@ -819,6 +1149,7 @@ test('users can request review for their captured Razorpay payments without issu
     subscriptionId: 'sub_refundtest',
     planKey: 'monthly',
     status: 'captured',
+    method: 'card',
     amount: 9900,
     currency: 'INR',
     createdAt: Date.now()
@@ -941,6 +1272,7 @@ test('captured recurring Razorpay webhook payments are recorded for account refu
           id: paymentId,
           subscription_id: subscriptionId,
           status: 'captured',
+          method: 'card',
           amount: 9900,
           currency: 'INR',
           created_at: Math.floor(Date.now() / 1000)
@@ -953,8 +1285,16 @@ test('captured recurring Razorpay webhook payments are recorded for account refu
   assert.equal(fakeDatabase.records.get(`billingPayments/${paymentId}`).uid, 'user-1');
   assert.equal(fakeDatabase.records.get(`billingPayments/${paymentId}`).status, 'captured');
   assert.equal(fakeDatabase.records.get(`billingPayments/${paymentId}`).amount, 9900);
+  assert.equal(fakeDatabase.records.get(`billingPayments/${paymentId}`).paymentMode, 'card');
+  const accessRecord = fakeDatabase.records.get(`billingAccessHistory/${paymentId}`);
+  assert.equal(accessRecord.subscriptionId, subscriptionId);
+  assert.equal(accessRecord.planKey, 'monthly');
+  assert.equal(accessRecord.paymentId, paymentId);
+  assert.equal(accessRecord.paymentMode, 'card');
+  assert.ok(accessRecord.validUntil > accessRecord.validFrom);
 
   fakeDatabase.records.delete(`billingSubscriptions/${subscriptionId}`);
   fakeDatabase.records.delete(`billingPayments/${paymentId}`);
+  fakeDatabase.records.delete(`billingAccessHistory/${paymentId}`);
   fakeDatabase.records.delete('billingWebhookEvents/evt_recurring_refund_test');
 });

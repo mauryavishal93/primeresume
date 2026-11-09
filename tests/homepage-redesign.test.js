@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const homepageStyles = readFileSync(new URL('../frontend/src/homepage.css', import.meta.url), 'utf8');
+const aboutStyles = readFileSync(new URL('../frontend/src/about.css', import.meta.url), 'utf8');
+const homepageTemplates = readFileSync(new URL('../frontend/src/homepage-templates.js', import.meta.url), 'utf8');
 
 test('homepage redesign sections and existing walkthrough stay consistent on both entry points', () => {
   for (const page of ['home.html', 'index.html']) {
@@ -10,10 +12,13 @@ test('homepage redesign sections and existing walkthrough stay consistent on bot
 
     assert.match(html, /href="\/src\/homepage\.css"/);
     assert.match(html, /src="\/images\/homepage-demo\.svg"/);
+    assert.match(html, /<script type="module" src="\/src\/homepage-templates\.js"><\/script>/);
+    assert.match(html, /class="landing-template-grid" data-template-carousel/);
     assert.match(html, /<script type="module" src="\/src\/theme\.js"><\/script>/);
     assert.match(html, /<div class="hero-actions landing-hero-actions">\s*<a class="btn primary landing-create-btn" href="\/editor\.html">Create my free resume <span aria-hidden="true">→<\/span><\/a>\s*<a class="btn outline landing-explore-btn" href="#templates">Explore templates<\/a>\s*<\/div>\s*<a class="landing-import-link" href="\/editor\.html\?open=import">Already have a resume\? Import it<\/a>/);
     assert.match(html, /<a class="landing-scratch-cta" href="\/resume-wizard\.html">\s*<span class="landing-scratch-title">Build my resume from scratch <span aria-hidden="true">→<\/span><\/span>\s*<span class="landing-scratch-subtitle">Guided step-by-step resume creation<\/span>\s*<\/a>/);
-    assert.match(html, /href="\/editor\.html\?open=import">Import resume<\/a>/);
+    assert.match(html, /<a class="btn outline landing-import-button" href="\/editor\.html\?open=import"><svg class="landing-import-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4"\/><path d="m7 9 5-5 5 5"\/><path d="M4 15v3a2 2 0 0 0 2 2h14"\/><\/svg>Import resume<\/a>/);
+    assert.match(html, /<div class="landing-header-actions">\s*<a class="btn outline" href="\/pricing\.html">Plans<\/a>\s*<a class="btn outline landing-import-button" href="\/editor\.html\?open=import">[\s\S]*?<\/a>\s*<a class="btn soft about-editor" href="\/editor\.html">Open editor<\/a>\s*<\/div>/);
     for (const section of ['templates', 'how-it-works', 'features', 'pricing', 'faq']) {
       assert.match(html, new RegExp(`id="${section}"`));
       assert.match(html, new RegExp(`href="#${section}">`));
@@ -35,6 +40,19 @@ test('homepage redesign sections and existing walkthrough stay consistent on bot
     assert.match(html, /href="\/community\.html">Community<\/a>/);
     assert.match(html, /<div class="landing-faq">[\s\S]*?<details>[\s\S]*?<summary>/);
   }
+  assert.match(homepageStyles, /\.landing-header-actions\s*\{[\s\S]*?display:\s*flex;[\s\S]*?gap:\s*6px/);
+  assert.match(aboutStyles, /@media\(max-width:640px\)\{[\s\S]*?\.about-header\{display:grid;grid-template-columns:minmax\(0,1fr\) 42px;grid-template-areas:"brand account" "nav nav";grid-template-rows:42px auto/);
+  assert.match(aboutStyles, /\.about-nav\{grid-area:nav;display:flex;width:100%;min-width:0;flex-wrap:wrap;align-items:center;justify-content:flex-start;gap:6px;margin:0\}/);
+  assert.match(aboutStyles, /\.about-nav>\.site-account-menu\{position:absolute;top:8px;right:12px;margin:0\}/);
+  assert.match(aboutStyles, /\.landing-page \.about-nav\{display:grid;grid-template-columns:minmax\(0,1fr\) auto;grid-template-areas:"auth community" "actions actions"/);
+  assert.match(aboutStyles, /\.about-nav>a\[href="\/support\.html"\],\.about-nav>\.landing-header-actions \.landing-import-button\{display:none\}/);
+  assert.match(aboutStyles, /\.landing-page \.about-nav>\.landing-header-actions\{display:grid;grid-area:actions;grid-template-columns:repeat\(2,minmax\(0,1fr\)\);justify-self:stretch;flex:initial;width:100%;max-width:none;gap:6px\}/);
+  assert.match(aboutStyles, /\.landing-page \.about-nav>\.landing-header-actions \.btn\{width:100%;min-width:0;min-height:40px;padding:6px 4px;font-size:11px\}/);
+  for (const page of ['about', 'admin', 'billing', 'community', 'home', 'index', 'my-account', 'my-posts', 'pricing', 'privacy', 'refunds', 'resume-wizard', 'support', 'terms']) {
+    const html = readFileSync(new URL(`../frontend/${page}.html`, import.meta.url), 'utf8');
+    assert.match(html, /<header class="about-header"/, `${page} should use the shared responsive header`);
+    assert.match(html, /src="\/src\/auth-nav\.js"/, `${page} should show the shared account menu`);
+  }
 });
 
 test('editor applies homepage template links to the loaded resume and preserves free-template access', () => {
@@ -47,7 +65,30 @@ test('editor applies homepage template links to the loaded resume and preserves 
   assert.match(source, /window\.history\.replaceState\(null,'',/);
 });
 
+test('homepage template carousel renders the catalog with actual template layouts, Free and Pro labels, and accessible controls', () => {
+  assert.match(homepageTemplates, /import \{ templateDefs \} from '\.\.\/\.\.\/Templates\/index\.js'/);
+  assert.match(homepageTemplates, /templateDefs\.map\(template =>/);
+  assert.match(homepageTemplates, /class="sheet \$\{cls\} landing-resume-paper"/);
+  assert.match(homepageTemplates, /template\.id === 'peach-mint'[\s\S]*?pm-sidebar/);
+  assert.match(homepageTemplates, /template\.id === 'teal-modern'[\s\S]*?tr-header/);
+  assert.match(homepageTemplates, /template\.id === 'interio-designer'[\s\S]*?interio-sidebar/);
+  assert.match(homepageTemplates, /template\.id === 'brian-baxter'[\s\S]*?br-yellow-panel/);
+  assert.match(homepageTemplates, /--mx:32px;--mt:32px;--mb:32px;--resume-size:18px;--resume-heading:22px/);
+  assert.match(homepageTemplates, /landing-template-description">\$\{escapeHtml\(template\.sub\)\}/);
+  assert.match(homepageTemplates, /isProTemplate\(template\.id\)/);
+  assert.match(homepageTemplates, /Show previous templates/);
+  assert.match(homepageTemplates, /Show next templates/);
+  assert.match(homepageTemplates, /prefers-reduced-motion: reduce/);
+  assert.match(homepageTemplates, /offset \+ visibleCount\(\)/);
+  assert.match(homepageTemplates, /manualPauseUntil/);
+  assert.match(homepageTemplates, /pointerenter/);
+  assert.match(homepageTemplates, /focusin/);
+});
+
 test('homepage redesign follows the existing theme and adapts its content to mobile', () => {
+  assert.match(homepageStyles, /\.landing-anchor-nav-wrap\s*\{[^}]*background: rgba\(7, 14, 23, \.92\)/);
+  assert.match(homepageStyles, /\.landing-anchor-nav a\s*\{[^}]*color: #d3deec/);
+  assert.match(homepageStyles, /:root\[data-theme="light"\] \.landing-anchor-nav a\s*\{[^}]*color: #4a5568/);
   assert.match(homepageStyles, /:root\[data-theme="light"\] \.landing-page/);
   assert.match(homepageStyles, /\.landing-hero \.hero-actions \.landing-create-btn \{[\s\S]*min-height: 46px;[\s\S]*font-size: 15px/);
   assert.match(homepageStyles, /:root\[data-theme="light"\] \.landing-page \.landing-hero \.hero-actions \.landing-create-btn \{[\s\S]*background: #b89456/);
@@ -56,12 +97,17 @@ test('homepage redesign follows the existing theme and adapts its content to mob
   assert.match(homepageStyles, /:root\[data-theme="light"\] \.landing-page \.landing-scratch-cta \{[\s\S]*#f4f0e7/);
   assert.match(homepageStyles, /@media \(max-width: 640px\)[\s\S]*\.landing-create-btn,[\s\S]*width: min\(100%, 260px\);[\s\S]*min-height: 44px/);
   assert.match(homepageStyles, /@media \(max-width: 640px\)[\s\S]*\.landing-scratch-cta \{[\s\S]*min-height: 82px/);
-  assert.match(homepageStyles, /\.landing-template-grid,[\s\S]*grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/);
-  assert.match(homepageStyles, /@media \(max-width: 980px\)[\s\S]*\.landing-template-grid[\s\S]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
+  assert.match(homepageStyles, /\.landing-template-track \.landing-template-card\s*\{[^}]*flex: 0 0 calc\(\(100% - 48px\) \/ 4\)/);
+  assert.match(homepageStyles, /@media \(max-width: 980px\)[\s\S]*\.landing-template-track \.landing-template-card\s*\{[^}]*flex-basis: calc\(\(100% - 16px\) \/ 2\)/);
+  assert.match(homepageStyles, /@media \(max-width: 640px\)[\s\S]*\.landing-template-track \.landing-template-card\s*\{[^}]*flex-basis: 100%/);
+  assert.match(homepageStyles, /\.landing-template-controls\s*\{[^}]*justify-content: center/);
+  assert.match(homepageStyles, /\.landing-template-preview\s*\{[^}]*min-height: 350px/);
+  assert.match(homepageStyles, /\.landing-resume-frame\s*\{[^}]*width: 230px;[^}]*height: 325px/);
+  assert.match(homepageStyles, /\.landing-resume-paper\s*\{[^}]*transform: scale\(\.28967\)/);
+  assert.match(homepageStyles, /\.landing-template-preview \.landing-resume-paper,[\s\S]*?\.landing-template-preview \.landing-resume-paper \.sheet-inner\s*\{[^}]*background-color: #fff !important;[^}]*background-image: none !important/);
+  assert.match(homepageStyles, /\.landing-template-preview \.landing-resume-paper\.layout-interio-designer::before\s*\{[^}]*display: none/);
+  assert.match(homepageStyles, /\.landing-template-description\s*\{[^}]*color: var\(--about-muted\)/);
   assert.match(homepageStyles, /@media \(max-width: 640px\)[\s\S]*\.landing-pricing-card[\s\S]*grid-template-columns: 1fr/);
   assert.match(homepageStyles, /\.landing-pricing-actions \{\s*gap: 10px;\s*margin-top: 16px;/);
-  assert.match(homepageStyles, /\.landing-resume-paper\[data-layout="modern"\] \.landing-resume-header[\s\S]*background: #344b67/);
-  assert.match(homepageStyles, /\.landing-resume-paper\[data-layout="minimal"\] \.landing-resume-name[\s\S]*font-family: Georgia, serif/);
-  assert.match(homepageStyles, /\.landing-resume-paper\[data-layout="tech"\] \.landing-resume-name[\s\S]*font-family: monospace/);
-  assert.match(homepageStyles, /\.landing-resume-two-column[\s\S]*grid-template-columns: minmax\(0, 1\.25fr\) minmax\(0, \.75fr\)/);
+  assert.match(homepageStyles, /\.landing-resume-paper \.section-columns\s*\{[\s\S]*grid-template-columns: minmax\(0, var\(--c1\)\) minmax\(0, var\(--c2\)\)/);
 });

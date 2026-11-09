@@ -262,9 +262,11 @@
           <span class="auth-status" data-auth-status role="status" aria-live="polite"></span>
         </div>
         <a class="btn outline" href="/community.html">Community</a>
-        <a class="btn outline" href="/pricing.html">Plans</a>
-        <a class="btn outline" href="/editor.html?open=import">Import resume</a>
-        <a class="btn soft about-editor" href="/editor.html">Open editor</a>
+        <div class="landing-header-actions">
+          <a class="btn outline" href="/pricing.html">Plans</a>
+          <a class="btn outline landing-import-button" href="/editor.html?open=import"><svg class="landing-import-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M4 15v3a2 2 0 0 0 2 2h14"/></svg>Import resume</a>
+          <a class="btn soft about-editor" href="/editor.html">Open editor</a>
+        </div>
       </nav>
     </header>
 
@@ -334,7 +336,7 @@
           <h2 id="landing-templates-title">Resume templates for every next step.</h2>
           <p>Explore clean, readable layouts and choose a style that fits your experience.</p>
         </div>
-        <div class="landing-template-grid">
+        <div class="landing-template-grid" data-template-carousel>
           <a class="landing-template-card" href="/editor.html?template=modern" aria-label="Use the Modern resume template">
             <div class="landing-template-preview" aria-hidden="true">
               <div class="landing-resume-paper" data-layout="modern">
@@ -530,5 +532,6 @@
     </footer>
     <script type="module" src="/src/theme.js"></script>
     <script type="module" src="/src/auth-nav.js"></script>
+    <script type="module" src="/src/homepage-templates.js"></script>
   </body>
 </html>

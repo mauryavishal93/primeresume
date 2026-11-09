@@ -21,9 +21,10 @@ import {
 } from './resume-persistence.js';
 import { buildResumePdf, drawPdfText } from './resume-pdf.js';
 import {
- cloudConfigured, consumeProTemplateDownload, deleteResume, getLastWorkedResumeId, getProTemplateDownloadStatus, googleSignInErrorMessage, listResumes, observeAuth, saveResume, setLastWorkedResumeId,
+ cloudConfigured, consumeProTemplateDownload, deleteResume, getAccountProfile, getLastWorkedResumeId, getProTemplateDownloadStatus, googleSignInErrorMessage, listResumes, observeAuth, saveResume, setLastWorkedResumeId,
  signInWithGoogle, signOutUser
 } from './firebase-cloud.js';
+import { setAccountAvatar } from './account-avatar.js';
 import { zoomFromPinch } from './zoom.js';
 
 (()=>{'use strict';
@@ -142,6 +143,23 @@ function insertPointerLine(sectionId,afterLine){
 }
 function toast(msg){$('toast').textContent=msg;$('toast').classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('toast').classList.remove('show'),2300)}
 function updateProLabel(){const isPro=canUseFeature(FEATURE_IDS.ALL_TEMPLATES,verifiedEntitlement);const badge=$('proBrandBadge');if(badge)badge.hidden=!isPro;document.title=isPro?`${baseDocumentTitle} | Pro`:baseDocumentTitle}
+async function refreshEditorBillingStatus(user,generation){
+ try{
+  const config=await loadBillingConfig();
+  if(authGeneration!==generation||cloudUser?.uid!==user.uid)return;
+  billingPricingConfig=config;
+  verifiedEntitlement=config.entitlementEnabled?await loadBillingEntitlement(user):null;
+  if(authGeneration!==generation||cloudUser?.uid!==user.uid)return;
+  updateProLabel();
+  renderTemplates();
+ }catch(error){
+  if(authGeneration!==generation||cloudUser?.uid!==user.uid)return;
+  console.error('Could not load the signed-in account billing status.',error);
+  verifiedEntitlement=null;
+  updateProLabel();
+  renderTemplates();
+ }
+}
 function authErrorMessage(error){
  return googleSignInErrorMessage(error);
 }
@@ -364,11 +382,15 @@ async function updateCloudAccount(user,error){
   $('accountMenu').hidden=false;
   $('cloudResumesBtn').hidden=true;
   $('myPostsLink').hidden=true;
+  $('myAccountLink').hidden=true;
   $('googleSignOutBtn').hidden=true;
   $('accountUserName').textContent='Guest';
   $('accountUserEmail').textContent='';
   $('accountAvatar').textContent='G';
   $('accountAvatarLarge').textContent='G';
+  $('myAccountLink').hidden=true;
+  setAccountAvatar($('accountAvatar'),'G');
+  setAccountAvatar($('accountAvatarLarge'),'G');
   $('accountMenu').querySelector('summary').setAttribute('aria-label','Account menu');
   $('cloudAccount').textContent=error.message;
   renderCloudResumes();
@@ -427,6 +449,7 @@ async function updateCloudAccount(user,error){
  $('accountMenu').hidden=false;
  $('cloudResumesBtn').hidden=!user;
  $('myPostsLink').hidden=!user;
+ $('myAccountLink').hidden=!user;
  $('googleSignOutBtn').hidden=!user;
  $('googleSignOutBtn').disabled=false;
  $('googleSignOutBtn').textContent='Sign out';
@@ -438,11 +461,23 @@ async function updateCloudAccount(user,error){
   $('accountUserEmail').textContent=user.email||'';
   $('accountAvatar').textContent=initial;
   $('accountAvatarLarge').textContent=initial;
+  setAccountAvatar($('accountAvatar'),initial,user.photoURL||'');
+  setAccountAvatar($('accountAvatarLarge'),initial,user.photoURL||'');
+  const accountUid=user.uid;
+  void getAccountProfile(user).then(profile=>{
+   if(cloudUser?.uid!==accountUid)return;
+   const photo=profile.photoDataUrl||user.photoURL||'';
+   setAccountAvatar($('accountAvatar'),initial,photo);
+   setAccountAvatar($('accountAvatarLarge'),initial,photo);
+  }).catch(profileError=>console.error('Could not load the account profile image.',profileError));
  }else{
   $('accountUserName').textContent='Guest';
   $('accountUserEmail').textContent='';
   $('accountAvatar').textContent='G';
   $('accountAvatarLarge').textContent='G';
+  $('myAccountLink').hidden=true;
+  setAccountAvatar($('accountAvatar'),'G');
+  setAccountAvatar($('accountAvatarLarge'),'G');
   $('accountMenu').querySelector('summary').setAttribute('aria-label','Account menu');
  }
  $('cloudAccount').textContent=user?`Signed in as ${user.email||user.displayName||'Google user'}. Cloud saves are private to this account.`:'Sign in to access your resumes across devices.';
@@ -455,6 +490,7 @@ async function updateCloudAccount(user,error){
   renderTemplates();
   return;
  }
+ void refreshEditorBillingStatus(user,generation);
  if(accountChanged)setSaveState('Saving…');
  renderCloudResumes();
  renderTemplates();
@@ -525,15 +561,6 @@ async function updateCloudAccount(user,error){
   }catch(error){
    console.error('Could not load the Pro-template trial allowance.',error);
    updateProTemplatePreviewAllowance({error:true});
-  }
-  try{
-   const config=await loadBillingConfig();
-   billingPricingConfig=config;
-   if(config.entitlementEnabled)verifiedEntitlement=await loadBillingEntitlement(user);
-   if(authGeneration!==generation||cloudUser?.uid!==user.uid)return;
-  }catch(billingError){
-   if(authGeneration!==generation||cloudUser?.uid!==user.uid)return;
-   console.error('Could not load the signed-in account billing status.',billingError);
   }
   if(authGeneration===generation&&cloudUser?.uid===user.uid){
    updateProLabel();
@@ -1029,9 +1056,9 @@ function renderSheets(){
 }
 function fitMobileZoom(){
  if(!mobileAutoFitZoom||!window.matchMedia('(max-width:800px)').matches)return;
- const width=$('sheets').clientWidth-4;
+ const root=$('sheets'),style=getComputedStyle(root),width=root.clientWidth-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight);
  if(width<=0)return;
- const fitted=Math.max(.45,Math.min(1,width/PAGE_W));
+ const fitted=Math.max(.3,Math.min(1,width/PAGE_W));
  if(Math.abs(fitted-zoom)<.005)return;
  zoom=fitted;
  renderSheets();
@@ -1325,11 +1352,11 @@ function toggleLeft(){leftCollapsed=!leftCollapsed;applyPanels();savePrefs()}
 function setTab(t){leftTab=t==='sections'?'sections':'templates';leftCollapsed=false;for(const k of ['templates','sections']){const on=k===leftTab;$('pane'+k[0].toUpperCase()+k.slice(1)).hidden=!on;const b=$('tab'+k[0].toUpperCase()+k.slice(1));b.classList.toggle('active',on);b.setAttribute('aria-selected',on)}applyPanels();savePrefs()}
 function setRightTab(t){rightTab=t==='section'?'section':'design';renderInspector();savePrefs()}
 function setMobilePanel(panel){
- const next=['templates','sections','design'].includes(panel)?panel:'resume';
+ const next=['templates','design'].includes(panel)?panel:'resume';
  $('layout').dataset.mobilePanel=next;
  document.querySelectorAll('.mobile-editor-tab').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.mobilePanel===next)));
  if(next!=='resume'){leftCollapsed=false;collapsed=false;applyPanels()}
- if(next==='templates'||next==='sections')setTab(next);
+ if(next==='templates')setTab(next);
  else if(next==='design'&&rightTab!=='design')setRightTab('design');
 }
 function savePrefs(){try{localStorage.setItem('resumeStudioUI',JSON.stringify({leftWidth,panelWidth,leftCollapsed,collapsed,leftTab,rightTab,onboardingDismissed,sectionTypographyCalloutEnabled}))}catch(error){console.error('Could not save editor preferences.',error)}}
@@ -3461,7 +3488,7 @@ $('sheets').addEventListener('pointermove',e=>{
  if(touchPoints.size<2||!pinchStart)return;
  e.preventDefault();
  const [first,second]=touchPoints.values();
- mobileAutoFitZoom=false;zoom=zoomFromPinch(pinchStart.zoom,pinchStart.distance,Math.hypot(second.x-first.x,second.y-first.y));
+ mobileAutoFitZoom=false;zoom=zoomFromPinch(pinchStart.zoom,pinchStart.distance,Math.hypot(second.x-first.x,second.y-first.y),window.matchMedia('(max-width:800px)').matches ? .3 : .45);
  renderSheets();
 },{passive:false});
 const finishTouchPointer=e=>{
@@ -3505,7 +3532,7 @@ $('editMode').addEventListener('change',e=>transact(()=>{
   state.mode='flow';
  }
 }));
-$('zoomIn').addEventListener('click',()=>{mobileAutoFitZoom=false;zoom=Math.min(1.5,zoom+.05);renderSheets()});$('zoomOut').addEventListener('click',()=>{mobileAutoFitZoom=false;zoom=Math.max(.45,zoom-.05);renderSheets()});
+$('zoomIn').addEventListener('click',()=>{mobileAutoFitZoom=false;zoom=Math.min(1.5,zoom+.05);renderSheets()});$('zoomOut').addEventListener('click',()=>{mobileAutoFitZoom=false;zoom=Math.max(window.matchMedia('(max-width:800px)').matches ? .3 : .45,zoom-.05);renderSheets()});
 $('saveBtn').addEventListener('click',exportJSON);$('loadBtn').addEventListener('click',()=>$('jsonInput').click());$('jsonInput').addEventListener('change',e=>{if(e.target.files[0])importJSON(e.target.files[0]);e.target.value=''});
 $('importResumeBtn').addEventListener('click',()=>$('resumeImportInput').click());
 $('chooseResumeImportFile').addEventListener('click',()=>$('resumeImportInput').click());
