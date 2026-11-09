@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createFirebaseCloudClient, googleSignInErrorMessage } from '../frontend/src/firebase-cloud.js';
 import { chooseAuthenticatedResume } from '../frontend/src/resume-persistence.js';
 
-function createFakeFirebase({ popupError = null, signOutError = null } = {}) {
+function createFakeFirebase({ popupError = null, popupDelay = null, signOutError = null } = {}) {
   const records = new Map();
   let generatedId = 0;
   const auth = {
@@ -16,6 +16,7 @@ function createFakeFirebase({ popupError = null, signOutError = null } = {}) {
   };
   let authObserver;
   let signedInWith;
+  let popupCalls = 0;
   let redirectedWith;
   let signedOut = false;
   const appSdk = {
@@ -28,6 +29,8 @@ function createFakeFirebase({ popupError = null, signOutError = null } = {}) {
     getAuth: () => auth,
     GoogleAuthProvider,
     signInWithPopup: async (_auth, provider) => {
+      popupCalls++;
+      if (popupDelay) await popupDelay;
       if (popupError) throw popupError;
       signedInWith = provider;
     },
@@ -101,6 +104,7 @@ function createFakeFirebase({ popupError = null, signOutError = null } = {}) {
     records,
     GoogleAuthProvider,
     get signedInWith() { return signedInWith; },
+    get popupCalls() { return popupCalls; },
     get redirectedWith() { return redirectedWith; },
     get signedOut() { return signedOut; },
     setSignOutError(error) { signOutError = error; },
@@ -132,6 +136,24 @@ test('Google sign-in falls back to redirect when the browser blocks a popup', as
 
   assert.ok(firebase.redirectedWith instanceof firebase.GoogleAuthProvider);
   assert.equal(firebase.signedInWith, undefined);
+});
+
+test('rapid Google sign-in requests share one popup and canceled popup requests are ignored', async () => {
+  let finishPopup;
+  const popupDelay = new Promise(resolve => { finishPopup = resolve; });
+  const firebase = createFakeFirebase({ popupDelay });
+
+  const firstRequest = firebase.client.signInWithGoogle();
+  const secondRequest = firebase.client.signInWithGoogle();
+  assert.strictEqual(firstRequest, secondRequest);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(firebase.popupCalls, 1);
+  finishPopup();
+  await Promise.all([firstRequest, secondRequest]);
+
+  const canceledPopup = createFakeFirebase({ popupError: { code: 'auth/cancelled-popup-request' } });
+  await assert.doesNotReject(canceledPopup.client.signInWithGoogle());
+  assert.equal(canceledPopup.redirectedWith, undefined);
 });
 
 test('Firebase sign-out errors are surfaced and the same client can retry', async () => {
