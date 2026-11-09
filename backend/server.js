@@ -471,10 +471,27 @@ async function loadForumContent(db, kind, cursor, userUid = null) {
   };
 }
 
-function isAdminUser(user) {
+export function normalizeAdminEmail(value) {
+  if (typeof value !== 'string') return '';
+  const cleaned = value.trim().replace(/^['"]+|['"]+$/g, '').replace(/\s+/g, '').toLowerCase().replace(/@+/g, '@');
+  if (!cleaned || (cleaned.match(/@/g) || []).length !== 1) return '';
+  const [localPart, domainPart] = cleaned.split('@');
+  if (!localPart || !domainPart || localPart.includes('..') || domainPart.includes('..')) return '';
+  return `${localPart}@${domainPart}`;
+}
+
+export function adminEmails() {
+  return (process.env.ADMIN_EMAILS || '')
+    .split(/[\n,;]+/)
+    .map(normalizeAdminEmail)
+    .filter(Boolean);
+}
+
+export function isAdminUser(user) {
   if (user?.admin === true || user?.claims?.admin === true) return true;
-  const allowed = (process.env.ADMIN_EMAILS || '').split(',').map(value => value.trim().toLowerCase()).filter(Boolean);
-  return Boolean(user?.email && allowed.includes(user.email.toLowerCase()));
+  const email = normalizeAdminEmail(user?.email || '');
+  if (!email) return false;
+  return adminEmails().includes(email);
 }
 
 async function requireAdmin(request, response, next) {
@@ -663,8 +680,17 @@ function calculateDiscount(actualPrice, currentPrice) {
   return Math.max(0, Math.min(100, Math.round(((actualPrice - currentPrice) / actualPrice) * 100)));
 }
 
+function normalizePricingAnnouncement(value) {
+  const text = String(value ?? '')
+    .replace(/<[^>]*>/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return text.slice(0, 240);
+}
+
 function normalizePricingConfig(rawConfig = {}) {
   const providerPlanIds = { INR: {}, USD: {} };
+  const announcement = normalizePricingAnnouncement(rawConfig?.announcement ?? rawConfig?.priceAnnouncement ?? rawConfig?.message ?? rawConfig?.notice);
   const normalizePlan = (planKey, currency) => {
     const basePlan = billingPlan(planKey, currency);
     const rawPlan = pricingPlanEntry(rawConfig, planKey, currency);
@@ -698,6 +724,7 @@ function normalizePricingConfig(rawConfig = {}) {
       monthly: usdMonthly,
       yearly: usdYearly
     },
+    announcement,
     providerPlanIds,
     updatedAt: Date.now()
   };
@@ -1337,6 +1364,7 @@ app.get('/api/admin/pricing', requireFirebaseUser, requireAdmin, async (_request
 
 app.put('/api/admin/pricing', requireFirebaseUser, requireAdmin, async (request, response) => {
   const rawPricing = request.body?.pricing || request.body || {};
+  const announcement = normalizePricingAnnouncement(rawPricing?.announcement ?? rawPricing?.priceAnnouncement ?? rawPricing?.message ?? rawPricing?.notice);
   const defaultPricing = normalizePricingConfig({});
   const requestedPlans = {};
   for (const currency of ['INR', 'USD']) {
@@ -1416,7 +1444,8 @@ app.put('/api/admin/pricing', requireFirebaseUser, requireAdmin, async (request,
         monthly: requestedPlans.USD.monthly,
         yearly: requestedPlans.USD.yearly
       },
-      providerPlanIds
+      providerPlanIds,
+      announcement
     });
     await db.doc('appConfig/pricing').set(pricing, { merge: true });
     response.json({ pricing: publicPricingConfig(pricing) });

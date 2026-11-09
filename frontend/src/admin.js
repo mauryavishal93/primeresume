@@ -229,6 +229,7 @@ function renderPricingConfig(pricing) {
   $('#usd-monthly-current-price').value = usdMonthly.currentPrice ?? 3.67;
   $('#usd-yearly-actual-price').value = usdYearly.actualPrice ?? 49.37;
   $('#usd-yearly-current-price').value = usdYearly.currentPrice ?? 49.37;
+  $('#pricing-announcement').value = config.announcement || '';
   const monthlyDiscount = calculateDiscount(monthly.actualPrice, monthly.currentPrice);
   const yearlyDiscount = calculateDiscount(yearly.actualPrice, yearly.currentPrice);
   const usdMonthlyDiscount = calculateDiscount(usdMonthly.actualPrice, usdMonthly.currentPrice);
@@ -663,6 +664,7 @@ $('#save-pricing-config').addEventListener('click', async () => {
   const usdMonthlyCurrent = Number($('#usd-monthly-current-price').value || 0);
   const usdYearlyActual = Number($('#usd-yearly-actual-price').value || 0);
   const usdYearlyCurrent = Number($('#usd-yearly-current-price').value || 0);
+  const announcement = $('#pricing-announcement').value.trim();
   const inrPrices = [monthlyActual, monthlyCurrent, yearlyActual, yearlyCurrent];
   const usdPrices = [usdMonthlyActual, usdMonthlyCurrent, usdYearlyActual, usdYearlyCurrent];
 
@@ -686,6 +688,7 @@ $('#save-pricing-config').addEventListener('click', async () => {
       method: 'PUT',
       body: JSON.stringify({
         pricing: {
+          announcement,
           monthly: { actualPrice: monthlyActual, currentPrice: monthlyCurrent },
           yearly: { actualPrice: yearlyActual, currentPrice: yearlyCurrent },
           USD: {

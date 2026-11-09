@@ -818,13 +818,23 @@ body.admin-page {
   text-transform: uppercase;
 }
 
-.pricing-config-grid input {
+.pricing-config-grid input,
+.pricing-config-grid textarea {
   border: 1px solid var(--admin-border);
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.02);
   color: var(--admin-text);
   padding: 11px 12px;
   font: inherit;
+}
+
+.pricing-announcement-field {
+  grid-column: 1 / -1;
+}
+
+.pricing-announcement-field textarea {
+  min-height: 86px;
+  resize: vertical;
 }
 
 .pricing-summary {

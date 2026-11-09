@@ -2,7 +2,7 @@ import test, { after, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { voucherDocumentId } from '../backend/billing.js';
-import { app } from '../backend/server.js';
+import { adminEmails, app, normalizeAdminEmail } from '../backend/server.js';
 
 const environment = {
   BILLING_ENABLED: 'true',
@@ -10,7 +10,7 @@ const environment = {
   BILLING_REFUNDS_PUBLISHED: 'true',
   BILLING_TEST_MODE_VERIFIED: 'true',
   BILLING_LIVE_LAUNCH_APPROVED: 'true',
-  ADMIN_EMAILS: 'admin@example.com',
+  ADMIN_EMAILS: 'mauryavishal93@gmail.com',
   FIREBASE_SERVICE_ACCOUNT_JSON: JSON.stringify({
     type: 'service_account',
     project_id: 'test-project',
@@ -32,6 +32,12 @@ const environment = {
 const previousEnvironment = Object.fromEntries(
   Object.keys(environment).map(key => [key, process.env[key]])
 );
+
+test('admin email allow list normalizes accidental duplicate @ characters and whitespace', () => {
+  process.env.ADMIN_EMAILS = ' mauryavishal93@@gmail.com , admin@example.com  ';
+  assert.equal(normalizeAdminEmail('mauryavishal93@@gmail.com'), 'mauryavishal93@gmail.com');
+  assert.deepEqual(adminEmails(), ['mauryavishal93@gmail.com', 'admin@example.com']);
+});
 
 function createFakeDatabase() {
   const records = new Map();
@@ -316,6 +322,7 @@ test('admin pricing stores distinct actual and current values', async () => {
     token: 'admin-test-token',
     body: {
       pricing: {
+        announcement: 'Limited-time price drop: launch pricing is now discounted to make Pro more accessible.',
         monthly: { actualPrice: 199, currentPrice: 99 },
         yearly: { actualPrice: 499, currentPrice: 399 },
         USD: {
@@ -333,6 +340,7 @@ test('admin pricing stores distinct actual and current values', async () => {
   assert.equal(saved.pricing.yearly.currentPrice, 399);
   assert.equal(saved.pricing.USD.monthly.currentPrice, 3.67);
   assert.equal(saved.pricing.USD.yearly.currentPrice, 49.37);
+  assert.match(saved.pricing.announcement, /price drop/i);
 
   const load = await request('/api/admin/pricing', { token: 'admin-test-token' });
   const loaded = await load.json();
@@ -342,6 +350,7 @@ test('admin pricing stores distinct actual and current values', async () => {
   assert.equal(loaded.pricing.yearly.currentPrice, 399);
   assert.equal(loaded.pricing.USD.monthly.currentPrice, 3.67);
   assert.equal(loaded.pricing.USD.yearly.currentPrice, 49.37);
+  assert.match(loaded.pricing.announcement, /price drop/i);
 
   const invalidPrice = await request('/api/admin/pricing', {
     method: 'PUT',

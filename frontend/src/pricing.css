@@ -1,4 +1,5 @@
 .pricing-main{max-width:1080px}
+.pricing-announcement{display:flex;align-items:center;justify-content:center;gap:10px;margin:0 auto 26px;max-width:880px;padding:14px 18px;border:1px solid rgba(246,185,84,.5);border-radius:16px;background:linear-gradient(135deg,rgba(255,196,80,.18),rgba(255,108,70,.12));color:#f9d79a;font-weight:700;line-height:1.5;text-align:center;box-shadow:0 16px 28px rgba(181,111,45,.16)}
 .pricing-hero{max-width:780px;margin:20px auto 40px;text-align:center}
 .pricing-hero h1{margin:0;color:#f3f8ff;font-size:clamp(2.2rem,4vw,3.7rem);line-height:1.05;letter-spacing:-.04em}
 .pricing-hero .about-lead{margin:18px auto 0}
