@@ -36,6 +36,7 @@ const loadFirebaseSdk = () => Promise.all([
 export function createFirebaseCloudClient({ config = firebaseConfig, loadSdk = loadFirebaseSdk, fetchImpl = globalThis.fetch } = {}) {
   const isConfigured = Object.values(config).every(value => typeof value === 'string' && value.length > 0);
   let servicesPromise;
+  let signInPromise;
 
   async function getServices() {
     if (!isConfigured) throw new Error('Cloud saving is not configured yet.');
@@ -151,17 +152,24 @@ export function createFirebaseCloudClient({ config = firebaseConfig, loadSdk = l
     };
   }
 
-  async function signInWithGoogle() {
-    const { auth, authSdk } = await getServices();
-    const provider = new authSdk.GoogleAuthProvider();
-    try {
-      await authSdk.signInWithPopup(auth, provider);
-    } catch (error) {
-      if (!['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment'].includes(error?.code)) {
-        throw error;
+  function signInWithGoogle() {
+    if (signInPromise) return signInPromise;
+    signInPromise = (async () => {
+      const { auth, authSdk } = await getServices();
+      const provider = new authSdk.GoogleAuthProvider();
+      try {
+        await authSdk.signInWithPopup(auth, provider);
+      } catch (error) {
+        if (error?.code === 'auth/cancelled-popup-request') return;
+        if (!['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment'].includes(error?.code)) {
+          throw error;
+        }
+        await authSdk.signInWithRedirect(auth, provider);
       }
-      await authSdk.signInWithRedirect(auth, provider);
-    }
+    })().finally(() => {
+      signInPromise = null;
+    });
+    return signInPromise;
   }
 
   async function signOutUser() {
