@@ -71,3 +71,21 @@ test('editing preserves template section backgrounds and uses a visible focus ri
   assert.doesNotMatch(styles, /\.sheet \[contenteditable="true"\]:focus\{background:#fff/);
   assert.match(brianStyles, /\.br-sidebar-sections \.resume-section \.section-body \[contenteditable=true\]:focus\{background:transparent!important;color:inherit!important;caret-color:currentColor!important/);
 });
+
+test('resume design supports independent section-title and details text colors', () => {
+  const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
+  const styles = readFileSync(new URL('../frontend/src/style.css', import.meta.url), 'utf8');
+  assert.match(source, /sectionTitleColor:'',detailsColor:''/);
+  assert.match(source, /sectionTitleColor:\/\^#\[0-9a-f\]\{6\}\$\/i\.test\(str\(ds\.sectionTitleColor\)\)/);
+  assert.match(source, /detailsColor:\/\^#\[0-9a-f\]\{6\}\$\/i\.test\(str\(ds\.detailsColor\)\)/);
+  assert.match(source, /data-design="sectionTitleColor" type="color"/);
+  assert.match(source, /data-design="detailsColor" type="color"/);
+  assert.match(source, /data-reset-design-color="sectionTitleColor"/);
+  assert.match(source, /data-reset-design-color="detailsColor"/);
+  assert.match(source, /id="resetAllTextColors" type="button">Reset all text colors to template/);
+  assert.match(source, /state\.design\.sectionTitleColor='';\s*state\.design\.detailsColor='';/);
+  assert.match(source, /set\('--resume-title-color',d\.sectionTitleColor\)/);
+  assert.match(source, /set\('--resume-details-color',d\.detailsColor\)/);
+  assert.match(styles, /#sheets \.sheet\[data-custom-title-color="true"\] \.resume-section>\.section-heading\{color:var\(--resume-title-color\)!important\}/);
+  assert.match(styles, /#sheets \.sheet\[data-custom-details-color="true"\] \.resume-section \.section-body \*\{color:var\(--resume-details-color\)!important\}/);
+});

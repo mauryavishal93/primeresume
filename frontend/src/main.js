@@ -47,7 +47,7 @@ const makeSections=()=>{
     {id:uid(),type:'certifications',title:'Certifications',visible:true,content:'Add relevant certifications, courses, or professional training.'}
   ];
 };
-const fresh=()=>({version:4,docName:'Untitled resume',template:'classic',layout:'single',mode:'flow',profile:{name:'Name Surname',headline:'Engineer',email:'abc@xyz.com',phone:'+91 98765 43210',location:'Bengaluru, India',website:'linkedin.com/in/abcxyz/',photo:''},design:{accent:'#31547a',font:'Arial',fontSize:12,headingSize:15,margin:DEFAULT_MARGIN,marginY:DEFAULT_MARGIN,pageNumbers:true,headerAlign:'',photoAlign:''},sections:makeSections().map(section=>({...section,headingSize:15,bodySize:12})),positions:{},freePageCount:1,freeLayoutsByTemplate:{},importedSourceText:''});
+const fresh=()=>({version:4,docName:'Untitled resume',template:'classic',layout:'single',mode:'flow',profile:{name:'Name Surname',headline:'Engineer',email:'abc@xyz.com',phone:'+91 98765 43210',location:'Bengaluru, India',website:'linkedin.com/in/abcxyz/',photo:''},design:{accent:'#31547a',sectionTitleColor:'',detailsColor:'',font:'Arial',fontSize:12,headingSize:15,margin:DEFAULT_MARGIN,marginY:DEFAULT_MARGIN,pageNumbers:true,headerAlign:'',photoAlign:''},sections:makeSections().map(section=>({...section,headingSize:15,bodySize:12})),positions:{},freePageCount:1,freeLayoutsByTemplate:{},importedSourceText:''});
 const str=v=>typeof v==='string'?v:'';
 /* Validates + upgrades any project (import or autosave). Throws on files that are not projects. */
 function normalizeState(d){
@@ -62,7 +62,7 @@ function normalizeState(d){
  if(out.profile.photo&&!/^data:image\//.test(out.profile.photo))out.profile.photo='';
  const ds=d.design;let mx=clamp(ds.margin,0,100,DEFAULT_MARGIN),my=clamp(ds.marginY!==undefined?ds.marginY:ds.margin,0,100,DEFAULT_MARGIN);
  if(ver<3){if(mx===56)mx=DEFAULT_MARGIN;if(my===56)my=DEFAULT_MARGIN}   /* old 56px default -> new tighter default */
- out.design={accent:/^#[0-9a-f]{6}$/i.test(str(ds.accent))?ds.accent:base.design.accent,font:FONTS.includes(ds.font)?ds.font:'Arial',fontSize:clamp(ds.fontSize,8,24,12),headingSize:clamp(ds.headingSize,10,28,15),margin:mx,marginY:my,pageNumbers:ds.pageNumbers!==false,headerAlign:['left','center','right'].includes(ds.headerAlign)?ds.headerAlign:'',photoAlign:['left','center','right'].includes(ds.photoAlign)?ds.photoAlign:''};
+ out.design={accent:/^#[0-9a-f]{6}$/i.test(str(ds.accent))?ds.accent:base.design.accent,sectionTitleColor:/^#[0-9a-f]{6}$/i.test(str(ds.sectionTitleColor))?ds.sectionTitleColor:'',detailsColor:/^#[0-9a-f]{6}$/i.test(str(ds.detailsColor))?ds.detailsColor:'',font:FONTS.includes(ds.font)?ds.font:'Arial',fontSize:clamp(ds.fontSize,8,24,12),headingSize:clamp(ds.headingSize,10,28,15),margin:mx,marginY:my,pageNumbers:ds.pageNumbers!==false,headerAlign:['left','center','right'].includes(ds.headerAlign)?ds.headerAlign:'',photoAlign:['left','center','right'].includes(ds.photoAlign)?ds.photoAlign:''};
  const seen=new Set();
  out.sections=d.sections.filter(s=>s&&typeof s==='object').map(s=>{
   const type=KNOWN_TYPES.includes(s.type)?s.type:'custom';let id=str(s.id)||uid();while(seen.has(id))id=uid();seen.add(id);
@@ -763,6 +763,8 @@ function createSheet(index,tmpl,cols){
  set('--resume-accent-soft',rgbaFromHex(accent,.12));
  set('--resume-accent-mid',rgbaFromHex(accent,.28));
  set('--resume-accent-strong',rgbaFromHex(accent,.56));
+ if(d.sectionTitleColor){el.dataset.customTitleColor='true';set('--resume-title-color',d.sectionTitleColor)}
+ if(d.detailsColor){el.dataset.customDetailsColor='true';set('--resume-details-color',d.detailsColor)}
  set('--resume-font',d.font||'Arial');
  set('--resume-size',clamp(d.fontSize,8,24,12)+'px');set('--resume-heading',clamp(d.headingSize,10,28,15)+'px');
  set('--mx',clamp(d.margin,0,100,DEFAULT_MARGIN)+'px');set('--mt',clamp(d.marginY,0,100,DEFAULT_MARGIN)+'px');set('--mb',clamp(d.marginY,0,100,DEFAULT_MARGIN)+'px');
@@ -1227,10 +1229,12 @@ function renderInspector(){
  <div class="field" style="margin-top:12px"><label>Photo position</label><div class="seg" role="group" aria-label="Photo position">${[['','Template'],['left','Left'],['center','Center'],['right','Right']].map(([v,l])=>`<button type="button" data-palign="${v}" class="${(d.photoAlign||'')===v?'active':''}" aria-pressed="${(d.photoAlign||'')===v}">${l}</button>`).join('')}</div></div>
  <div class="rule"></div><div class="eyebrow">Global design</div>
  <div class="field-row"><div class="field"><label>Accent color</label><input data-design="accent" type="color" value="${$esc(d.accent)}"></div><div class="field"><label>Font</label><select data-design="font">${FONTS.map(f=>`<option ${d.font===f?'selected':''}>${f}</option>`).join('')}</select></div></div>
+ <div class="field-row"><div class="field"><label for="sectionTitleColor">Section title color</label><div class="design-color-control"><input id="sectionTitleColor" data-design="sectionTitleColor" type="color" value="${$esc(d.sectionTitleColor||d.accent)}"><button class="btn outline small" type="button" data-reset-design-color="sectionTitleColor" aria-label="Use template section title color" title="Use template section title color">Auto</button></div></div><div class="field"><label for="detailsColor">Details text color</label><div class="design-color-control"><input id="detailsColor" data-design="detailsColor" type="color" value="${$esc(d.detailsColor||'#273348')}"><button class="btn outline small" type="button" data-reset-design-color="detailsColor" aria-label="Use template details text color" title="Use template details text color">Auto</button></div></div></div>
+ <div class="field"><button class="btn outline small" id="resetAllTextColors" type="button">Reset all text colors to template</button></div>
  <div class="field-row"><div class="field"><label>Body size (px)</label><input data-design="fontSize" type="number" min="8" max="24" value="${d.fontSize}"></div><div class="field"><label>Heading size (px)</label><input data-design="headingSize" type="number" min="10" max="28" value="${d.headingSize}"></div></div>
  <div class="field-row"><div class="field"><label>Left/right margin (px)</label><input data-design="margin" type="number" min="0" max="100" value="${d.margin}"></div><div class="field"><label>Top/bottom margin (px)</label><input data-design="marginY" type="number" min="0" max="100" value="${d.marginY}"></div></div>
  <div class="field"><label><input type="checkbox" data-design="pageNumbers" ${d.pageNumbers?'checked':''}>Show page numbers (reserves a small footer)</label></div>
- <div class="small-note">Page size is A4 (210 × 297 mm). The same margins drive the preview, print and PDF. Your draft is saved in this browser. Export JSON for a backup.</div>${state.importedSourceText?`<details class="resume-import-source"><summary>Original imported text (saved with this project)</summary><pre>${$esc(state.importedSourceText)}</pre></details>`:''}`:''}`;
+ <div class="small-note">Auto colors use the selected template defaults. Page size is A4 (210 × 297 mm). The same margins drive the preview, print and PDF. Your draft is saved in this browser. Export JSON for a backup.</div>${state.importedSourceText?`<details class="resume-import-source"><summary>Original imported text (saved with this project)</summary><pre>${$esc(state.importedSourceText)}</pre></details>`:''}`:''}`;
  if(rightTab==='section'&&s){
    h+=`<div class="eyebrow">Selected section</div><div class="field"><label>Section title</label><input id="sectionTitle" value="${$esc(s.title)}"></div><div class="field-row"><div class="field"><label for="sectionHeadingSize">Heading size (px)</label><input id="sectionHeadingSize" type="number" min="10" max="36" step="1" value="${s.headingSize}"></div><div class="field"><label for="sectionBodySize">Body size (px)</label><input id="sectionBodySize" type="number" min="8" max="24" step="1" value="${s.bodySize}"></div></div>${s.type==='skills'?`<div class="field"><label for="skillStyle">Core skills display style</label><select id="skillStyle">${SKILL_STYLES.map(([value,label])=>`<option value="${value}" ${(s.skillStyle||'tags')===value?'selected':''}>${label}</option>`).join('')}</select></div>`:`<div class="field"><label>Line pointers</label><select id="sectionPointer">${[['bullet','• Bullet'],['number','1. Numbered'],['arrow','→ Arrow'],['check','✓ Check mark'],['dash','– Dash'],['diamond','◆ Diamond'],['none','No pointer']].map(([value,label])=>`<option value="${value}" ${(s.listStyle||'bullet')===value?'selected':''}>${label}</option>`).join('')}</select></div>`}`;
    if(s.entries){
@@ -1249,6 +1253,15 @@ function renderInspector(){
   else if(el.type==='number'){v=Number(el.value);if(el.value===''||!Number.isFinite(v)){renderInspector();return}v=clamp(v,Number(el.min),Number(el.max),state.design[k])}
   else v=el.value;
   transact(()=>{state.design[k]=v;if(k==='fontSize')state.sections.forEach(section=>section.bodySize=v);if(k==='headingSize')state.sections.forEach(section=>section.headingSize=v)});
+ }));
+ $('inspector').querySelectorAll('[data-reset-design-color]').forEach(button=>button.addEventListener('click',()=>{
+  const key=button.dataset.resetDesignColor;
+  if(!['sectionTitleColor','detailsColor'].includes(key))return;
+  transact(()=>{state.design[key]=''});
+ }));
+ $('resetAllTextColors')?.addEventListener('click',()=>transact(()=>{
+  state.design.sectionTitleColor='';
+  state.design.detailsColor='';
  }));
  const photo=$('photoInput');photo?.addEventListener('change',()=>{const f=photo.files&&photo.files[0];if(!f)return;if(!f.type.startsWith('image/')||f.size>8*1024*1024){toast('Choose an image under 8 MB');return}const r=new FileReader();r.onload=()=>{const im=new Image();im.onload=()=>{const scale=Math.min(1,500/Math.max(im.width,im.height)),c=document.createElement('canvas');c.width=Math.max(1,im.width*scale);c.height=Math.max(1,im.height*scale);c.getContext('2d').drawImage(im,0,0,c.width,c.height);transact(()=>state.profile.photo=c.toDataURL('image/jpeg',.84))};im.onerror=()=>toast('That image could not be read');im.src=String(r.result)};r.readAsDataURL(f)});
  $('removePhoto')?.addEventListener('click',()=>transact(()=>state.profile.photo=''));
@@ -1694,12 +1707,6 @@ function normalizePdfCaptureColors(clonedDocument){
  for(const stylesheet of clonedDocument.styleSheets){
   try{stripUnsupportedColors(stylesheet.cssRules);}catch(error){console.warn('Could not sanitize PDF capture stylesheet.',error);}
  }
- const captureFallback=document.createElement('style');
- captureFallback.textContent='\
-  .sheet *, .sheet *::before, .sheet *::after { color: inherit !important; background: transparent !important; box-shadow: none !important; border-color: currentColor !important; }\
-  .sheet { color: var(--resume-accent, #1f2937) !important; }\
-';
- clonedDocument.head.appendChild(captureFallback);
 }
 async function exportPDF(templateId=null){
  const originalState=state,originalSelection=selectedId,originalZoom=zoom;
