@@ -32,9 +32,11 @@ const $=id=>document.getElementById(id),deep=x=>JSON.parse(JSON.stringify(x)),ui
 const baseDocumentTitle=document.title;
 const clamp=(v,min,max,def)=>{v=Number(v);return Number.isFinite(v)?Math.max(min,Math.min(max,v)):def};
 const PAGE_W=794,PAGE_H=1122,DEFAULT_MARGIN=32,FONTS=['Arial','Georgia','Verdana','Trebuchet MS','Times New Roman','Courier New'];
-const homepageDemoMode=new URLSearchParams(location.search).get('homepageDemo')==='1';
-const incomingShareId=new URLSearchParams(location.search).get('share')||'';
-const publicPdfMode=new URLSearchParams(location.search).get('pdf')==='1';
+const pageParams=new URLSearchParams(location.search);
+const publicSharePath=location.pathname.match(/^\/file\/d\/([A-Za-z0-9_-]{1,128})\/view\/?$/);
+const homepageDemoMode=pageParams.get('homepageDemo')==='1';
+const incomingShareId=pageParams.get('share')||publicSharePath?.[1]||'';
+const publicPdfMode=pageParams.get('pdf')==='1'||Boolean(publicSharePath);
 const publicShareOrigin=['localhost','127.0.0.1'].includes(location.hostname)
  ?'https://resumeout.vercel.app'
  :location.origin;
@@ -397,9 +399,8 @@ async function removeCloudResume(id){
  }catch(error){toast(error.message||'Could not delete this cloud resume.')}
 }
 function resumeShareUrl(id){
- const url=new URL('/editor.html',publicShareOrigin);
- url.searchParams.set('share',id);
- url.searchParams.set('pdf','1');
+ const url=new URL(`/file/d/${encodeURIComponent(id)}/view`,publicShareOrigin);
+ url.searchParams.set('resourcekey',id);
  return url.toString();
 }
 function resumeEditUrl(id){
@@ -4040,7 +4041,6 @@ if(!homepageDemoMode){
  if(!cloudConfigured)updateCloudAccount(null,new Error('Add the Firebase web-app settings to enable cloud saving.'));
  else observeAuth(updateCloudAccount);
 }
-const pageParams=new URLSearchParams(location.search);
 if(pageParams.get('tool')==='cover-letter')openCoverLetter();
 if(pageParams.get('open')==='import')openResumeImportPrompt();
 })();

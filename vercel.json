@@ -11,6 +11,10 @@
   ],
   "rewrites": [
     {
+      "source": "/file/d/:shareId/view",
+      "destination": "/editor.html?share=:shareId&pdf=1"
+    },
+    {
       "source": "/api/:path*",
       "missing": [
         {

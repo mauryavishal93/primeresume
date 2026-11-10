@@ -503,15 +503,22 @@ test('public resume links target the global PDF viewer and render a read-only PD
   const styles = readFileSync(new URL('../frontend/src/style.css', import.meta.url), 'utf8');
   const server = readFileSync(new URL('../backend/server.js', import.meta.url), 'utf8');
   const editor = readFileSync(new URL('../frontend/editor.html', import.meta.url), 'utf8');
-  assert.match(source, /const publicPdfMode=new URLSearchParams\(location\.search\)\.get\('pdf'\)==='1'/);
+  const vercel = JSON.parse(readFileSync(new URL('../vercel.json', import.meta.url), 'utf8'));
+  assert.match(source, /const publicSharePath=location\.pathname\.match\(/);
+  assert.match(source, /pageParams\.get\('share'\)\|\|publicSharePath\?\.\[1\]/);
+  assert.match(source, /pageParams\.get\('pdf'\)==='1'\|\|Boolean\(publicSharePath\)/);
   assert.match(source, /'https:\/\/resumeout\.vercel\.app'/);
-  assert.match(source, /url\.searchParams\.set\('share',id\);\s+url\.searchParams\.set\('pdf','1'\)/);
+  assert.match(source, /new URL\(`\/file\/d\/\$\{encodeURIComponent\(id\)\}\/view`,publicShareOrigin\)/);
+  assert.match(source, /url\.searchParams\.set\('resourcekey',id\)/);
   assert.match(source, /if\(publicPdfMode\)\{[\s\S]*?setTimeout\(\(\)=>void exportPDF\(\),0\)/);
   assert.match(source, /publicPdfMode\?'Public resume PDF':'Preview your resume PDF'/);
   assert.match(source, /window\.history\.replaceState\(null,'',location\.pathname\+location\.hash\)/);
   assert.doesNotMatch(source, /delete snapshot\.importedSourceText/);
   assert.match(styles, /body\.public-resume-pdf-ready \.topbar,body\.public-resume-pdf-ready \.layout/);
   assert.match(server, /https:\/\/resumeout\.vercel\.app\$\{request\.originalUrl/);
+  assert.match(server, /app\.get\('\/file\/d\/:shareId\/view'/);
   assert.match(editor, /https:\/\/resumeout\.vercel\.app\$\{location\.pathname/);
   assert.doesNotMatch(source+server+editor, /primeresume-ten\.vercel\.app/);
+  assert.ok(vercel.rewrites.some(rewrite => rewrite.source==='/file/d/:shareId/view'
+    && rewrite.destination==='/editor.html?share=:shareId&pdf=1'));
 });

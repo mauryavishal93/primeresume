@@ -3301,6 +3301,16 @@ app.get('/home.html', (_request, response) => {
   response.sendFile(path.join(distDir, 'home.html'));
 });
 
+app.get('/file/d/:shareId/view', (request, response, next) => {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(request.params.shareId)) {
+    response.status(404).json({ error: 'This public resume link is invalid.' });
+    return;
+  }
+  response.sendFile(path.join(distDir, 'editor.html'), error => {
+    if (error) next(error);
+  });
+});
+
 app.use(express.static(distDir));
 app.use((_request, response) => {
   response.status(404).json({ error: 'Not found' });

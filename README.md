@@ -28,7 +28,7 @@ Add `FIREBASE_SERVICE_ACCOUNT_JSON` and `ADMIN_EMAILS` under **Project Settings 
 
 ## Production
 
-The public Vercel site is `https://resumeout.vercel.app`. Public resume share links use this stable domain; local-development share links also point to it.
+The public Vercel site is `https://resumeout.vercel.app`. Public resume share links use a Drive-style `/file/d/{shareId}/view?resourcekey={shareId}` URL; local-development share links also point to the public site.
 
 ```sh
 npm run build

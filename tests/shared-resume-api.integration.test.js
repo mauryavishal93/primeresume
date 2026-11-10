@@ -202,3 +202,10 @@ test('shared resume API deletes an owner link and makes the old URL unavailable'
   assert.equal(revoke.response.status, 204);
   assert.equal((await request(`/api/shared-resumes/${created.data.id}`)).response.status, 404);
 });
+
+test('Drive-style public resume URLs serve the editor and preserve the share token query', async () => {
+  const response = await fetch(`${origin}/file/d/share-token-123/view?resourcekey=share-token-123`);
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type'), /text\/html/);
+  assert.match(await response.text(), /pdfPreviewModalBg/);
+});
