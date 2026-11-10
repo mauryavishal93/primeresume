@@ -24,6 +24,7 @@ test('sections panel restores its section rows and action button layout', () => 
 test('editor toolbar controls have compact icons and responsive grid positions', () => {
   assert.match(styles, /\.toolbar\{[^}]*justify-content:center/);
   assert.match(styles, /\.toolbar-btn svg\{width:16px;height:16px;flex:0 0 16px/);
+  assert.match(styles, /#pageLayout\{width:126px;max-width:126px\}/);
   assert.match(styles, /@container \(max-width:800px\)\{\.toolbar\{display:flex;align-items:center;justify-content:center;gap:6px\}/);
   assert.match(styles, /@container \(max-width:440px\)/);
 });
@@ -155,6 +156,34 @@ test('resume editing tools collapse vertically on mobile only', () => {
   assert.match(source, /setResumeToolbarCollapsed\(mobileToolbarQuery\.matches\)/);
   assert.match(source, /resumeToolbarToggle\.addEventListener\('click'/);
   assert.match(source, /mobileToolbarQuery\.addEventListener\('change'/);
+});
+
+test('editor header uses icon-only sharing and concise JSON action labels', () => {
+  const html = readFileSync(new URL('../frontend/editor.html', import.meta.url), 'utf8');
+  assert.match(html, /id="loadBtn"[^>]*aria-label="Load JSON project" title="Load JSON"[\s\S]*?<svg[\s\S]*?<\/svg>\s*<\/button>/);
+  assert.match(html, /id="saveBtn"[^>]*aria-label="Download JSON project" title="Download JSON"[\s\S]*?<svg[\s\S]*?<\/svg>\s*<\/button>/);
+  assert.match(html, /id="shareResumeBtn"[^>]*aria-label="Share resume" title="Share resume"[\s\S]*?<svg[\s\S]*?<\/svg>\s*<\/button>/);
+  assert.doesNotMatch(html, /id="loadBtn"[\s\S]*?<span>JSON<\/span>/);
+  assert.doesNotMatch(html, /id="saveBtn"[\s\S]*?<span>JSON<\/span>/);
+  assert.doesNotMatch(html, /id="shareResumeBtn"[\s\S]*?<span>Share resume<\/span>/);
+});
+
+test('editor toolbar controls provide descriptive tooltips', () => {
+  const html = readFileSync(new URL('../frontend/editor.html', import.meta.url), 'utf8');
+  const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
+  for (const [id, title] of [
+    ['undoBtn', 'Undo'],
+    ['redoBtn', 'Redo'],
+    ['pageLayout', 'Choose a resume column layout'],
+    ['editMode', 'Choose how to edit resume content'],
+    ['atsBtn', 'ATS Check'],
+    ['zoomOut', 'Zoom out'],
+    ['zoomIn', 'Zoom in'],
+    ['zoomLabel', 'Current zoom level']
+  ]) {
+    assert.match(html, new RegExp(`id="${id}"[^>]*title="${title}"`));
+  }
+  assert.match(source, /\$\('zoomLabel'\)\.title=`Current zoom level: \$\{zoomPercent\}%`/);
 });
 
 test('typography popup is hidden only on mobile and positions using its rendered size', () => {

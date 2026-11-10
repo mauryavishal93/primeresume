@@ -167,48 +167,45 @@ if (location.hostname.toLowerCase() === 'buildmyportfolio.onrender.com') {
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
    </button>
    <div class="toolbar-content" id="resumeToolbarControls">
-   <button class="btn soft small toolbar-btn icon-btn" id="undoBtn" type="button" aria-label="Undo last change">
+   <button class="btn soft small toolbar-btn icon-btn" id="undoBtn" type="button" aria-label="Undo last change" title="Undo">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14L4 9l5-5"/><path d="M20 20v-2a7 7 0 0 0-7-7H4"/></svg>
     <span>Undo</span>
    </button>
-   <button class="btn soft small toolbar-btn icon-btn" id="redoBtn" type="button" aria-label="Redo last change">
+   <button class="btn soft small toolbar-btn icon-btn" id="redoBtn" type="button" aria-label="Redo last change" title="Redo">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 14l5-5-5-5"/><path d="M4 20v-2a7 7 0 0 1 7-7h9"/></svg>
     <span>Redo</span>
    </button>
    <div class="toolbar-control">
-    <select id="pageLayout" aria-label="Layout">
+    <select id="pageLayout" aria-label="Layout" title="Choose a resume column layout">
      <option value="" disabled selected>Layout</option>
-     <option value="single">Single column</option>
-     <option value="two">Two columns</option>
+     <option value="single" title="Single column">Single column</option>
+     <option value="two" title="Two columns">Two columns</option>
     </select>
    </div>
    <div class="toolbar-control">
-    <select id="editMode" aria-label="Editor mode">
+    <select id="editMode" aria-label="Editor mode" title="Choose how to edit resume content">
      <option value="" disabled selected>Editor</option>
-     <option value="flow">Structured</option>
-     <option value="free">Free position</option>
+     <option value="flow" title="Structured">Structured</option>
+     <option value="free" title="Free position">Free position</option>
     </select>
    </div>
-   <button class="btn outline small toolbar-btn icon-btn" id="loadBtn" type="button" aria-label="Load JSON project">
-    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v10"/><path d="M8 19l4 4 4-4"/><path d="M4 15v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
-    <span>Load JSON</span>
+   <button class="btn outline small toolbar-btn icon-btn" id="loadBtn" type="button" aria-label="Load JSON project" title="Load JSON">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"/><path d="m8 7 4-4 4 4"/><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/></svg>
    </button>
-   <button class="btn outline small toolbar-btn icon-btn" id="saveBtn" type="button" aria-label="Download JSON project">
+   <button class="btn outline small toolbar-btn icon-btn" id="saveBtn" type="button" aria-label="Download JSON project" title="Download JSON">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v10"/><path d="M8 18l4 4 4-4"/><path d="M4 14v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
-    <span>Download JSON</span>
    </button>
-   <button class="btn outline small toolbar-btn icon-btn" id="shareResumeBtn" type="button" aria-label="Share resume">
+   <button class="btn outline small toolbar-btn icon-btn" id="shareResumeBtn" type="button" aria-label="Share resume" title="Share resume">
     <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.7 10.6 6.6-4.2M8.7 13.4l6.6 4.2"/></svg>
-    <span>Share resume</span>
    </button>
-   <button class="btn outline small toolbar-btn icon-btn" id="atsBtn" type="button" aria-label="Run ATS check">
+   <button class="btn outline small toolbar-btn icon-btn" id="atsBtn" type="button" aria-label="Run ATS check" title="ATS Check">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v6"/><path d="M12 18v2"/><path d="M4.93 4.93l4.24 4.24"/><path d="M14.83 14.83l4.24 4.24"/><path d="M20 12h-2"/><path d="M4 12h2"/><path d="M14.83 9.17l4.24-4.24"/><path d="M4.93 19.07l4.24-4.24"/></svg>
     <span>ATS Check</span>
    </button>
    <div class="toolbar-zoom" aria-label="Zoom controls">
-    <button class="btn soft small" id="zoomOut" type="button" aria-label="Zoom out">−</button>
-    <span id="zoomLabel" aria-live="polite">100%</span>
-    <button class="btn soft small" id="zoomIn" type="button" aria-label="Zoom in">＋</button>
+    <button class="btn soft small" id="zoomOut" type="button" aria-label="Zoom out" title="Zoom out">−</button>
+    <span id="zoomLabel" aria-live="polite" title="Current zoom level">100%</span>
+    <button class="btn soft small" id="zoomIn" type="button" aria-label="Zoom in" title="Zoom in">＋</button>
    </div>
    </div>
   </div>

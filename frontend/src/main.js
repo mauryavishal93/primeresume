@@ -291,7 +291,7 @@ function renderCloudResumes(){
  if(!cloudResumes.length){list.innerHTML='<div class="cloud-empty">No cloud resumes yet. Save your current resume as a new cloud copy to get started.</div>';return}
  list.innerHTML=cloudResumes.map(item=>{
   const updated=item.updatedAt?new Date(item.updatedAt).toLocaleString():'Date unavailable';
-  return `<div class="cloud-resume-item"><div class="cloud-resume-meta"><strong>${$esc(item.name||'Untitled resume')}</strong><small>Updated ${$esc(updated)}</small></div><button class="btn soft" type="button" data-cloud-load="${$esc(item.id)}">Open</button><button class="btn danger" type="button" data-cloud-delete="${$esc(item.id)}">Delete</button></div>`;
+  return `<div class="cloud-resume-item"><div class="cloud-resume-meta"><strong>${$esc(item.name||'Untitled resume')}</strong><small>Updated ${$esc(updated)}</small></div><button class="btn soft" type="button" data-cloud-load="${$esc(item.id)}">Open</button><button class="btn outline cloud-icon-btn" type="button" data-cloud-share="${$esc(item.id)}" aria-label="Share ${$esc(item.name||'Untitled resume')}" title="Share resume"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.7 10.6 6.6-4.2M8.7 13.4l6.6 4.2"/></svg></button><button class="btn danger cloud-icon-btn" type="button" data-cloud-delete="${$esc(item.id)}" aria-label="Delete ${$esc(item.name||'Untitled resume')}" title="Delete resume"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="m6 7 1 14h10l1-14"/><path d="M9 7V4h6v3"/></svg></button></div>`;
  }).join('');
 }
 async function refreshCloudResumes(){
@@ -472,10 +472,10 @@ async function refreshSharedResumeList(){
   list.textContent=error.message||'Could not load your share links. Try again.';
  }
 }
-function openShareResumeModal(){
+function openShareResumeModal(link=''){
  if(!cloudUser){toast('Sign in with Google to create and manage resume share links.');return}
- $('resumeShareLinkResult').hidden=true;
- $('resumeShareLink').value='';
+ $('resumeShareLink').value=link;
+ $('resumeShareLinkResult').hidden=!link;
  $('shareResumeModalBg').classList.add('show');
  $('shareResumeModalBg').setAttribute('aria-hidden','false');
  refreshSharedResumeList();
@@ -484,28 +484,37 @@ function closeShareResumeModal(){
  $('shareResumeModalBg').classList.remove('show');
  $('shareResumeModalBg').setAttribute('aria-hidden','true');
 }
-async function createResumeShareLink(){
+async function createResumeShareLink(resume=null,triggerButton=null){
  if(!cloudUser){toast('Sign in with Google to create a share link.');return}
- const button=$('createResumeShare');
- button.disabled=true;
- button.setAttribute('aria-busy','true');
+ const button=triggerButton||$('createResumeShare');
+ if(button){
+  button.disabled=true;
+  button.setAttribute('aria-busy','true');
+ }
  try{
   const uid=cloudUser.uid,generation=cloudSessionGeneration;
-  saveActiveFreeLayout();
-  const snapshot=deep(state);
-  const share=await createSharedResume(uid,snapshot.docName,snapshot,activeCloudResumeId||'');
+  if(resume?.id===activeCloudResumeId)saveActiveFreeLayout();
+  const snapshot=deep(resume?.id===activeCloudResumeId?state:resume?.state||state);
+  snapshot.docName=snapshot.docName||resume?.name||'Untitled resume';
+  const share=await createSharedResume(
+   uid,
+   snapshot.docName||resume?.name||'Untitled resume',
+   snapshot,
+   resume?.id||activeCloudResumeId||''
+  );
   if(cloudUser?.uid!==uid||cloudSessionGeneration!==generation)return;
   const link=resumeShareUrl(share.id);
-  $('resumeShareLink').value=link;
-  $('resumeShareLinkResult').hidden=false;
-  await refreshSharedResumeList();
-  toast('Public PDF link created.');
+  openShareResumeModal(link);
+  await copyResumeShareLink(link,$('resumeShareLink'));
+  if(!resume)toast('Public PDF link created.');
  }catch(error){
   console.error('Could not create a resume share link.',error);
   toast(error.message||'Could not create a resume share link.');
  }finally{
-  button.disabled=false;
-  button.removeAttribute('aria-busy');
+  if(button){
+   button.disabled=false;
+   button.removeAttribute('aria-busy');
+  }
  }
 }
 async function revokeResumeShare(id){
@@ -1330,7 +1339,9 @@ function renderSheets(){
   sh.style.transform=zoom===1?'':`scale(${zoom})`;sh.style.marginBottom=zoom===1?'':((zoom-1)*PAGE_H)+'px';
  });
  $('hint').textContent=state.mode==='free'?'Free position: use the move handle to place sections and the right edge to resize. Pages are added automatically as content grows.':'Click any name, heading, bullet, skill, or paragraph on the page to edit · Use the right panel for design and photo details';
- $('zoomLabel').textContent=Math.round(zoom*100)+'%';
+ const zoomPercent=Math.round(zoom*100);
+ $('zoomLabel').textContent=zoomPercent+'%';
+ $('zoomLabel').title=`Current zoom level: ${zoomPercent}%`;
  updateSectionTypographyCallout();
 }
 function fitMobileZoom(){
@@ -3908,7 +3919,7 @@ $('resumeImportModalBg').addEventListener('click',event=>{if(event.target===$('r
  $('closeCloudModal').addEventListener('click',closeCloudModal);
  $('closeCloudModalAction').addEventListener('click',closeCloudModal);
  $('cloudModalBg').addEventListener('click',event=>{if(event.target===$('cloudModalBg'))closeCloudModal()});
- $('shareResumeBtn').addEventListener('click',openShareResumeModal);
+ $('shareResumeBtn').addEventListener('click',()=>openShareResumeModal());
  $('closeShareResume').addEventListener('click',closeShareResumeModal);
  $('closeShareResumeAction').addEventListener('click',closeShareResumeModal);
  $('shareResumeModalBg').addEventListener('click',event=>{if(event.target===$('shareResumeModalBg'))closeShareResumeModal()});
@@ -3936,8 +3947,13 @@ $('resumeImportModalBg').addEventListener('click',event=>{if(event.target===$('r
  $('saveCloudCopy').addEventListener('click',saveCurrentAsCloudCopy);
  $('cloudResumeList').addEventListener('click',event=>{
   const load=event.target.closest('[data-cloud-load]');
+  const share=event.target.closest('[data-cloud-share]');
   const remove=event.target.closest('[data-cloud-delete]');
   if(load)openCloudResume(load.dataset.cloudLoad);
+  if(share){
+   const resume=cloudResumes.find(item=>item.id===share.dataset.cloudShare);
+   if(resume)void createResumeShareLink(resume,share);
+  }
   if(remove)removeCloudResume(remove.dataset.cloudDelete);
  });
  $('downloadRecoveryBackup').addEventListener('click',downloadRecoveryData);

@@ -246,6 +246,7 @@
 .toolbar-control{display:flex;align-items:center;gap:6px;padding:0 2px;min-width:0;flex:0 0 auto}
 .toolbar label{font-size:11px;color:var(--muted);font-weight:700;white-space:nowrap}
 .toolbar select{border:1px solid var(--line);background:#fff;border-radius:7px;padding:7px 18px 7px 8px;font-size:12px;min-width:0;width:96px;max-width:96px;appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);background-position:calc(100% - 11px) calc(50% - 2px),calc(100% - 7px) calc(50% - 2px);background-size:4px 4px,4px 4px;background-repeat:no-repeat;flex-shrink:0}
+#pageLayout{width:126px;max-width:126px}
 .toolbar .spacer{display:none}
 .toolbar-btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;white-space:nowrap;flex-shrink:0;padding:6px 10px;font-size:11px;line-height:1.2;min-height:32px}
 .toolbar-btn svg{width:16px;height:16px;flex:0 0 16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
@@ -440,11 +441,13 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 :root[data-theme=dark] .hint,
 :root[data-theme=dark] .toolbar label{color:#a9b8cc}
 .cloud-resume-list{display:grid;min-height:0;flex:1 1 auto;gap:8px;overflow-x:hidden;overflow-y:auto}
-.cloud-resume-item{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:8px;min-width:0;padding:10px;border:1px solid var(--line);border-radius:9px}
+.cloud-resume-item{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;align-items:center;gap:8px;min-width:0;padding:10px;border:1px solid var(--line);border-radius:9px}
 .cloud-resume-meta{min-width:0}
 .cloud-resume-meta strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cloud-resume-meta small{display:block;overflow:hidden;color:var(--muted);text-overflow:ellipsis;white-space:nowrap}
 .cloud-resume-item .btn{padding:6px 9px;font-size:11px}
+.cloud-resume-item .cloud-icon-btn{width:30px;height:30px;padding:6px}
+.cloud-resume-item .cloud-icon-btn svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .cloud-empty{padding:18px;border:1px dashed var(--line);border-radius:9px;color:var(--muted);font-size:12px;text-align:center}
 .cloud-modal>.modal-actions{flex:none;flex-wrap:wrap}
 @media(max-width:480px){.cloud-modal{padding:14px}.cloud-modal-head{gap:8px}.cloud-modal-head h2{font-size:16px}.cloud-modal>.modal-actions{flex-direction:column;gap:6px}.cloud-modal>.modal-actions .btn{width:100%}.cloud-resume-item{gap:5px;padding:8px}.cloud-resume-item .btn{padding:6px;font-size:10px}}
