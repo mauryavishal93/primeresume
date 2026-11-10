@@ -268,6 +268,97 @@ export function createFirebaseCloudClient({ config = firebaseConfig, loadSdk = l
     await firestoreSdk.deleteDoc(firestoreSdk.doc(resumeCollection(firestoreSdk, db, uid), id));
   }
 
+  async function createSharedResume(uid, name, state, sourceResumeId = '') {
+    if (typeof name !== 'string' || !name.trim() || name.length > 120) {
+      throw new Error('A valid resume name is required to create a share link.');
+    }
+    if (!state || typeof state !== 'object' || Array.isArray(state)) {
+      throw new Error('The resume data is invalid and cannot be shared.');
+    }
+    const stateJson = JSON.stringify(state);
+    if (new TextEncoder().encode(stateJson).byteLength > 800 * 1024) {
+      throw new Error('This resume is too large to share safely. Remove large images or content, then try again.');
+    }
+    if (typeof sourceResumeId !== 'string' || sourceResumeId.length > 1500) {
+      throw new Error('The source resume reference is invalid.');
+    }
+    const { auth } = await getServices();
+    requireCurrentAccount(auth, uid);
+    const user = auth.currentUser;
+    const token = await getFirebaseIdToken(user);
+    const response = await fetchImpl('/api/shared-resumes', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({ name: name.trim(), state, sourceResumeId })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || 'Could not create a resume share link.');
+    if (typeof result.id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(result.id)) {
+      throw new Error('The server returned an invalid resume share link.');
+    }
+    return { id: result.id };
+  }
+
+  async function listSharedResumes(uid) {
+    const { auth } = await getServices();
+    requireCurrentAccount(auth, uid);
+    const token = await getFirebaseIdToken(auth.currentUser);
+    const response = await fetchImpl('/api/shared-resumes', {
+      headers: { authorization: `Bearer ${token}` },
+      cache: 'no-store'
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || 'Could not load your share links.');
+    if (!Array.isArray(result.shares)) throw new Error('The server returned an invalid share-link list.');
+    return result.shares.map(share => {
+      if (!share || typeof share.id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(share.id)
+        || typeof share.name !== 'string' || typeof share.active !== 'boolean') {
+        throw new Error('A saved share link is invalid. Refresh the list or contact support.');
+      }
+      return {
+        id: share.id,
+        name: share.name,
+        sourceResumeId: typeof share.sourceResumeId === 'string' ? share.sourceResumeId : '',
+        active: share.active,
+        createdAt: Number.isFinite(share.createdAt) ? share.createdAt : 0
+      };
+    });
+  }
+
+  async function getSharedResume(id) {
+    if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) {
+      throw new Error('This resume share link is invalid.');
+    }
+    const response = await fetchImpl(`/api/shared-resumes/${encodeURIComponent(id)}`, {
+      cache: 'no-store'
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || 'This resume share link is unavailable.');
+    if (typeof result.name !== 'string' || !result.state || typeof result.state !== 'object' || Array.isArray(result.state)) {
+      throw new Error('This shared resume is invalid and cannot be opened.');
+    }
+    return { name: result.name, state: result.state };
+  }
+
+  async function revokeSharedResume(uid, id) {
+    if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) {
+      throw new Error('This resume share link is invalid.');
+    }
+    const { auth } = await getServices();
+    requireCurrentAccount(auth, uid);
+    const token = await getFirebaseIdToken(auth.currentUser);
+    const response = await fetchImpl(`/api/shared-resumes/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${token}` },
+      cache: 'no-store'
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || 'Could not revoke this resume share link.');
+  }
+
   async function getProTemplateDownloadStatus(uid) {
     const { db, firestoreSdk } = await getServices();
     const ref = firestoreSdk.doc(db, 'users', uid, 'trial', 'proTemplateDownloads');
@@ -312,6 +403,10 @@ export function createFirebaseCloudClient({ config = firebaseConfig, loadSdk = l
     setLastWorkedResumeId,
     saveResume,
     deleteResume,
+    createSharedResume,
+    listSharedResumes,
+    getSharedResume,
+    revokeSharedResume,
     getProTemplateDownloadStatus,
     consumeProTemplateDownload
   };
@@ -329,5 +424,9 @@ export const getLastWorkedResumeId = defaultClient.getLastWorkedResumeId;
 export const setLastWorkedResumeId = defaultClient.setLastWorkedResumeId;
 export const saveResume = defaultClient.saveResume;
 export const deleteResume = defaultClient.deleteResume;
+export const createSharedResume = defaultClient.createSharedResume;
+export const listSharedResumes = defaultClient.listSharedResumes;
+export const getSharedResume = defaultClient.getSharedResume;
+export const revokeSharedResume = defaultClient.revokeSharedResume;
 export const getProTemplateDownloadStatus = defaultClient.getProTemplateDownloadStatus;
 export const consumeProTemplateDownload = defaultClient.consumeProTemplateDownload;

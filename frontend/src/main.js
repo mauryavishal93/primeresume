@@ -21,7 +21,7 @@ import {
 } from './resume-persistence.js';
 import { buildResumePdf, drawPdfText } from './resume-pdf.js';
 import {
- cloudConfigured, consumeProTemplateDownload, deleteResume, getAccountProfile, getLastWorkedResumeId, getProTemplateDownloadStatus, googleSignInErrorMessage, listResumes, observeAuth, saveResume, setLastWorkedResumeId,
+ cloudConfigured, consumeProTemplateDownload, createSharedResume, deleteResume, getAccountProfile, getLastWorkedResumeId, getProTemplateDownloadStatus, getSharedResume, googleSignInErrorMessage, listResumes, listSharedResumes, observeAuth, revokeSharedResume, saveResume, setLastWorkedResumeId,
  signInWithGoogle, signOutUser
 } from './firebase-cloud.js';
 import { getAccountPhotoUrls, setAccountAvatar } from './account-avatar.js';
@@ -33,8 +33,15 @@ const baseDocumentTitle=document.title;
 const clamp=(v,min,max,def)=>{v=Number(v);return Number.isFinite(v)?Math.max(min,Math.min(max,v)):def};
 const PAGE_W=794,PAGE_H=1122,DEFAULT_MARGIN=32,FONTS=['Arial','Georgia','Verdana','Trebuchet MS','Times New Roman','Courier New'];
 const homepageDemoMode=new URLSearchParams(location.search).get('homepageDemo')==='1';
+const incomingShareId=new URLSearchParams(location.search).get('share')||'';
+const publicPdfMode=new URLSearchParams(location.search).get('pdf')==='1';
+const publicShareOrigin=['localhost','127.0.0.1'].includes(location.hostname)
+ ?'https://resumeout.vercel.app'
+ :location.origin;
 document.documentElement.classList.toggle('homepage-demo',homepageDemoMode);
 document.body.classList.toggle('homepage-demo',homepageDemoMode);
+document.documentElement.classList.toggle('public-resume-pdf',publicPdfMode);
+document.body.classList.toggle('public-resume-pdf',publicPdfMode);
 fitHomepageDemoViewport();
 const KNOWN_TYPES=['summary','experience','education','skills','projects','certifications','custom'];
 const SKILL_STYLES=[['tags','Tags'],['pills','Pills'],['outlined','Outlined'],['list','Simple list'],['inline','Inline'],['grid','Grid'],['soft','Soft color'],['gradient','Gradient'],['underline','Underline'],['numbered','Numbered'],['compact','Compact'],['dense','Dense (space-saving)']];
@@ -119,7 +126,7 @@ const browserStorage=homepageDemoMode
  :{getItem:(...args)=>window.localStorage.getItem(...args),setItem:(...args)=>window.localStorage.setItem(...args),removeItem:(...args)=>window.localStorage.removeItem(...args)};
 const guestResumeStorage=createGuestResumeStorage(browserStorage,normalizeState);
 let lastWorkedResumeWrite=Promise.resolve();
-let guestResumeLoaded=false,guestResumeDirty=false,wizardResumeDraftPending=false,authGeneration=0,authStateResolved=false,cloudSessionGeneration=0,cloudReady=false,cloudDraftDirty=false;
+let guestResumeLoaded=false,guestResumeDirty=false,wizardResumeDraftPending=false,authGeneration=0,authStateResolved=false,cloudSessionGeneration=0,cloudReady=false,cloudDraftDirty=false,sharedCopyMode=!!incomingShareId,sharedResumeName='';
 let verifiedEntitlement=null,pendingProTemplate=null,pendingUpgradeFeature='';
 let billingPricingConfig=null;
 let cloudUser=null,activeCloudResumeId=null,activeCloudRevision=null,cloudSaveTimer=null,cloudSaving=false,cloudSavePending=false,cloudSaveBlocked=false,cloudResumes=[],proTemplateDownloadsRemaining=null,openCloudOnAuth=new URLSearchParams(location.search).get('open')==='cloud';
@@ -193,17 +200,18 @@ function setSaveState(message){
   }
 }
 function currentSaveStateLabel(){
+  if(sharedCopyMode)return 'Shared copy — not saved';
   if(cloudUser)return cloudSaveBlocked?'Unable to save changes':'All changes saved';
   return guestResumeStorage.enabled?'Saved locally':'Browser saving is off. Refreshing will discard your resume.';
 }
 function updateBrowserPersistenceUI(){
  const toggle=$('browserSaveControl'),input=$('browserSaveToggle');
- if(toggle)toggle.hidden=!shouldShowBrowserSaveToggle(cloudUser,authStateResolved);
+ if(toggle)toggle.hidden=sharedCopyMode||!shouldShowBrowserSaveToggle(cloudUser,authStateResolved);
  if(input)input.checked=guestResumeStorage.enabled;
  if(!cloudUser&&!saveTimer&&!localPersistenceBlocked)setSaveState(currentSaveStateLabel());
 }
 function scheduleCloudSave(){
- if(!cloudUser||!cloudReady||cloudSaveBlocked)return;
+ if(sharedCopyMode||!cloudUser||!cloudReady||cloudSaveBlocked)return;
  clearTimeout(cloudSaveTimer);
  cloudSaveTimer=setTimeout(persistCloudResume,700);
 }
@@ -223,7 +231,7 @@ async function rememberLastWorkedResume(uid,resumeId,generation=cloudSessionGene
  }
 }
 async function persistCloudResume(){
- if(!cloudUser||!cloudReady||cloudSaveBlocked)return;
+ if(sharedCopyMode||!cloudUser||!cloudReady||cloudSaveBlocked)return;
  if(cloudSaving){cloudSavePending=true;return}
  const uid=cloudUser.uid,id=activeCloudResumeId,generation=cloudSessionGeneration,snapshot=deep(state),expectedRevision=id?activeCloudRevision:null;
  cloudSaving=true;
@@ -250,6 +258,7 @@ async function persistCloudResume(){
 }
 function saveLocal(syncCloud=true){
  saveActiveFreeLayout();
+ if(sharedCopyMode){setSaveState('Shared copy — not saved');return}
  const persistenceMode=resumeStorageMode(cloudUser,guestResumeStorage.enabled);
  if(persistenceMode==='cloud'){
   cloudDraftDirty=true;
@@ -387,6 +396,250 @@ async function removeCloudResume(id){
   toast('Cloud resume deleted.');
  }catch(error){toast(error.message||'Could not delete this cloud resume.')}
 }
+function resumeShareUrl(id){
+ const url=new URL('/editor.html',publicShareOrigin);
+ url.searchParams.set('share',id);
+ url.searchParams.set('pdf','1');
+ return url.toString();
+}
+function resumeEditUrl(id){
+ const url=new URL('/editor.html',publicShareOrigin);
+ url.searchParams.set('share',id);
+ return url.toString();
+}
+async function copyResumeShareLink(value,input=null){
+ try{
+  await navigator.clipboard.writeText(value);
+ }catch(error){
+  if(input){
+   input.focus();
+   input.select();
+   if(document.execCommand('copy')){toast('Share link copied.');return}
+  }
+  toast(input?'Could not copy the link. Select and copy it from the text field.':'Could not access the clipboard. Open the share link and copy it manually.');
+  return;
+ }
+ toast('Share link copied.');
+}
+async function refreshSharedResumeList(){
+ const list=$('sharedResumeList');
+ list.replaceChildren();
+ if(!cloudUser){list.textContent='Sign in to manage your active share links.';return}
+ list.textContent='Loading your share links…';
+ try{
+  const uid=cloudUser.uid,generation=cloudSessionGeneration;
+  const shares=await listSharedResumes(uid);
+  if(cloudUser?.uid!==uid||cloudSessionGeneration!==generation)return;
+  list.replaceChildren();
+  if(!shares.length){list.textContent='You have no active share links.';return}
+  for(const share of shares){
+   const row=document.createElement('div');
+   row.className='resume-share-item';
+   const details=document.createElement('div');
+   const title=document.createElement('strong');
+   title.textContent=share.name;
+   const link=document.createElement('a');
+   link.href=resumeShareUrl(share.id);
+   link.textContent='View public PDF';
+   link.target='_blank';
+   link.rel='noopener noreferrer';
+   details.append(title,link);
+   const editLink=document.createElement('a');
+   editLink.href=resumeEditUrl(share.id);
+   editLink.textContent='Open editable copy';
+   editLink.target='_blank';
+   editLink.rel='noopener noreferrer';
+   details.append(editLink);
+   const actions=document.createElement('div');
+   actions.className='resume-share-item-actions';
+   const copy=document.createElement('button');
+   copy.className='btn outline small';
+   copy.type='button';
+   copy.dataset.copyShare=share.id;
+   copy.textContent='Copy link';
+   const revoke=document.createElement('button');
+   revoke.className='btn danger small';
+   revoke.type='button';
+   revoke.dataset.revokeShare=share.id;
+   revoke.textContent='Revoke';
+   actions.append(copy,revoke);
+   row.append(details,actions);
+   list.append(row);
+  }
+ }catch(error){
+  console.error('Could not load your resume share links.',error);
+  list.textContent=error.message||'Could not load your share links. Try again.';
+ }
+}
+function openShareResumeModal(){
+ if(!cloudUser){toast('Sign in with Google to create and manage resume share links.');return}
+ $('resumeShareLinkResult').hidden=true;
+ $('resumeShareLink').value='';
+ $('shareResumeModalBg').classList.add('show');
+ $('shareResumeModalBg').setAttribute('aria-hidden','false');
+ refreshSharedResumeList();
+}
+function closeShareResumeModal(){
+ $('shareResumeModalBg').classList.remove('show');
+ $('shareResumeModalBg').setAttribute('aria-hidden','true');
+}
+async function createResumeShareLink(){
+ if(!cloudUser){toast('Sign in with Google to create a share link.');return}
+ const button=$('createResumeShare');
+ button.disabled=true;
+ button.setAttribute('aria-busy','true');
+ try{
+  const uid=cloudUser.uid,generation=cloudSessionGeneration;
+  saveActiveFreeLayout();
+  const snapshot=deep(state);
+  const share=await createSharedResume(uid,snapshot.docName,snapshot,activeCloudResumeId||'');
+  if(cloudUser?.uid!==uid||cloudSessionGeneration!==generation)return;
+  const link=resumeShareUrl(share.id);
+  $('resumeShareLink').value=link;
+  $('resumeShareLinkResult').hidden=false;
+  await refreshSharedResumeList();
+  toast('Public PDF link created.');
+ }catch(error){
+  console.error('Could not create a resume share link.',error);
+  toast(error.message||'Could not create a resume share link.');
+ }finally{
+  button.disabled=false;
+  button.removeAttribute('aria-busy');
+ }
+}
+async function revokeResumeShare(id){
+ if(!cloudUser)return;
+ const confirmed=await confirmModern({
+  title:'Revoke resume link?',
+  message:'Anyone using this link will no longer be able to open the shared resume.',
+  confirmText:'Revoke link',
+  cancelText:'Keep link',
+  variant:'danger'
+ });
+ if(!confirmed)return;
+ const uid=cloudUser.uid,generation=cloudSessionGeneration;
+ try{
+  await revokeSharedResume(uid,id);
+  if(cloudUser?.uid!==uid||cloudSessionGeneration!==generation)return;
+  if($('resumeShareLink').value===resumeShareUrl(id)){
+   $('resumeShareLinkResult').hidden=true;
+   $('resumeShareLink').value='';
+  }
+  await refreshSharedResumeList();
+  toast('Resume share link revoked.');
+ }catch(error){
+  console.error('Could not revoke the resume share link.',error);
+  toast(error.message||'Could not revoke this resume share link.');
+ }
+}
+async function loadIncomingSharedResume(){
+ const status=$('incomingShareStatus');
+ $('incomingShareModalBg').classList.add('show');
+ $('incomingShareModalBg').setAttribute('aria-hidden','false');
+ status.textContent='Loading the shared resume…';
+ try{
+  const shared=await getSharedResume(incomingShareId);
+  state=normalizeState(shared.state);
+  sharedResumeName=shared.name;
+  state.docName=shared.name;
+  selectedId=null;
+  history=[];redoHistory=[];
+  $('sharedCopyTitle').textContent=shared.name;
+  $('sharedCopyNotice').hidden=false;
+  $('incomingShareModalBg').classList.remove('show');
+  $('incomingShareModalBg').setAttribute('aria-hidden','true');
+  render();
+  setSaveState('Shared copy — not saved');
+  if(!publicPdfMode)window.history.replaceState(null,'',location.pathname+location.hash);
+  if(publicPdfMode){
+   $('sharedCopyNotice').hidden=true;
+   $('cancelPdfPreview').textContent='Close';
+   $('closePdfPreview').setAttribute('aria-label','Close public resume PDF');
+   setTimeout(()=>void exportPDF(),0);
+  }
+ }catch(error){
+  console.error('Could not open the shared resume.',error);
+  status.textContent=error.code==='permission-denied'
+   ?'This resume share link is unavailable. Ask the owner for a new link.'
+   :error.message||'This shared resume could not be opened.';
+  $('incomingShareLoading').hidden=true;
+  $('incomingShareError').hidden=false;
+ }
+}
+async function saveIncomingSharedCopy(){
+ if(!sharedCopyMode)return;
+ if(!cloudUser){toast('Sign in with Google to save your own editable copy.');return}
+ const button=$('saveSharedCopyBtn');
+ button.disabled=true;
+ button.setAttribute('aria-busy','true');
+ try{
+  const uid=cloudUser.uid,generation=cloudSessionGeneration;
+  saveActiveFreeLayout();
+  const copy=deep(state);
+  const name=copy.docName||`${sharedResumeName} (copy)`;
+  const result=await saveResume(uid,null,name,copy,null);
+  if(cloudUser?.uid!==uid||cloudSessionGeneration!==generation)return;
+  copy.docName=name;
+  state=copy;
+  sharedCopyMode=false;
+  cloudReady=true;
+  cloudSaveBlocked=false;
+  cloudDraftDirty=false;
+  activeCloudResumeId=result.id;
+  activeCloudRevision=result.revision;
+  $('sharedCopyNotice').hidden=true;
+  render();
+  void rememberLastWorkedResume(uid,result.id,cloudSessionGeneration);
+  setSaveState('All changes saved');
+  await refreshCloudResumes();
+  toast('Your editable cloud copy is saved. The shared original was not changed.');
+ }catch(error){
+  console.error('Could not save your copy of the shared resume.',error);
+  toast(error.message||'Could not save your copy of the shared resume.');
+ }finally{
+  button.disabled=false;
+  button.removeAttribute('aria-busy');
+ }
+}
+function updateSharedCopyAuth(user){
+ cloudUser=user;
+ cloudReady=false;
+ activeCloudResumeId=null;
+ activeCloudRevision=null;
+ cloudResumes=[];
+ $('googleSignInBtn').hidden=!!user;
+ $('cloudActions').hidden=!!user;
+ $('accountMenu').hidden=false;
+ $('cloudResumesBtn').hidden=!user;
+ $('myPostsLink').hidden=!user;
+ $('myAccountLink').hidden=!user;
+ $('googleSignOutBtn').hidden=!user;
+ $('googleSignOutBtn').disabled=false;
+ $('googleSignOutBtn').textContent='Sign out';
+ $('saveSharedCopyBtn').disabled=!user;
+ if(user){
+  const accountName=user.displayName?.trim()||user.email?.split('@')[0]||'Google user';
+  const initial=Array.from(accountName)[0]?.toLocaleUpperCase()||'U';
+  $('accountUserName').textContent=accountName;
+  $('accountUserEmail').textContent=user.email||'';
+  $('accountAvatar').textContent=initial;
+  $('accountAvatarLarge').textContent=initial;
+  setAccountAvatar($('accountAvatar'),initial,getAccountPhotoUrls(user));
+  setAccountAvatar($('accountAvatarLarge'),initial,getAccountPhotoUrls(user));
+  $('accountMenu').querySelector('summary').setAttribute('aria-label',`Account menu for ${accountName}`);
+ }else{
+  $('accountUserName').textContent='Guest';
+  $('accountUserEmail').textContent='';
+  $('accountAvatar').textContent='G';
+  $('accountAvatarLarge').textContent='G';
+  setAccountAvatar($('accountAvatar'),'G');
+  setAccountAvatar($('accountAvatarLarge'),'G');
+  $('accountMenu').querySelector('summary').setAttribute('aria-label','Account menu');
+ }
+ $('cloudAccount').textContent=user?`Signed in as ${user.email||user.displayName||'Google user'}.`:'Sign in to save your own copy.';
+ updateBrowserPersistenceUI();
+ setSaveState('Shared copy — not saved');
+}
 async function updateCloudAccount(user,error){
  authStateResolved=true;
  if(error){
@@ -415,6 +668,10 @@ async function updateCloudAccount(user,error){
   renderCloudResumes();
   renderTemplates();
   updateBrowserPersistenceUI();
+  return;
+ }
+ if(sharedCopyMode){
+  updateSharedCopyAuth(user);
   return;
  }
  const previousUser=cloudUser;
@@ -1791,7 +2048,7 @@ async function exportPDF(templateId=null){
  const generation=++pdfPreviewGeneration;
  const btn=$('pdfBtn'),status=$('pdfPreviewStatus'),frame=$('pdfPreviewFrame'),downloadBtn=$('downloadPdfPreview');
  openPdfPreview();
- $('pdfPreviewTitle').textContent='Preview your resume PDF';
+ $('pdfPreviewTitle').textContent=publicPdfMode?'Public resume PDF':'Preview your resume PDF';
  status.textContent='Preparing your PDF preview…';
  frame.hidden=true;
  $('pdfPreviewPages').replaceChildren();
@@ -1823,7 +2080,8 @@ async function exportPDF(templateId=null){
    resumeState:state,
   });
   if(generation!==pdfPreviewGeneration)return;
-  showPdfPreview(blob,`${(state.docName||'resume').replace(/[^a-z0-9-_]+/gi,'-')}.pdf`,sheets.length,'Preview your resume PDF',renderedPages.map(page=>page.image));
+  if(publicPdfMode)document.body.classList.add('public-resume-pdf-ready');
+  showPdfPreview(blob,`${(state.docName||'resume').replace(/[^a-z0-9-_]+/gi,'-')}.pdf`,sheets.length,publicPdfMode?'Public resume PDF':'Preview your resume PDF',renderedPages.map(page=>page.image));
  }catch(e){
   console.error(e);
   status.textContent=e.message||'PDF preview could not be created. Close this window and try again.';
@@ -1899,6 +2157,7 @@ async function renderMobilePdfPages(blob,generation){
  }
 }
 function closePdfPreview(){
+ if(publicPdfMode){location.assign('/home.html');return}
  pdfPreviewGeneration++;
  $('pdfPreviewModalBg').classList.remove('show');
  $('pdfPreviewModalBg').setAttribute('aria-hidden','true');
@@ -1919,7 +2178,7 @@ async function downloadPreviewPdf(){
  button.disabled=true;
  button.textContent='Preparing download…';
  try{
-  if(usesProTemplate&&!canUseFeature(FEATURE_IDS.ALL_TEMPLATES,verifiedEntitlement)){
+  if(usesProTemplate&&!publicPdfMode&&!canUseFeature(FEATURE_IDS.ALL_TEMPLATES,verifiedEntitlement)){
    if(!cloudUser){
     closePdfPreview();
     showUpgrade('template-trial-sign-in','Sign in for free Pro-template downloads','Sign in with Google to use Pro templates and get two lifetime Pro-template PDF downloads.');
@@ -3648,6 +3907,21 @@ $('resumeImportModalBg').addEventListener('click',event=>{if(event.target===$('r
  $('closeCloudModal').addEventListener('click',closeCloudModal);
  $('closeCloudModalAction').addEventListener('click',closeCloudModal);
  $('cloudModalBg').addEventListener('click',event=>{if(event.target===$('cloudModalBg'))closeCloudModal()});
+ $('shareResumeBtn').addEventListener('click',openShareResumeModal);
+ $('closeShareResume').addEventListener('click',closeShareResumeModal);
+ $('closeShareResumeAction').addEventListener('click',closeShareResumeModal);
+ $('shareResumeModalBg').addEventListener('click',event=>{if(event.target===$('shareResumeModalBg'))closeShareResumeModal()});
+ $('createResumeShare').addEventListener('click',()=>void createResumeShareLink());
+ $('copyResumeShare').addEventListener('click',()=>void copyResumeShareLink($('resumeShareLink').value,$('resumeShareLink')));
+ $('refreshSharedResumes').addEventListener('click',()=>void refreshSharedResumeList());
+ $('sharedResumeList').addEventListener('click',event=>{
+  const copy=event.target.closest('[data-copy-share]');
+  const revoke=event.target.closest('[data-revoke-share]');
+  if(copy){const link=resumeShareUrl(copy.dataset.copyShare);void copyResumeShareLink(link)}
+  if(revoke)void revokeResumeShare(revoke.dataset.revokeShare);
+ });
+ $('saveSharedCopyBtn').addEventListener('click',()=>void saveIncomingSharedCopy());
+ $('incomingShareModalBg').addEventListener('click',event=>{if(event.target===$('incomingShareModalBg')&&!$('incomingShareError').hidden)location.assign('/home.html')});
  $('refreshCloudResumes').addEventListener('click',refreshCloudResumes);
  $('closeUpgrade').addEventListener('click',closeUpgrade);
  $('cancelUpgrade').addEventListener('click',closeUpgrade);
@@ -3695,15 +3969,16 @@ document.addEventListener('keydown',e=>{
   if(!e.shiftKey){e.preventDefault();undo();return}
  }
  if(modifier&&(key==='y'||(key==='z'&&e.shiftKey))){e.preventDefault();redo();return}
- if(e.key==='Escape'){if($('modalBg').classList.contains('show'))closeCustomSectionDialog();closeResumeImport();closeAts();closeCoverLetter();closePdfPreview();closeCloudModal();closeUpgrade()}
+ if(e.key==='Escape'){if($('modalBg').classList.contains('show'))closeCustomSectionDialog();closeResumeImport();closeAts();closeCoverLetter();closePdfPreview();closeCloudModal();closeShareResumeModal();closeUpgrade()}
 });
 const savedProject=homepageDemoMode
+ ||sharedCopyMode
  ?{state:null,key:null,raw:null,error:null,failedKey:null}
  :guestResumeStorage.load();
 if(savedProject.state)state=savedProject.state;
 guestResumeLoaded=Boolean(savedProject.state);
 let wizardDraftLoaded=false,wizardDraftError='',wizardDraftWarning='';
-if(requestedWizardResume){
+if(requestedWizardResume&&!sharedCopyMode){
  try{
   const serializedDraft=window.sessionStorage.getItem(RESUME_WIZARD_DRAFT_KEY);
   if(!serializedDraft)throw new Error('The resume wizard details could not be found in this browser session.');
@@ -3724,12 +3999,13 @@ if(requestedWizardResume){
  clearWizardResumeParam();
 }
 showRecoveryNotice(wizardDraftLoaded?{error:null}:savedProject);
-if(requestedHomepageTemplateId){
+if(requestedHomepageTemplateId&&!sharedCopyMode){
  if(applyHomepageTemplate())saveLocal();
  clearHomepageTemplateParam();
 }
 if(wizardDraftLoaded)saveLocal();
 addEventListener('pagehide',()=>{
+ if(sharedCopyMode)return;
  const persistenceMode=resumeStorageMode(cloudUser,guestResumeStorage.enabled);
  if(persistenceMode==='cloud'){
   if(cloudReady&&!cloudSaveBlocked){clearTimeout(cloudSaveTimer);void persistCloudResume()}
@@ -3760,6 +4036,7 @@ if(guestResumeStorage.preferenceError)setSaveState('Unable to save changes');
 if(wizardDraftError)toast(`${wizardDraftError} Please return to the wizard and try again.`);
 else if(wizardDraftWarning)toast(wizardDraftWarning);
 if(!homepageDemoMode){
+ if(incomingShareId)void loadIncomingSharedResume();
  if(!cloudConfigured)updateCloudAccount(null,new Error('Add the Firebase web-app settings to enable cloud saving.'));
  else observeAuth(updateCloudAccount);
 }

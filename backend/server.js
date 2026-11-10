@@ -39,7 +39,7 @@ app.use((request, response, next) => {
   const hostname = String(request.hostname || '').toLowerCase();
   const isApiRequest = request.path === '/api' || request.path.startsWith('/api/');
   if (hostname === 'buildmyportfolio.onrender.com' && !isApiRequest) {
-    return response.redirect(301, `https://primeresume-ten.vercel.app${request.originalUrl || '/'}`);
+    return response.redirect(301, `https://resumeout.vercel.app${request.originalUrl || '/'}`);
   }
   next();
 });
@@ -880,6 +880,7 @@ app.get('/api/health', (_request, response) => {
 
 app.use('/api/billing/webhook', express.raw({ type: 'application/json', limit: '256kb' }));
 app.use('/api/account/profile', express.json({ limit: '160kb' }));
+app.use('/api/shared-resumes', express.json({ limit: '900kb' }));
 app.use(express.json({ limit: '32kb' }));
 
 app.use('/api/forum', (_request, response, next) => {
@@ -949,6 +950,128 @@ app.put('/api/account/profile', requireFirebaseUser, async (request, response) =
   } catch (error) {
     console.error('Could not save the account profile.', error);
     response.status(500).json({ error: 'Could not save your account details. Please try again.' });
+  }
+});
+
+app.use('/api/shared-resumes', (_request, response, next) => {
+  response.set('Cache-Control', 'no-store');
+  next();
+});
+
+app.post('/api/shared-resumes', requireFirebaseUser, async (request, response) => {
+  const name = typeof request.body?.name === 'string' ? request.body.name.trim() : '';
+  const sourceResumeId = typeof request.body?.sourceResumeId === 'string' ? request.body.sourceResumeId : '';
+  const state = request.body?.state;
+  if (!name || name.length > 120 || sourceResumeId.length > 1500
+    || !state || typeof state !== 'object' || Array.isArray(state)) {
+    response.status(400).json({ error: 'The resume name or data is invalid and cannot be shared.' });
+    return;
+  }
+  if (Buffer.byteLength(JSON.stringify(state), 'utf8') > 800 * 1024) {
+    response.status(413).json({ error: 'This resume is too large to share. Remove large images or content, then try again.' });
+    return;
+  }
+  try {
+    const { db } = await getFirebaseAdmin();
+    const collection = db.collection('sharedResumes');
+    const existing = await collection.where('ownerUid', '==', request.user.uid).limit(50).get();
+    if (existing.size >= 50) {
+      response.status(409).json({ error: 'You have reached the limit of 50 active share links. Revoke a link before creating another.' });
+      return;
+    }
+    const reference = collection.doc();
+    await reference.set({
+      ownerUid: request.user.uid,
+      sourceResumeId,
+      name,
+      state,
+      active: true,
+      createdAt: new Date()
+    });
+    response.status(201).json({ id: reference.id });
+  } catch (error) {
+    console.error('Could not create a shared resume.', error);
+    response.status(500).json({ error: 'Could not create a share link. Please try again.' });
+  }
+});
+
+app.get('/api/shared-resumes', requireFirebaseUser, async (request, response) => {
+  try {
+    const { db } = await getFirebaseAdmin();
+    const result = await db.collection('sharedResumes')
+      .where('ownerUid', '==', request.user.uid)
+      .limit(50)
+      .get();
+    const shares = result.docs.map(document => {
+      const data = document.data();
+      if (data.ownerUid !== request.user.uid || typeof data.name !== 'string'
+        || typeof data.active !== 'boolean') {
+        throw new Error('A stored resume share has invalid data.');
+      }
+      const createdAt = data.createdAt instanceof Date
+        ? data.createdAt.getTime()
+        : data.createdAt?.toMillis?.() ?? 0;
+      return {
+        id: document.id,
+        name: data.name,
+        sourceResumeId: typeof data.sourceResumeId === 'string' ? data.sourceResumeId : '',
+        active: data.active,
+        createdAt
+      };
+    }).sort((left, right) => right.createdAt - left.createdAt);
+    response.json({ shares });
+  } catch (error) {
+    console.error('Could not list shared resumes.', error);
+    response.status(500).json({ error: 'Could not load your share links. Please try again.' });
+  }
+});
+
+app.get('/api/shared-resumes/:shareId', async (request, response) => {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(request.params.shareId)) {
+    response.status(400).json({ error: 'This resume share link is invalid.' });
+    return;
+  }
+  try {
+    const { db } = await getFirebaseAdmin();
+    const snapshot = await db.collection('sharedResumes').doc(request.params.shareId).get();
+    if (!snapshot.exists || snapshot.data().active !== true) {
+      response.status(404).json({ error: 'This resume share link is unavailable. Ask the owner for a new link.' });
+      return;
+    }
+    const { name, state } = snapshot.data();
+    if (typeof name !== 'string' || !state || typeof state !== 'object' || Array.isArray(state)) {
+      response.status(500).json({ error: 'This shared resume is invalid and cannot be opened.' });
+      return;
+    }
+    response.json({ name, state });
+  } catch (error) {
+    console.error('Could not open a shared resume.', error);
+    response.status(500).json({ error: 'Could not open this shared resume. Please try again.' });
+  }
+});
+
+app.delete('/api/shared-resumes/:shareId', requireFirebaseUser, async (request, response) => {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(request.params.shareId)) {
+    response.status(400).json({ error: 'This resume share link is invalid.' });
+    return;
+  }
+  try {
+    const { db } = await getFirebaseAdmin();
+    const reference = db.collection('sharedResumes').doc(request.params.shareId);
+    const snapshot = await reference.get();
+    if (!snapshot.exists) {
+      response.status(404).json({ error: 'This resume share link is already unavailable.' });
+      return;
+    }
+    if (snapshot.data().ownerUid !== request.user.uid) {
+      response.status(403).json({ error: 'You can only revoke share links that you created.' });
+      return;
+    }
+    await reference.delete();
+    response.status(204).end();
+  } catch (error) {
+    console.error('Could not revoke a shared resume.', error);
+    response.status(500).json({ error: 'Could not revoke this share link. Please try again.' });
   }
 });
 

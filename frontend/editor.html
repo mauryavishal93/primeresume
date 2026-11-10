@@ -7,7 +7,7 @@
 <link rel="icon" type="image/svg+xml" href="/images/resumeout-mark.svg">
 <script>
 if (location.hostname.toLowerCase() === 'buildmyportfolio.onrender.com') {
- location.replace(`https://https://primeresume-ten.vercel.app${location.pathname}${location.search}${location.hash}`);
+ location.replace(`https://resumeout.vercel.app${location.pathname}${location.search}${location.hash}`);
 }
 </script>
 <link rel="stylesheet" href="/src/style.css">
@@ -90,6 +90,27 @@ if (location.hostname.toLowerCase() === 'buildmyportfolio.onrender.com') {
     </div>
   </section>
 </div>
+<div class="modal-bg share-resume-modal-bg" id="shareResumeModalBg" aria-hidden="true">
+ <section class="modal share-resume-modal" role="dialog" aria-modal="true" aria-labelledby="shareResumeTitle">
+  <div class="cloud-modal-head">
+   <div><p class="eyebrow">PUBLIC PDF LINK</p><h2 id="shareResumeTitle">Share your resume</h2><p class="ats-subtitle">Create a public link that opens a PDF view of this resume. Anyone with the link can see and download it.</p></div>
+   <button class="size-btn" id="closeShareResume" type="button" aria-label="Close resume sharing">✕</button>
+  </div>
+  <div class="share-resume-warning"><strong>Anyone with this public link can view every page and section in the resume PDF.</strong><span>The link contains a complete snapshot of the current resume, including contact details and profile image. It will not update when you edit the resume, and you can revoke it here at any time.</span></div>
+  <div class="modal-actions share-resume-create-actions"><button class="btn primary" id="createResumeShare" type="button">Create public PDF link</button><button class="btn soft" id="closeShareResumeAction" type="button">Done</button></div>
+  <div class="share-resume-link-result" id="resumeShareLinkResult" hidden><label for="resumeShareLink">Public PDF link</label><div><input id="resumeShareLink" type="url" readonly><button class="btn outline" id="copyResumeShare" type="button">Copy link</button></div></div>
+  <div class="share-resume-list-head"><h3>Your active share links</h3><button class="btn outline small" id="refreshSharedResumes" type="button">Refresh</button></div>
+  <div class="resume-share-list" id="sharedResumeList" aria-live="polite">Sign in with Google to manage your share links.</div>
+ </section>
+</div>
+<div class="modal-bg incoming-share-modal-bg" id="incomingShareModalBg" aria-hidden="true">
+ <section class="modal incoming-share-modal" role="dialog" aria-modal="true" aria-labelledby="incomingShareTitle">
+  <h2 id="incomingShareTitle">Opening shared resume</h2>
+  <p id="incomingShareStatus" role="status" aria-live="polite">Loading the shared resume…</p>
+  <div id="incomingShareLoading"><span class="feature-progress-spinner" aria-hidden="true"></span></div>
+  <div id="incomingShareError" hidden><p>The link may have been revoked or is no longer available.</p><a class="btn primary" href="/home.html">Go to ResumeOut.com</a></div>
+ </section>
+</div>
 <div class="layout" id="layout" data-mobile-panel="resume">
  <aside class="left" id="leftPanel">
   <div class="panel-grip left-grip" id="leftGrip" title="Drag to resize panel"></div>
@@ -136,6 +157,10 @@ if (location.hostname.toLowerCase() === 'buildmyportfolio.onrender.com') {
    </div>
    <button class="btn outline small" id="dismissOnboarding" type="button">Start editing</button>
   </section>
+  <section class="shared-copy-notice" id="sharedCopyNotice" hidden aria-live="polite">
+   <div><strong>Editing a shared copy: <span id="sharedCopyTitle"></span></strong><span>Your edits won’t change the owner’s resume. Save a separate copy to your Google account to keep your changes.</span></div>
+   <button class="btn primary small" id="saveSharedCopyBtn" type="button" disabled>Save copy to my cloud</button>
+  </section>
   <div class="toolbar" aria-label="Resume editing tools" data-collapsed="true">
    <button class="toolbar-toggle" id="toggleResumeTools" type="button" aria-expanded="false" aria-controls="resumeToolbarControls">
     <span>Resume editing tools</span>
@@ -171,6 +196,10 @@ if (location.hostname.toLowerCase() === 'buildmyportfolio.onrender.com') {
    <button class="btn outline small toolbar-btn icon-btn" id="saveBtn" type="button" aria-label="Download JSON project">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v10"/><path d="M8 18l4 4 4-4"/><path d="M4 14v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
     <span>Download JSON</span>
+   </button>
+   <button class="btn outline small toolbar-btn icon-btn" id="shareResumeBtn" type="button" aria-label="Share resume">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.7 10.6 6.6-4.2M8.7 13.4l6.6 4.2"/></svg>
+    <span>Share resume</span>
    </button>
    <button class="btn outline small toolbar-btn icon-btn" id="atsBtn" type="button" aria-label="Run ATS check">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v6"/><path d="M12 18v2"/><path d="M4.93 4.93l4.24 4.24"/><path d="M14.83 14.83l4.24 4.24"/><path d="M20 12h-2"/><path d="M4 12h2"/><path d="M14.83 9.17l4.24-4.24"/><path d="M4.93 19.07l4.24-4.24"/></svg>

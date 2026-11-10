@@ -448,6 +448,43 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 .cloud-empty{padding:18px;border:1px dashed var(--line);border-radius:9px;color:var(--muted);font-size:12px;text-align:center}
 .cloud-modal>.modal-actions{flex:none;flex-wrap:wrap}
 @media(max-width:480px){.cloud-modal{padding:14px}.cloud-modal-head{gap:8px}.cloud-modal-head h2{font-size:16px}.cloud-modal>.modal-actions{flex-direction:column;gap:6px}.cloud-modal>.modal-actions .btn{width:100%}.cloud-resume-item{gap:5px;padding:8px}.cloud-resume-item .btn{padding:6px;font-size:10px}}
+.share-resume-modal{display:flex;width:min(620px,calc(100vw - 32px));max-height:calc(100vh - 32px);max-height:calc(100dvh - 32px);flex-direction:column;gap:14px;overflow:auto;color:var(--ink)}
+.share-resume-modal .cloud-modal-head{align-items:flex-start}
+.share-resume-modal .cloud-modal-head h2{margin:0}
+.share-resume-warning{display:grid;gap:4px;padding:12px;border:1px solid #f1d29a;border-radius:10px;background:#fff8e9;color:#6b4c15;font-size:12px}
+.share-resume-warning span{line-height:1.5}
+.share-resume-create-actions{justify-content:flex-start;margin:0}
+.share-resume-link-result{display:grid;gap:6px}
+.share-resume-link-result label,.share-resume-list-head h3{margin:0;font-size:13px;font-weight:800}
+.share-resume-link-result>div{display:flex;gap:8px;min-width:0}
+.share-resume-link-result input{flex:1;min-width:0}
+.share-resume-list-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding-top:8px;border-top:1px solid var(--line)}
+.resume-share-list{display:grid;gap:8px;min-height:40px;max-height:240px;overflow:auto;color:var(--muted);font-size:12px}
+.resume-share-item{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px;border:1px solid var(--line);border-radius:9px;background:var(--panel);color:var(--ink)}
+.resume-share-item>div:first-child{display:grid;min-width:0;gap:3px}
+.resume-share-item strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.resume-share-item a{color:var(--purple);font-size:11px;overflow-wrap:anywhere}
+.resume-share-item-actions{display:flex;flex:0 0 auto;gap:6px}
+.shared-copy-notice{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 12px;padding:12px 14px;border:1px solid #a9c8ff;border-radius:12px;background:#eef5ff;color:#203a64}
+.shared-copy-notice[hidden]{display:none}
+.shared-copy-notice>div{display:grid;gap:3px;min-width:0}
+.shared-copy-notice>div>span{font-size:12px;line-height:1.45}
+.shared-copy-notice .btn{flex:0 0 auto}
+.incoming-share-modal{display:grid;justify-items:center;gap:10px;width:min(420px,calc(100vw - 32px));text-align:center;color:var(--ink)}
+.incoming-share-modal p{margin:0;color:var(--muted)}
+.incoming-share-modal #incomingShareLoading{padding:10px}
+.incoming-share-modal #incomingShareError{display:grid;justify-items:center;gap:12px}
+:root[data-theme=dark] .share-resume-warning{border-color:#66512a;background:#322b1c;color:#f0d99c}
+:root[data-theme=dark] .shared-copy-notice{border-color:#35527c;background:#1a2a40;color:#dce9ff}
+@media(max-width:480px){.share-resume-modal{padding:14px;gap:10px}.share-resume-create-actions{flex-direction:column}.share-resume-create-actions .btn{width:100%}.resume-share-item{align-items:flex-start;flex-direction:column}.resume-share-item-actions{width:100%}.resume-share-item-actions .btn{flex:1}.share-resume-link-result>div{flex-direction:column}.shared-copy-notice{align-items:stretch;flex-direction:column}.shared-copy-notice .btn{width:100%}}
+body.public-resume-pdf-ready .topbar,body.public-resume-pdf-ready .layout,body.public-resume-pdf-ready #sharedCopyNotice{display:none!important}
+body.public-resume-pdf-ready #pdfPreviewModalBg.show{z-index:100;padding:0;background:#e9edf4}
+body.public-resume-pdf-ready .pdf-preview-modal{width:100%;height:100%;max-height:none;border-radius:0;padding:16px}
+body.public-resume-pdf-ready .pdf-preview-modal #cancelPdfPreview{display:none}
+body.public-resume-pdf-ready .pdf-preview-modal .modal-actions{justify-content:center}
+body.public-resume-pdf-ready .pdf-preview-modal #downloadPdfPreview{min-width:180px}
+body.public-resume-pdf #incomingShareModalBg.show{z-index:101}
+@media(max-width:600px){body.public-resume-pdf-ready .pdf-preview-modal{padding:max(8px,env(safe-area-inset-top)) 8px max(8px,env(safe-area-inset-bottom))}}
 @media(max-width:800px){.topbar{grid-template-areas:"brand docname docname docname docname" "cloud cloud cloud cloud cloud" "cover cover about pdf pdf"}.cloud-actions{grid-area:cloud;justify-content:center}.cloud-actions .btn{width:auto;padding:7px 9px}}
 .theme-switch{display:inline-flex;align-items:center;justify-content:center;gap:7px;flex:none;padding:5px 8px;border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--ink);font-size:12px;font-weight:700;line-height:1;cursor:pointer;transition:border-color .16s ease,background-color .16s ease}
 .theme-switch:hover{border-color:var(--purple)}

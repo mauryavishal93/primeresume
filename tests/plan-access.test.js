@@ -95,8 +95,8 @@ test('homepage demo embeds an isolated live editor preview on both landing pages
   const editorSource = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
   assert.match(editorSource, /document\.documentElement\.classList\.toggle\('homepage-demo',homepageDemoMode\)/);
   assert.match(editorSource, /document\.body\.classList\.toggle\('homepage-demo',homepageDemoMode\)/);
-  assert.match(editorSource, /const savedProject=homepageDemoMode\s*\?\{state:null,key:null,raw:null,error:null,failedKey:null\}/);
-  assert.match(editorSource, /if\(!homepageDemoMode\)\{\s+if\(!cloudConfigured\)/);
+  assert.match(editorSource, /const savedProject=homepageDemoMode\s*\|\|sharedCopyMode\s*\?\{state:null,key:null,raw:null,error:null,failedKey:null\}/);
+  assert.match(editorSource, /if\(!homepageDemoMode\)\{\s+if\(incomingShareId\)void loadIncomingSharedResume\(\);\s+if\(!cloudConfigured\)/);
   assert.match(editorSource, /if\(homepageDemoMode\)return;try\{localStorage\.setItem\('resumeStudioUI'/);
   assert.match(editorSource, /onboardingDismissed=homepageDemoMode/);
   assert.match(editorSource, /function fitHomepageDemoZoom\(\)\{\s+if\(!homepageDemoMode\)return;\s+const root=\$\('sheets'\),style=getComputedStyle\(root\)/);
@@ -496,4 +496,22 @@ test('Firestore rules scope the last-worked resume preference to its signed-in a
   assert.match(rules, /allow get: if request\.auth != null && request\.auth\.uid == userId/);
   assert.match(rules, /request\.resource\.data\.keys\(\)\.hasOnly\(\['lastWorkedResumeId'\]\)/);
   assert.match(rules, /request\.resource\.data\.lastWorkedResumeId is string/);
+});
+
+test('public resume links target the global PDF viewer and render a read-only PDF preview', () => {
+  const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
+  const styles = readFileSync(new URL('../frontend/src/style.css', import.meta.url), 'utf8');
+  const server = readFileSync(new URL('../backend/server.js', import.meta.url), 'utf8');
+  const editor = readFileSync(new URL('../frontend/editor.html', import.meta.url), 'utf8');
+  assert.match(source, /const publicPdfMode=new URLSearchParams\(location\.search\)\.get\('pdf'\)==='1'/);
+  assert.match(source, /'https:\/\/resumeout\.vercel\.app'/);
+  assert.match(source, /url\.searchParams\.set\('share',id\);\s+url\.searchParams\.set\('pdf','1'\)/);
+  assert.match(source, /if\(publicPdfMode\)\{[\s\S]*?setTimeout\(\(\)=>void exportPDF\(\),0\)/);
+  assert.match(source, /publicPdfMode\?'Public resume PDF':'Preview your resume PDF'/);
+  assert.match(source, /window\.history\.replaceState\(null,'',location\.pathname\+location\.hash\)/);
+  assert.doesNotMatch(source, /delete snapshot\.importedSourceText/);
+  assert.match(styles, /body\.public-resume-pdf-ready \.topbar,body\.public-resume-pdf-ready \.layout/);
+  assert.match(server, /https:\/\/resumeout\.vercel\.app\$\{request\.originalUrl/);
+  assert.match(editor, /https:\/\/resumeout\.vercel\.app\$\{location\.pathname/);
+  assert.doesNotMatch(source+server+editor, /primeresume-ten\.vercel\.app/);
 });

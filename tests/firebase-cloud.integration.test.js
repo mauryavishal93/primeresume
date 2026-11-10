@@ -5,7 +5,9 @@ import { chooseAuthenticatedResume } from '../frontend/src/resume-persistence.js
 
 function createFakeFirebase({ popupError = null, popupDelay = null, signOutError = null } = {}) {
   const records = new Map();
+  const sharedResumes = new Map();
   let generatedId = 0;
+  let generatedShareId = 0;
   const auth = {
     currentUser: {
       uid: 'user-1',
@@ -72,10 +74,17 @@ function createFakeFirebase({ popupError = null, popupDelay = null, signOutError
       records.set(ref.key, options.merge ? { ...records.get(ref.key), ...value } : value);
     },
     orderBy: (field, direction) => ({ field, direction }),
-    query: collection => collection,
+    query: (collection, ...constraints) => ({ ...collection, constraints }),
+    where: (field, operator, value) => ({ type: 'where', field, operator, value }),
+    limit: count => ({ type: 'limit', count }),
     getDocs: async collection => ({
       docs: [...records.entries()]
         .filter(([key]) => key.startsWith(`${collection.path}/`))
+        .filter(([, data]) => collection.constraints?.every(constraint =>
+          constraint.type !== 'where'
+          || (constraint.operator === '==' && data[constraint.field] === constraint.value)
+        ))
+        .slice(0, collection.constraints?.find(constraint => constraint.type === 'limit')?.count ?? Infinity)
         .map(([key, data]) => ({
           id: key.split('/').at(-1),
           data: () => data
@@ -93,7 +102,51 @@ function createFakeFirebase({ popupError = null, popupDelay = null, signOutError
     serverTimestamp: () => ({ toMillis: () => 1_700_000_000_000 }),
     deleteDoc: async ref => { records.delete(ref.key); }
   };
-  const fetchImpl = async (_url, options) => {
+  const fetchImpl = async (url, options = {}) => {
+    const sharedRoute = /^\/api\/shared-resumes(?:\/([A-Za-z0-9_-]+))?$/.exec(url);
+    if (sharedRoute) {
+      const shareId = sharedRoute[1];
+      const method = options.method || 'GET';
+      const respond = (ok, data, status = ok ? 200 : 400) => ({
+        ok,
+        status,
+        json: async () => data
+      });
+      if (method === 'POST' && !shareId) {
+        const ownerShares = [...sharedResumes.values()].filter(share => share.ownerUid === 'user-1' && share.active);
+        if (ownerShares.length >= 50) {
+          return respond(false, { error: 'You have reached the limit of 50 active share links.' }, 409);
+        }
+        const body = JSON.parse(options.body);
+        const id = `share-${++generatedShareId}`;
+        sharedResumes.set(id, {
+          ...body,
+          ownerUid: 'user-1',
+          active: true,
+          createdAt: 1_700_000_000_000
+        });
+        return respond(true, { id }, 201);
+      }
+      if (method === 'GET' && !shareId) {
+        return respond(true, {
+          shares: [...sharedResumes.entries()]
+            .filter(([, share]) => share.ownerUid === 'user-1')
+            .slice(0, 50)
+            .map(([id, share]) => ({ id, ...share }))
+        });
+      }
+      if (method === 'GET' && shareId) {
+        const share = sharedResumes.get(shareId);
+        return share?.active
+          ? respond(true, { name: share.name, state: share.state })
+          : respond(false, { error: 'This resume share link is unavailable.' }, 404);
+      }
+      if (method === 'DELETE' && shareId) {
+        sharedResumes.delete(shareId);
+        return respond(true, {});
+      }
+      return respond(false, { error: 'Not found.' }, 404);
+    }
     const key = 'users/user-1/profile/account';
     const record = records.get(key) || { mobileNumber: '', photoDataUrl: '' };
     if (options.method === 'PUT') {
@@ -113,6 +166,7 @@ function createFakeFirebase({ popupError = null, popupDelay = null, signOutError
     client,
     auth,
     records,
+    sharedResumes,
     GoogleAuthProvider,
     get signedInWith() { return signedInWith; },
     get popupCalls() { return popupCalls; },
@@ -240,6 +294,76 @@ test('cloud resume create, list, revision update, conflict detection, and delete
 
   await firebase.client.deleteResume('user-1', created.id);
   assert.equal((await firebase.client.listResumes('user-1')).length, 0);
+});
+
+test('shared resumes can be opened by link, listed and revoked only by the owner', async () => {
+  const firebase = createFakeFirebase();
+  const state = {
+    version: 4,
+    docName: 'Alex resume',
+    template: 'classic',
+    profile: { name: 'Alex', email: 'alex@example.com', photo: 'data:image/jpeg;base64,abc' },
+    design: { accent: '#31547a', font: 'Arial' },
+    sections: [
+      { id: 'experience-1', type: 'experience', title: 'Experience', entries: [
+        { role: 'Engineer', company: 'Example Co.', date: '2022—Present', details: 'Built the full product.\nImproved reliability.' }
+      ] },
+      { id: 'skills-1', type: 'skills', title: 'Skills', content: 'JavaScript, TypeScript' }
+    ],
+    importedSourceText: 'Complete imported source resume'
+  };
+  const created = await firebase.client.createSharedResume('user-1', 'Alex resume', state, 'resume-1');
+
+  assert.match(created.id, /^share-/);
+  assert.deepEqual(await firebase.client.getSharedResume(created.id), {
+    name: 'Alex resume',
+    state
+  });
+  assert.deepEqual(firebase.sharedResumes.get(created.id).state, state);
+  assert.deepEqual(await firebase.client.listSharedResumes('user-1'), [{
+    id: created.id,
+    name: 'Alex resume',
+    sourceResumeId: 'resume-1',
+    active: true,
+    createdAt: 1_700_000_000_000
+  }]);
+
+  await assert.rejects(firebase.client.listSharedResumes('user-2'), /Sign in to the account/);
+  await assert.rejects(
+    firebase.client.createSharedResume('user-2', 'Other account', state),
+    /Sign in to the account/
+  );
+  await assert.rejects(firebase.client.revokeSharedResume('user-2', created.id), /Sign in to the account/);
+
+  await firebase.client.revokeSharedResume('user-1', created.id);
+  assert.deepEqual(await firebase.client.listSharedResumes('user-1'), []);
+  await assert.rejects(firebase.client.getSharedResume(created.id), /unavailable/);
+});
+
+test('shared resume creation rejects invalid names, references, and oversized payloads', async () => {
+  const firebase = createFakeFirebase();
+  await assert.rejects(firebase.client.createSharedResume('user-1', ' ', {}), /valid resume name/);
+  await assert.rejects(firebase.client.createSharedResume('user-1', 'Valid name', null), /resume data is invalid/);
+  await assert.rejects(
+    firebase.client.createSharedResume('user-1', 'Valid name', {}, 'x'.repeat(1501)),
+    /source resume reference is invalid/
+  );
+  await assert.rejects(
+    firebase.client.createSharedResume('user-1', 'Valid name', { data: 'x'.repeat(800 * 1024) }),
+    /too large to share/
+  );
+  await assert.rejects(firebase.client.getSharedResume('../invalid'), /share link is invalid/);
+});
+
+test('shared resume creation limits each owner to 50 active links', async () => {
+  const firebase = createFakeFirebase();
+  for (let index = 0; index < 50; index++) {
+    await firebase.client.createSharedResume('user-1', `Resume ${index + 1}`, {});
+  }
+  await assert.rejects(
+    firebase.client.createSharedResume('user-1', 'Resume 51', {}),
+    /limit of 50 active share links/
+  );
 });
 
 test('last-worked resume selection prefers the saved account selection and falls back to newest', () => {
