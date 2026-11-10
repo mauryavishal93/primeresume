@@ -308,7 +308,7 @@ test('public pricing always uses INR while historical currencies remain formatta
   const pricingSource = readFileSync(new URL('../frontend/src/pricing.js', import.meta.url), 'utf8');
   assert.doesNotMatch(pricingSource, /useLocalSupportedCurrency/);
   assert.doesNotMatch(pricingSource, /Till then user voucher code is available for free access/);
-  assert.match(pricingSource, /temporarily unavailable\. You can continue with the Free plan or redeem a Pro voucher below/);
+  assert.doesNotMatch(pricingSource, /Pro subscriptions are temporarily unavailable\. You can continue with the Free plan or redeem a Pro voucher below if you have one/);
   assert.doesNotMatch(pricingPage, /pricingCurrency|pricing-currency-picker/);
   assert.match(pricingPage, /Loading price/);
   const adminPage = readFileSync(new URL('../frontend/admin.html', import.meta.url), 'utf8');

@@ -247,8 +247,8 @@ function updatePurchaseControls() {
     monthlyButton.textContent = 'Coming soon';
     yearlyButton.textContent = 'Coming soon';
     checkoutStatus.textContent = billingConfig?.checkoutEnabled
-      ? 'INR subscriptions are temporarily unavailable. You can continue with the Free plan or redeem a Pro voucher below.'
-      : 'Pro subscriptions are temporarily unavailable. You can continue with the Free plan or redeem a Pro voucher below if you have one.';
+      ? 'INR subscriptions are temporarily unavailable.'
+      : '';
   } else if (!currentUser) {
     monthlyButton.textContent = 'Sign in to purchase monthly';
     yearlyButton.textContent = 'Sign in to purchase yearly';
@@ -359,7 +359,7 @@ async function loadRazorpayCheckout() {
 
 async function startCheckout(planKey) {
   if (!billingConfig?.checkoutEnabled || !billingConfig.supportedCurrencies?.includes(selectedCurrency)) {
-    checkoutStatus.textContent = 'Pro subscriptions are temporarily unavailable. You can continue with the Free plan or redeem a Pro voucher below if you have one.';
+    checkoutStatus.textContent = '';
     return;
   }
   if (!currentUser) {
