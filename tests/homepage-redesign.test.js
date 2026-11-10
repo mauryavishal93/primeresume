@@ -44,10 +44,16 @@ test('homepage redesign sections and existing walkthrough stay consistent on bot
   assert.match(aboutStyles, /@media\(max-width:640px\)\{[\s\S]*?\.about-header\{display:grid;grid-template-columns:minmax\(0,1fr\) 42px;grid-template-areas:"brand account" "nav nav";grid-template-rows:42px auto/);
   assert.match(aboutStyles, /\.about-nav\{grid-area:nav;display:flex;width:100%;min-width:0;flex-wrap:wrap;align-items:center;justify-content:flex-start;gap:6px;margin:0\}/);
   assert.match(aboutStyles, /\.about-nav>\.site-account-menu\{position:absolute;top:8px;right:12px;margin:0\}/);
-  assert.match(aboutStyles, /\.landing-page \.about-nav\{display:grid;grid-template-columns:minmax\(0,1fr\) auto;grid-template-areas:"auth community" "actions actions"/);
+  assert.match(aboutStyles, /\.landing-page \.about-nav\{display:grid;grid-template-columns:40px minmax\(0,auto\) minmax\(0,1fr\);grid-template-areas:"auth community actions"/);
+  assert.match(aboutStyles, /\.landing-page \.about-nav>\.auth-actions \.google-signin\{width:40px;max-width:40px\}/);
+  assert.match(aboutStyles, /\.about-nav \.google-signin \[data-auth-sign-in-label\]\{position:absolute;width:1px;height:1px/);
   assert.match(aboutStyles, /\.about-nav>a\[href="\/support\.html"\],\.about-nav>\.landing-header-actions \.landing-import-button\{display:none\}/);
-  assert.match(aboutStyles, /\.landing-page \.about-nav>\.landing-header-actions\{display:grid;grid-area:actions;grid-template-columns:repeat\(2,minmax\(0,1fr\)\);justify-self:stretch;flex:initial;width:100%;max-width:none;gap:6px\}/);
+  assert.match(aboutStyles, /\.landing-page \.about-nav>\.landing-header-actions\{display:grid;grid-area:actions;grid-template-columns:repeat\(2,minmax\(0,1fr\)\);justify-self:stretch;flex:initial;width:100%;min-width:0;max-width:none;gap:6px\}/);
   assert.match(aboutStyles, /\.landing-page \.about-nav>\.landing-header-actions \.btn\{width:100%;min-width:0;min-height:40px;padding:6px 4px;font-size:11px\}/);
+  assert.match(aboutStyles, /\.about-page:not\(\.landing-page\):not\(\.admin-page\) \.about-nav\{display:grid;grid-template-columns:40px minmax\(0,auto\) repeat\(2,minmax\(0,1fr\)\);grid-template-areas:"auth community plans editor"/);
+  assert.match(aboutStyles, /\.about-page:not\(\.landing-page\):not\(\.admin-page\) \.about-nav>a\[href="\/community\.html"\]\{grid-area:community/);
+  assert.match(aboutStyles, /\.about-page:not\(\.landing-page\):not\(\.admin-page\) \.about-nav>a\[href="\/pricing\.html"\]\{grid-area:plans/);
+  assert.match(aboutStyles, /\.about-page:not\(\.landing-page\):not\(\.admin-page\) \.about-nav>\.about-editor\{grid-area:editor/);
   for (const page of ['about', 'admin', 'billing', 'community', 'home', 'index', 'my-account', 'my-posts', 'pricing', 'privacy', 'refunds', 'resume-wizard', 'support', 'terms']) {
     const html = readFileSync(new URL(`../frontend/${page}.html`, import.meta.url), 'utf8');
     assert.match(html, /<header class="about-header"/, `${page} should use the shared responsive header`);

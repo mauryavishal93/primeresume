@@ -269,12 +269,18 @@ button,a{font:inherit}
  .about-nav .theme-switch{min-height:40px}
  .about-nav>.site-account-menu{position:absolute;top:8px;right:12px;margin:0}
  .about-nav>.landing-header-actions .btn{min-height:40px}
- .landing-page .about-nav{display:grid;grid-template-columns:40px auto;grid-template-areas:"auth community" "actions actions";align-items:center;justify-content:start;gap:6px 5px}
+ .landing-page .about-nav{display:grid;grid-template-columns:40px minmax(0,auto) minmax(0,1fr);grid-template-areas:"auth community actions";align-items:center;justify-content:start;gap:6px 5px}
  .landing-page .about-nav>.auth-actions{grid-area:auth;min-width:0}
  .landing-page .about-nav>.auth-actions .google-signin{width:40px;max-width:40px}
  .landing-page .about-nav>a[href="/community.html"]{grid-area:community;min-height:40px;padding:6px 8px;font-size:11px}
- .landing-page .about-nav>.landing-header-actions{display:grid;grid-area:actions;grid-template-columns:repeat(2,minmax(0,1fr));justify-self:stretch;flex:initial;width:100%;max-width:none;gap:6px}
+ .landing-page .about-nav>.landing-header-actions{display:grid;grid-area:actions;grid-template-columns:repeat(2,minmax(0,1fr));justify-self:stretch;flex:initial;width:100%;min-width:0;max-width:none;gap:6px}
  .landing-page .about-nav>.landing-header-actions .btn{width:100%;min-width:0;min-height:40px;padding:6px 4px;font-size:11px}
+ .about-page:not(.landing-page):not(.admin-page) .about-nav{display:grid;grid-template-columns:40px minmax(0,auto) repeat(2,minmax(0,1fr));grid-template-areas:"auth community plans editor";align-items:center;justify-content:stretch;gap:6px 5px}
+ .about-page:not(.landing-page):not(.admin-page) .about-nav>.auth-actions{grid-area:auth;min-width:0}
+ .about-page:not(.landing-page):not(.admin-page) .about-nav>a[href="/community.html"]{grid-area:community;min-height:40px;min-width:0;padding:6px 8px;font-size:11px}
+ .about-page:not(.landing-page):not(.admin-page) .about-nav>a[href="/pricing.html"]{grid-area:plans;min-height:40px;min-width:0;padding:6px 4px;font-size:11px}
+ .about-page:not(.landing-page):not(.admin-page) .about-nav>.about-editor{grid-area:editor;min-height:40px;min-width:0;padding:6px 4px;font-size:11px}
+ .about-page:not(.landing-page):not(.admin-page) .about-nav>.site-account-menu{position:absolute;top:8px;right:12px;margin:0}
 }
 :root[data-theme=light] body.about-page{background:radial-gradient(ellipse at 50% -18%,#fffefa 0,#f4f0e7 48%,#ebe7df 100%)}
 :root[data-theme=light] .about-pro-brand-badge{border-color:#c9b487;background:#f7f0df;color:#765b2e}

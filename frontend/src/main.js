@@ -74,7 +74,14 @@ function normalizeState(d){
   const normalizedListStyle=['none','bullet','number','arrow','check','dash','diamond'].includes(s.listStyle)?s.listStyle:(type==='summary'?'none':'bullet');
   const n={id,type,title:str(s.title).trim()?str(s.title):'Untitled section',visible:s.visible!==false,listStyle:(type==='summary'&&ver<4&&normalizedListStyle==='bullet')?'none':normalizedListStyle,...normalizeSectionTypography(s,out.design)};
   if(type==='skills')n.skillStyle=normalizeSkillStyle(s.skillStyle);
-  if(['experience','education','projects'].includes(type)||Array.isArray(s.entries))n.entries=(Array.isArray(s.entries)?s.entries:[]).filter(e=>e&&typeof e==='object').map(e=>({role:str(e.role),company:str(e.company),date:str(e.date),details:str(e.details)}));
+  if(['experience','education','projects'].includes(type)||Array.isArray(s.entries))n.entries=(Array.isArray(s.entries)?s.entries:[]).filter(e=>e&&typeof e==='object').map(e=>{
+   const entry={role:str(e.role),company:str(e.company),date:str(e.date),details:str(e.details)};
+   if(type==='education'){
+    entry.detailsEnabled=e.detailsEnabled===false?false:e.detailsEnabled===true||Boolean(entry.details.trim());
+    if(!entry.detailsEnabled)entry.details='';
+   }
+   return entry;
+  });
   else n.content=str(s.content);
   return n});
  const normalizePositions=pos=>{
@@ -123,9 +130,14 @@ const lines=v=>String(v||'').split(/\n/).map(x=>x.trim()).filter(Boolean);
 const detailLines=v=>String(v||'').replace(/\r\n?/g,'\n').split('\n');
 function pointerMarker(style,index){return style==='number'?`${index+1}.`:({bullet:'•',arrow:'→',check:'✓',dash:'–',diamond:'◆'}[style]||'')}
 function renderDetailInputs(entry,index){const style=sectionById(selectedId)?.listStyle||'bullet';return detailLines(entry.details).map((line,lineIndex)=>`<div class="detail-bullet-row"><span class="detail-bullet-marker" aria-hidden="true">${pointerMarker(style,lineIndex)}</span><input aria-label="Detail bullet ${lineIndex+1}" data-entry-detail-line data-index="${index}" data-line="${lineIndex}" value="${$esc(line)}"><button class="detail-bullet-remove" type="button" data-remove-detail-line="${lineIndex}" data-index="${index}" aria-label="Remove bullet ${lineIndex+1}" title="Remove bullet">×</button></div>`).join('')}
+function renderEntryDetailsField(section,entry,index){
+ if(section.type==='education'&&!entry.detailsEnabled)return `<div class="field"><label>Details</label><button class="btn outline small" type="button" data-add-entry-details="${index}">＋ Add details</button></div>`;
+ return `<div class="field"><label>Details</label><div class="detail-bullet-list" data-entry-details="${index}">${renderDetailInputs(entry,index)}</div><button class="btn outline small" type="button" data-add-detail-line="${index}">＋ Add bullet</button>${section.type==='education'?`<button class="btn outline small" type="button" data-remove-entry-details="${index}">Remove details</button>`:''}</div>`;
+}
 function renderPointerInputs(section){return detailLines(section.content).map((line,lineIndex)=>`<div class="detail-bullet-row"><span class="detail-bullet-marker" aria-hidden="true">${pointerMarker(section.listStyle,lineIndex)}</span><input aria-label="Pointer line ${lineIndex+1}" data-section-pointer-line data-section-id="${$esc(section.id)}" data-line="${lineIndex}" value="${$esc(line)}"><button class="detail-bullet-remove" type="button" data-remove-pointer-line="${lineIndex}" data-section-id="${$esc(section.id)}" aria-label="Remove line ${lineIndex+1}" title="Remove line">×</button></div>`).join('')}
 function insertEntryDetailLine(index,afterLine){
  const section=sectionById(selectedId),entry=section?.entries?.[index];if(!entry)return;
+ if(section.type==='education')entry.detailsEnabled=true;
  const details=detailLines(entry.details);
  let lineIndex;
  if(Number.isInteger(afterLine)){lineIndex=Math.min(afterLine+1,details.length);details.splice(lineIndex,0,'')}
@@ -809,12 +821,12 @@ function createSheet(index,tmpl,cols){
 /* ---------- Content is grouped into atoms so pages/columns can be filled precisely ---------- */
 function sectionAtoms(s){
  const a=[];
- if(s.entries){for(const e of s.entries){const ls=detailLines(e.details);a.push({k:'entry',e});ls.forEach((t,i)=>{const text=t.trim();a.push({k:s.listStyle==='none'?'detail-paragraph':'li',e,t:text,detailIndex:i,textStart:0,textLength:text.length,blank:!text.trim()})})}}
+ if(s.entries){for(const e of s.entries){const ls=detailLines(e.details).map((text,index)=>({text:text.trim(),index})).filter(line=>line.text);if(![e.role,e.company,e.date].some(value=>String(value||'').trim())&&!ls.length)continue;a.push({k:'entry',e});ls.forEach(({text,index})=>a.push({k:s.listStyle==='none'?'detail-paragraph':'li',e,t:text,detailIndex:index,textStart:0,textLength:text.length,blank:false}))}}
  else if(s.type==='skills')String(s.content||'').split(/[,\n]/).map(x=>x.trim()).filter(Boolean).forEach((t,index)=>a.push({k:'chip',t,index}));
  else String(s.content||'').replace(/\r\n?/g,'\n').split('\n').forEach((par,lineIndex)=>{
   a.push({k:'p',t:par,cont:false,lineIndex,textStart:0,textLength:par.length,blank:!par.trim()});
  });
- if(!a.length)a.push(s.type==='skills'?{k:'chip',t:'',index:0}:{k:'p',t:'',cont:false});
+ if(!a.length&&!s.entries)a.push(s.type==='skills'?{k:'chip',t:'',index:0}:{k:'p',t:'',cont:false});
  return a;
 }
 function makeShell(s,cont){
@@ -830,7 +842,7 @@ function appendAtom(shell,a,st,s){
  const entryIndex=a.e&&s.entries?s.entries.indexOf(a.e):-1;
  if(a.k==='entry'){
   el=document.createElement('div');el.className='entry';
-  if(!a.continuation)el.innerHTML=`<div class="entry-top"><span class="entry-title" contenteditable="true" spellcheck="true" data-section-id="${$esc(s.id)}" data-entry="${entryIndex}" data-entry-field="role" title="Click to edit role">${$esc(a.e.role)}</span><span class="entry-date" contenteditable="true" spellcheck="true" data-section-id="${$esc(s.id)}" data-entry="${entryIndex}" data-entry-field="date" title="Click to edit dates">${$esc(a.e.date)}</span></div>${a.e.company?`<div class="entry-sub" contenteditable="true" spellcheck="true" data-section-id="${$esc(s.id)}" data-entry="${entryIndex}" data-entry-field="company" title="Click to edit organization">${$esc(a.e.company)}</div>`:''}`;
+  if(!a.continuation){const role=String(a.e.role||'').trim(),date=String(a.e.date||'').trim(),company=String(a.e.company||'').trim();el.innerHTML=`${role||date?`<div class="entry-top">${role?`<span class="entry-title" contenteditable="true" spellcheck="true" data-section-id="${$esc(s.id)}" data-entry="${entryIndex}" data-entry-field="role" title="Click to edit role">${$esc(role)}</span>`:''}${date?`<span class="entry-date" contenteditable="true" spellcheck="true" data-section-id="${$esc(s.id)}" data-entry="${entryIndex}" data-entry-field="date" title="Click to edit dates">${$esc(date)}</span>`:''}</div>`:''}${company?`<div class="entry-sub" contenteditable="true" spellcheck="true" data-section-id="${$esc(s.id)}" data-entry="${entryIndex}" data-entry-field="company" title="Click to edit organization">${$esc(company)}</div>`:''}`}
   body.appendChild(el);st.ul=null;
  }else if(a.k==='detail-paragraph'){
   el=document.createElement('p');el.className='detail-paragraph';if(a.blank)el.classList.add('blank-line');el.spellcheck=true;el.title='Click to edit text';el.dataset.sectionId=s.id;el.dataset.entry=entryIndex;el.dataset.entryField='detail';el.dataset.detailSource=a.t;el.dataset.detailIndex=String(a.detailIndex);el.dataset.detailStart=String(a.textStart);el.dataset.detailLength=String(a.textLength);el.textContent=a.t;
@@ -887,6 +899,7 @@ function flowSections(root,tmpl){
   };
   for(const s of state.sections.filter(x=>x.visible)){
    const atoms=sectionAtoms(s);let i=0,cont=false,cur=null,lastSi=0;
+    if(!atoms.length)continue;
    const pref=tmpl.id==='peach-mint'?(s.type==='skills'||s.type==='certifications'?1:0):tmpl.id==='teal-modern'?(s.type==='skills'?1:0):tmpl.id==='brian-baxter'?(s.type==='education'||s.type==='certifications'?1:0):!two?0:MAIN_TYPES.has(s.type)?0:SIDE_TYPES.has(s.type)?1:(fill(0,s)<=fill(1,s)?0:1);
   while(i<atoms.length){
     const a=atoms[i];
@@ -1025,6 +1038,7 @@ function renderFree(root,tmpl){
   node.append(move,resize);
  };
  state.sections.filter(section=>section.visible).forEach(section=>{
+  if(!sectionAtoms(section).length)return;
   const stored=state.positions[section.id];
   if(stored){
    const pageIndex=clamp(Math.floor(Number(stored.page)||0),0,49,0);
@@ -1288,7 +1302,7 @@ function renderInspector(){
  if(rightTab==='section'&&s){
    h+=`<div class="eyebrow">Selected section</div><div class="field"><label>Section title</label><input id="sectionTitle" value="${$esc(s.title)}"></div><div class="field-row"><div class="field"><label for="sectionHeadingSize">Heading size (px)</label><input id="sectionHeadingSize" type="number" min="10" max="36" step="1" value="${s.headingSize}"></div><div class="field"><label for="sectionBodySize">Body size (px)</label><input id="sectionBodySize" type="number" min="8" max="24" step="1" value="${s.bodySize}"></div></div>${s.type==='skills'?`<div class="field"><label for="skillStyle">Core skills display style</label><select id="skillStyle">${SKILL_STYLES.map(([value,label])=>`<option value="${value}" ${(s.skillStyle||'tags')===value?'selected':''}>${label}</option>`).join('')}</select></div>`:`<div class="field"><label>Line pointers</label><select id="sectionPointer">${[['bullet','• Bullet'],['number','1. Numbered'],['arrow','→ Arrow'],['check','✓ Check mark'],['dash','– Dash'],['diamond','◆ Diamond'],['none','No pointer']].map(([value,label])=>`<option value="${value}" ${(s.listStyle||'bullet')===value?'selected':''}>${label}</option>`).join('')}</select></div>`}`;
    if(s.entries){
-    h+=s.entries.map((e,i)=>`<details class="inspector-entry"${i===0?' open':''}><summary><span>Entry ${i+1}</span><span class="inspector-entry-title" data-entry-summary="${i}">${$esc(e.role||e.company||'Add entry details')}</span></summary><div class="inspector-entry-content"><div class="field"><label>Role / qualification</label><input data-entry="role" data-index="${i}" value="${$esc(e.role)}"></div><div class="field"><label>Company / institution</label><input data-entry="company" data-index="${i}" value="${$esc(e.company)}"></div><div class="field"><label>Date</label><input data-entry="date" data-index="${i}" value="${$esc(e.date)}"></div><div class="field"><label>Details</label><div class="detail-bullet-list" data-entry-details="${i}">${renderDetailInputs(e,i)}</div><button class="btn outline small" type="button" data-add-detail-line="${i}">＋ Add bullet</button></div><button class="btn danger small" data-remove-entry="${i}">Remove entry</button></div></details>`).join('');
+    h+=s.entries.map((e,i)=>`<details class="inspector-entry"${i===0?' open':''}><summary><span>Entry ${i+1}</span><span class="inspector-entry-title" data-entry-summary="${i}">${$esc(e.role||e.company||'Add entry details')}</span></summary><div class="inspector-entry-content"><div class="field"><label>Role / qualification</label><input data-entry="role" data-index="${i}" value="${$esc(e.role)}"></div><div class="field"><label>Company / institution</label><input data-entry="company" data-index="${i}" value="${$esc(e.company)}"></div><div class="field"><label>Date</label><input data-entry="date" data-index="${i}" value="${$esc(e.date)}"></div>${renderEntryDetailsField(s,e,i)}<button class="btn danger small" data-remove-entry="${i}">Remove entry</button></div></details>`).join('');
      h+='<button class="btn outline small" id="addEntry">＋ Add entry</button>';
   }else if(s.type!=='skills'&&s.listStyle!=='none')h+=`<div class="field"><label>Pointer lines</label><div class="detail-bullet-list" data-pointer-lines="${$esc(s.id)}">${renderPointerInputs(s)}</div><button class="btn outline small" type="button" data-add-pointer-line="${$esc(s.id)}">＋ Add line</button></div>`;
   else h+=`<div class="field"><label>Content (use new lines for paragraphs; comma-separated skills work too)</label><textarea id="sectionContent">${$esc(s.content||'')}</textarea></div>`;
@@ -1324,7 +1338,7 @@ function renderInspector(){
  $('inspector').querySelectorAll('[data-entry]').forEach(el=>el.addEventListener('input',()=>{const x=sectionById(selectedId),i=+el.dataset.index;if(!x?.entries?.[i])return;x.entries[i][el.dataset.entry]=el.value;if(el.dataset.entry==='role'||el.dataset.entry==='company')updateInspectorEntryTitle(i,x.entries[i]);saveLocal();syncSheetFields();}));
  $('inspector').oninput=event=>{
   const detailInput=event.target.closest('[data-entry-detail-line]');
-  if(detailInput){const x=sectionById(selectedId),i=+detailInput.dataset.index,lineIndex=+detailInput.dataset.line;if(!x?.entries?.[i])return;const details=detailLines(x.entries[i].details);details[lineIndex]=detailInput.value;x.entries[i].details=details.join('\n');saveLocal();renderSheets();return}
+  if(detailInput){const x=sectionById(selectedId),i=+detailInput.dataset.index,lineIndex=+detailInput.dataset.line;if(!x?.entries?.[i])return;const details=detailLines(x.entries[i].details);details[lineIndex]=detailInput.value;x.entries[i].details=details.join('\n');if(x.type==='education')x.entries[i].detailsEnabled=true;saveLocal();renderSheets();return}
   const pointerInput=event.target.closest('[data-section-pointer-line]');
   if(pointerInput){const section=sectionById(pointerInput.dataset.sectionId),lineIndex=+pointerInput.dataset.line;if(!section)return;const contentLines=detailLines(section.content);contentLines[lineIndex]=pointerInput.value;section.content=contentLines.join('\n');saveLocal();renderSheets()}
  };
@@ -1336,6 +1350,10 @@ function renderInspector(){
   if(pointerInput){event.preventDefault();const section=sectionById(pointerInput.dataset.sectionId),lineIndex=+pointerInput.dataset.line;if(!section)return;const contentLines=detailLines(section.content);contentLines[lineIndex]=pointerInput.value;section.content=contentLines.join('\n');insertPointerLine(section.id,lineIndex)}
  };
  $('inspector').onclick=event=>{
+  const addEntryDetails=event.target.closest('[data-add-entry-details]');
+  if(addEntryDetails){const x=sectionById(selectedId),i=+addEntryDetails.dataset.addEntryDetails;if(!x?.entries?.[i])return;x.entries[i].details='';x.entries[i].detailsEnabled=true;saveLocal();renderInspector();renderSheets();$('inspector').querySelector(`[data-entry-detail-line][data-index="${i}"]`)?.focus();return}
+  const removeEntryDetails=event.target.closest('[data-remove-entry-details]');
+  if(removeEntryDetails){const x=sectionById(selectedId),i=+removeEntryDetails.dataset.removeEntryDetails;if(!x?.entries?.[i])return;x.entries[i].details='';x.entries[i].detailsEnabled=false;saveLocal();renderInspector();renderSheets();return}
   const detailButton=event.target.closest('[data-remove-detail-line]');
   if(detailButton){const x=sectionById(selectedId),i=+detailButton.dataset.index,lineIndex=+detailButton.dataset.removeDetailLine;if(!x?.entries?.[i])return;const details=detailLines(x.entries[i].details);details.splice(lineIndex,1);if(!details.length)details.push('');x.entries[i].details=details.join('\n');saveLocal();const list=$('inspector').querySelector(`[data-entry-details="${i}"]`);if(list)list.innerHTML=renderDetailInputs(x.entries[i],i);renderSheets();$('inspector').querySelector(`[data-entry-detail-line][data-index="${i}"][data-line="${Math.min(lineIndex,details.length-1)}"]`)?.focus();return}
   const pointerButton=event.target.closest('[data-remove-pointer-line]');
@@ -1344,7 +1362,7 @@ function renderInspector(){
  $('inspector').querySelectorAll('[data-add-pointer-line]').forEach(button=>button.addEventListener('click',()=>insertPointerLine(button.dataset.addPointerLine)));
  $('inspector').querySelectorAll('[data-add-detail-line]').forEach(button=>button.addEventListener('click',()=>insertEntryDetailLine(+button.dataset.addDetailLine)));
  $('inspector').querySelectorAll('[data-remove-entry]').forEach(el=>el.addEventListener('click',()=>transact(()=>{const x=sectionById(selectedId);if(x)x.entries.splice(+el.dataset.removeEntry,1)})));
- $('addEntry')?.addEventListener('click',()=>transact(()=>{const x=sectionById(selectedId);if(x)x.entries.push({role:'New role',company:'Organization',date:'Year',details:'Add details here.'})}));
+ $('addEntry')?.addEventListener('click',()=>transact(()=>{const x=sectionById(selectedId);if(x)x.entries.push(x.type==='education'?{role:'',company:'',date:'',details:'',detailsEnabled:false}:{role:'New role',company:'Organization',date:'Year',details:'Add details here.'})}));
  $('duplicateSection')?.addEventListener('click',()=>transact(()=>{const i=state.sections.findIndex(x=>x.id===selectedId);if(i>=0){const n=deep(state.sections[i]);n.id=uid();n.title+=' (copy)';state.sections.splice(i+1,0,n);selectedId=n.id}}));
  $('deleteSection')?.addEventListener('click',()=>void deleteSectionById(selectedId));
  $('inspector').querySelectorAll('[data-rtab]').forEach(b=>b.addEventListener('click',()=>setRightTab(b.dataset.rtab)));
@@ -1393,7 +1411,7 @@ function addSection(type,title,content){
  if(type==='skills')s.skillStyle='tags';
  if(['experience','education','projects'].includes(type)){
   const defaultRole = type==='education'?'Degree / qualification':type==='projects'?'Project name':'Role / milestone';
-  s.entries=[{role:defaultRole,company:'Organization',date:'Year',details:'Add one detail per line.'}];
+  s.entries=[type==='education'?{role:'',company:'',date:'',details:'',detailsEnabled:false}:{role:defaultRole,company:'Organization',date:'Year',details:'Add one detail per line.'}];
  } else {
   s.content=content||(type==='skills'?'Skill one, Skill two, Skill three':'Add your content here.');
  }
