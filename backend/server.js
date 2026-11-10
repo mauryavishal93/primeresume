@@ -543,6 +543,12 @@ async function razorpayRequest(endpoint, { method = 'GET', body } = {}) {
 function providerPlanId(planKey, currency = 'INR', pricing = {}) {
   const envKey = billingPlanEnvKey(planKey, currency);
   const envValue = envKey ? (process.env[envKey] || '').trim() : '';
+  const basePlan = billingPlan(planKey, currency);
+  const configuredPrice = Number(pricingPlanEntry(pricing, planKey, currency)?.currentPrice);
+  const envPlanMatchesPrice = isRazorpayPlanId(envValue)
+    && (!Number.isFinite(configuredPrice) || Math.round(configuredPrice * 100) === basePlan?.amount);
+  if (envPlanMatchesPrice) return envValue;
+
   const hasSavedCurrencyPlans = pricing?.providerPlanIds
     && Object.hasOwn(pricing.providerPlanIds, currency);
   const planId = pricing?.providerPlanIds?.[currency]?.[planKey]
