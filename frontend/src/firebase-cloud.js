@@ -36,7 +36,6 @@ const loadFirebaseSdk = () => Promise.all([
 export function createFirebaseCloudClient({ config = firebaseConfig, loadSdk = loadFirebaseSdk, fetchImpl = globalThis.fetch } = {}) {
   const isConfigured = Object.values(config).every(value => typeof value === 'string' && value.length > 0);
   let servicesPromise;
-  let signInPromise;
 
   async function getServices() {
     if (!isConfigured) throw new Error('Cloud saving is not configured yet.');
@@ -153,8 +152,7 @@ export function createFirebaseCloudClient({ config = firebaseConfig, loadSdk = l
   }
 
   function signInWithGoogle() {
-    if (signInPromise) return signInPromise;
-    signInPromise = (async () => {
+    return (async () => {
       const { auth, authSdk } = await getServices();
       const provider = new authSdk.GoogleAuthProvider();
       try {
@@ -166,10 +164,7 @@ export function createFirebaseCloudClient({ config = firebaseConfig, loadSdk = l
         }
         await authSdk.signInWithRedirect(auth, provider);
       }
-    })().finally(() => {
-      signInPromise = null;
-    });
-    return signInPromise;
+    })();
   }
 
   async function signOutUser() {

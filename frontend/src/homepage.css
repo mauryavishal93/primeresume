@@ -43,9 +43,9 @@
 }
 
 .landing-page .landing-hero {
-  min-height: 330px;
+  min-height: clamp(360px, 38vw, 440px);
   align-items: center;
-  padding: 40px 24px;
+  padding: clamp(44px, 7vw, 76px) clamp(20px, 7vw, 80px);
   border: 1px solid rgba(126, 150, 184, .22);
   border-radius: 28px;
   background: linear-gradient(135deg, rgba(11, 24, 39, .96), rgba(8, 15, 22, .9));
@@ -67,11 +67,32 @@
 .landing-page .landing-hero-copy {
   position: relative;
   z-index: 1;
+  width: min(100%, 860px);
 }
 
 .landing-page .landing-hero-eyebrow {
-  margin: 0 0 16px;
+  display: inline-flex;
+  align-items: center;
+  margin: 0 0 20px;
+  padding: 8px 13px;
+  border: 1px solid rgba(148, 185, 241, .28);
+  border-radius: 999px;
+  background: rgba(91, 135, 206, .13);
   color: #b6d5ff;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .09em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.landing-page .landing-hero h1 {
+  max-width: 18ch;
+  margin-inline: auto;
+  font-size: clamp(2.6rem, 5.4vw, 4.6rem);
+  line-height: 1.04;
+  letter-spacing: -.045em;
+  text-wrap: balance;
 }
 
 .landing-page .landing-gradient-text {
@@ -79,6 +100,15 @@
   background-clip: text;
   -webkit-background-clip: text;
   color: transparent;
+}
+
+.landing-page .landing-hero-copy > p:not(.landing-hero-eyebrow) {
+  max-width: 650px;
+  margin: 20px auto 0;
+  color: #c1ccdc;
+  font-size: clamp(1rem, 1.5vw, 1.15rem);
+  line-height: 1.7;
+  text-wrap: pretty;
 }
 
 .landing-page .landing-hero .hero-actions {
@@ -1006,8 +1036,19 @@
 
   .landing-page .landing-hero {
     min-height: 0;
-    padding: 30px 16px;
+    padding: 40px 20px;
     border-radius: 20px;
+  }
+
+  .landing-page .landing-hero h1 {
+    max-width: 19ch;
+    font-size: clamp(2.2rem, 10vw, 3.2rem);
+    line-height: 1.06;
+  }
+
+  .landing-page .landing-hero-copy > p:not(.landing-hero-eyebrow) {
+    margin-top: 16px;
+    font-size: 1rem;
   }
 
   .landing-page .landing-hero-actions {
@@ -1047,6 +1088,7 @@
   }
 
   .landing-page .landing-hero-eyebrow {
+    margin-bottom: 16px;
     font-size: 10px;
   }
 

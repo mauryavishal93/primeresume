@@ -79,13 +79,46 @@ test('new resume templates have dedicated editor markup and styles', () => {
   }
 });
 
-test('homepage demo uses the animated editor walkthrough on both landing pages', () => {
+test('homepage demo embeds an isolated live editor preview on both landing pages', () => {
   for (const page of ['home.html', 'index.html']) {
     const html = readFileSync(new URL(`../frontend/${page}`, import.meta.url), 'utf8');
-    assert.match(html, /src="\/images\/homepage-demo\.svg"/);
-    assert.match(html, /Cursor-guided preview of the resume editor/);
+    assert.match(html, /<iframe class="home-editor-preview" src="\/editor\.html\?homepageDemo=1"/);
+    assert.match(html, /Live sample resume preview with a cursor guide/);
+    assert.match(html, /class="demo-guide-cursor"/);
+    assert.match(html, /demo-cursor-tour 12s/);
+    assert.match(html, /demo-guide-step:nth-of-type\(3\)/);
+    assert.match(html, /Choose a template/);
+    assert.match(html, /Edit your resume details/);
+    assert.match(html, /Customize your design/);
+    assert.match(html, /\.home-editor-preview \{ height: clamp\(190px, 58vw, 406px\); \}/);
   }
-  assert.match(readFileSync(new URL('../frontend/public/images/homepage-demo.svg', import.meta.url), 'utf8'), /resume editor walkthrough/);
+  const editorSource = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
+  assert.match(editorSource, /document\.documentElement\.classList\.toggle\('homepage-demo',homepageDemoMode\)/);
+  assert.match(editorSource, /document\.body\.classList\.toggle\('homepage-demo',homepageDemoMode\)/);
+  assert.match(editorSource, /const savedProject=homepageDemoMode\s*\?\{state:null,key:null,raw:null,error:null,failedKey:null\}/);
+  assert.match(editorSource, /if\(!homepageDemoMode\)\{\s+if\(!cloudConfigured\)/);
+  assert.match(editorSource, /if\(homepageDemoMode\)return;try\{localStorage\.setItem\('resumeStudioUI'/);
+  assert.match(editorSource, /onboardingDismissed=homepageDemoMode/);
+  assert.match(editorSource, /function fitHomepageDemoZoom\(\)\{\s+if\(!homepageDemoMode\)return;\s+const root=\$\('sheets'\),style=getComputedStyle\(root\)/);
+  assert.match(editorSource, /function fitHomepageDemoViewport\(\)/);
+  assert.match(editorSource, /window\.matchMedia\('\(max-width:700px\)'\)\.matches\)return;\s+const scale=Math\.min\(window\.innerWidth\/1100,window\.innerHeight\/700\)/);
+  assert.match(editorSource, /fitHomepageDemoViewport\(\);fitHomepageDemoZoom\(\);fitMobileZoom\(\)/);
+  assert.match(editorSource, /if\(!homepageDemoMode&&window\.matchMedia\('\(max-width:800px\)'\)\.matches\)\{leftCollapsed=true;collapsed=true\}/);
+  assert.match(editorSource, /fitHomepageDemoZoom\(\);fitMobileZoom\(\)/);
+  const editorCss = readFileSync(new URL('../frontend/src/style.css', import.meta.url), 'utf8');
+  assert.match(editorCss, /\.homepage-demo #sheets,.homepage-demo \.sheets\{[^}]*align-items:center/);
+  assert.match(editorCss, /\.homepage-demo \.sheet\{transform-origin:top center\}/);
+  assert.match(editorCss, /\.homepage-demo \.layout\{[^}]*grid-template-areas:"left center right"/);
+  assert.match(editorCss, /@media\(max-width:560px\)\{[^}]*grid-template-columns:minmax\(0,\.85fr\) minmax\(0,2\.3fr\) minmax\(0,\.85fr\);grid-template-areas:"left center right"/);
+  assert.match(editorCss, /body\.homepage-demo \.topbar\{display:flex!important/);
+  assert.match(editorCss, /body\.homepage-demo \.toolbar\{display:flex!important/);
+  assert.match(editorCss, /html\.homepage-demo\{overflow:hidden\}/);
+  assert.match(editorCss, /grid-template-columns:220px minmax\(0,660px\) 220px/);
+  const aboutCss = readFileSync(new URL('../frontend/src/about.css', import.meta.url), 'utf8');
+  assert.match(aboutCss, /\.about-nav \.google-signin\{position:relative;width:40px;min-width:40px;max-width:40px/);
+  assert.match(aboutCss, /\.about-nav \.google-signin \[data-auth-sign-in-label\]\{position:absolute;width:1px;height:1px/);
+  assert.match(editorCss, /\.cloud-actions \.google-signin\{position:relative;width:40px;min-width:40px/);
+  assert.match(editorCss, /\.google-signin \[data-auth-sign-in-label\],\.google-signin #googleSignInLabel\{position:absolute;width:1px;height:1px/);
 });
 
 test('essential Free features are included and future Pro features remain unavailable', () => {

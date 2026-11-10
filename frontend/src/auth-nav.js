@@ -2,7 +2,7 @@ import { cloudConfigured, getAccountProfile, googleSignInErrorMessage, observeAu
 import { loadBillingConfig, loadBillingEntitlement } from './billing-client.js';
 import { canUseFeature, FEATURE_IDS } from './plan-access.js';
 import { confirmModern } from './modern-modal.js';
-import { setAccountAvatar } from './account-avatar.js';
+import { getAccountPhotoUrls, setAccountAvatar } from './account-avatar.js';
 
 const nav = document.querySelector('.about-nav');
 const signInButton = document.querySelector('[data-auth-sign-in]');
@@ -142,9 +142,9 @@ window.addEventListener('account-profile-updated', event => {
   const initial = Array.from(accountName)[0]?.toLocaleUpperCase() || 'U';
   accountMenu.name.textContent = accountName;
   accountMenu.summary.setAttribute('aria-label', `Account menu for ${accountName}`);
-  const photo = photoDataUrl || currentUser.photoURL || '';
-  setAccountAvatar(accountMenu.avatar, initial, photo);
-  setAccountAvatar(accountMenu.largeAvatar, initial, photo);
+  const photos = getAccountPhotoUrls(currentUser, photoDataUrl);
+  setAccountAvatar(accountMenu.avatar, initial, photos);
+  setAccountAvatar(accountMenu.largeAvatar, initial, photos);
 });
 
 function updateProBadge(entitlement) {
@@ -223,8 +223,8 @@ function updateAuthControls(user, error) {
       const initial = Array.from(accountName)[0]?.toLocaleUpperCase() || 'U';
       accountMenu.avatar.textContent = initial;
       accountMenu.largeAvatar.textContent = initial;
-      setAccountAvatar(accountMenu.avatar, initial, user.photoURL || '');
-      setAccountAvatar(accountMenu.largeAvatar, initial, user.photoURL || '');
+      setAccountAvatar(accountMenu.avatar, initial, getAccountPhotoUrls(user));
+      setAccountAvatar(accountMenu.largeAvatar, initial, getAccountPhotoUrls(user));
       accountMenu.name.textContent = accountName;
       accountMenu.email.textContent = user.email || '';
       accountMenu.summary.setAttribute('aria-label', `Account menu for ${accountName}`);
@@ -240,9 +240,9 @@ function updateAuthControls(user, error) {
       const accountUid = user.uid;
       void getAccountProfile(user).then(profile => {
         if (currentUser?.uid !== accountUid || !accountMenu) return;
-        const photo = profile.photoDataUrl || user.photoURL || '';
-        setAccountAvatar(accountMenu.avatar, initial, photo);
-        setAccountAvatar(accountMenu.largeAvatar, initial, photo);
+        const photos = getAccountPhotoUrls(user, profile.photoDataUrl);
+        setAccountAvatar(accountMenu.avatar, initial, photos);
+        setAccountAvatar(accountMenu.largeAvatar, initial, photos);
       }).catch(profileError => {
         if (currentUser?.uid === accountUid) console.error('Could not load the account profile image.', profileError);
       });

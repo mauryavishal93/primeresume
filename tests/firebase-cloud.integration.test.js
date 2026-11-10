@@ -17,6 +17,7 @@ function createFakeFirebase({ popupError = null, popupDelay = null, signOutError
   let authObserver;
   let signedInWith;
   let popupCalls = 0;
+  let cancelPendingPopup;
   let redirectedWith;
   let signedOut = false;
   const appSdk = {
@@ -30,7 +31,17 @@ function createFakeFirebase({ popupError = null, popupDelay = null, signOutError
     GoogleAuthProvider,
     signInWithPopup: async (_auth, provider) => {
       popupCalls++;
-      if (popupDelay) await popupDelay;
+      if (cancelPendingPopup) {
+        const cancel = cancelPendingPopup;
+        cancelPendingPopup = null;
+        cancel({ code: 'auth/cancelled-popup-request' });
+      }
+      if (popupDelay) {
+        await new Promise((resolve, reject) => {
+          cancelPendingPopup = reject;
+          popupDelay.then(resolve, reject);
+        });
+      }
       if (popupError) throw popupError;
       signedInWith = provider;
     },
@@ -138,16 +149,16 @@ test('Google sign-in falls back to redirect when the browser blocks a popup', as
   assert.equal(firebase.signedInWith, undefined);
 });
 
-test('rapid Google sign-in requests share one popup and canceled popup requests are ignored', async () => {
+test('rapid Google sign-in requests open a fresh popup and canceled popup requests are ignored', async () => {
   let finishPopup;
   const popupDelay = new Promise(resolve => { finishPopup = resolve; });
   const firebase = createFakeFirebase({ popupDelay });
 
   const firstRequest = firebase.client.signInWithGoogle();
   const secondRequest = firebase.client.signInWithGoogle();
-  assert.strictEqual(firstRequest, secondRequest);
+  assert.notStrictEqual(firstRequest, secondRequest);
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(firebase.popupCalls, 1);
+  assert.equal(firebase.popupCalls, 2);
   finishPopup();
   await Promise.all([firstRequest, secondRequest]);
 

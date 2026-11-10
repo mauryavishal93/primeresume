@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { getAccountPhotoUrl, getAccountPhotoUrls } from '../frontend/src/account-avatar.js';
 
 const page = readFileSync(new URL('../frontend/my-account.html', import.meta.url), 'utf8');
 const authNavigation = readFileSync(new URL('../frontend/src/auth-nav.js', import.meta.url), 'utf8');
@@ -23,6 +24,31 @@ test('my account is available from the account menu on shared pages and in the e
   );
   assert.match(readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8'), /\$\('myAccountLink'\)\.hidden=!user/);
   assert.match(vite, /myAccount: fileURLToPath\(new URL\('\.\/frontend\/my-account\.html'/);
+});
+
+test('account avatars use the Google provider photo when the Firebase user photo is unavailable', () => {
+  assert.equal(getAccountPhotoUrl({
+    photoURL: '',
+    providerData: [{ providerId: 'google.com', photoURL: 'https://google.test/profile.png' }]
+  }), 'https://google.test/profile.png');
+  assert.deepEqual(getAccountPhotoUrls({
+    photoURL: 'https://firebase.test/profile.png',
+    providerData: [
+      { providerId: 'google.com', photoURL: 'https://google.test/profile.png' },
+      { providerId: 'other.com', photoURL: 'https://other.test/profile.png' }
+    ]
+  }, 'data:image/jpeg;base64,abc'), [
+    'data:image/jpeg;base64,abc',
+    'https://google.test/profile.png',
+    'https://firebase.test/profile.png',
+    'https://other.test/profile.png'
+  ]);
+  assert.equal(getAccountPhotoUrl({
+    photoURL: 'https://firebase.test/profile.png',
+    providerData: [{ providerId: 'google.com', photoURL: 'https://google.test/profile.png' }]
+  }), 'https://google.test/profile.png');
+  assert.match(authNavigation, /getAccountPhotoUrls\(user\)/);
+  assert.match(readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8'), /getAccountPhotoUrls\(user\)/);
 });
 
 test('account page exposes editable name and mobile fields with a read-only email', () => {
