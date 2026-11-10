@@ -1602,13 +1602,13 @@ app.get('/api/billing/config', async (_request, response) => {
   const checkoutEnabled = billingCheckoutConfigured();
   try {
     const pricing = await loadPricingConfigFromStore();
-    const supportedCurrencies = Object.keys(BILLING_CURRENCY_PLANS)
-      .filter(currency => checkoutEnabled
-        && Object.keys(BILLING_PLANS).every(planKey => providerPlanReferenceExists(planKey, currency, pricing)));
-    const currencyPlans = Object.fromEntries(Object.entries(BILLING_CURRENCY_PLANS).map(([currency, plans]) => [
-      currency,
-      Object.fromEntries(Object.entries(plans).map(([key, plan]) => {
-        const pricedPlan = pricedBillingPlan(key, currency, pricing) || plan;
+    const supportedCurrencies = checkoutEnabled
+      && Object.keys(BILLING_PLANS).every(planKey => providerPlanReferenceExists(planKey, 'INR', pricing))
+      ? ['INR']
+      : [];
+    const currencyPlans = {
+      INR: Object.fromEntries(Object.entries(BILLING_PLANS).map(([key, plan]) => {
+        const pricedPlan = pricedBillingPlan(key, 'INR', pricing) || plan;
         return [key, {
           id: plan.id,
           label: plan.label,
@@ -1617,7 +1617,7 @@ app.get('/api/billing/config', async (_request, response) => {
           period: plan.period
         }];
       }))
-    ]));
+    };
     response.json({
       checkoutEnabled,
       supportedCurrencies,
@@ -2556,6 +2556,10 @@ app.post('/api/billing/subscriptions', requireBillingConfig, requireFirebaseUser
   const planKey = request.body?.planKey;
   const currency = request.body?.currency || 'INR';
   const expectedAmount = request.body?.expectedAmount;
+  if (currency !== 'INR') {
+    response.status(400).json({ error: 'Only INR subscriptions are supported.' });
+    return;
+  }
   const basePlan = billingPlan(planKey, currency);
   if (!basePlan) {
     response.status(400).json({ error: 'Choose a valid monthly or yearly plan.' });
@@ -2900,6 +2904,10 @@ app.post('/api/billing/change-plan', requireBillingConfig, requireFirebaseUser, 
     }
 
     const currency = mapping.currency || 'INR';
+    if (currency !== 'INR') {
+      response.status(409).json({ error: 'Plan changes are available only for INR subscriptions. Your current subscription remains unchanged.' });
+      return;
+    }
     const pricingSnapshot = await db.doc('appConfig/pricing').get();
     const pricing = normalizePricingConfig(pricingSnapshot.exists ? pricingSnapshot.data() : {});
     const yearlyBillingPlan = pricedBillingPlan('yearly', currency, pricing);

@@ -55,7 +55,7 @@ const voucherStatus = $('#pricingVoucherStatus');
 let currentUser = null;
 let billingConfig = null;
 let entitlement = null;
-let selectedCurrency = preferredPricingCurrency();
+const selectedCurrency = preferredPricingCurrency();
 
 $('#supportLink')?.addEventListener('click', event => {
   event.preventDefault();
@@ -70,9 +70,6 @@ supportDialog?.addEventListener('click', event => {
 const formatPrice = (amount, currency = selectedCurrency) => formatCurrencyPrice(amount, currency);
 
 function pricingForCurrency(currency) {
-  if (currency === 'USD') {
-    return window.__pricingConfig?.USD || PLAN_CONFIG.pro.currencies.USD;
-  }
   return window.__pricingConfig || {};
 }
 
@@ -136,16 +133,6 @@ function renderStoredPricing(currency = selectedCurrency) {
   $('#freePrice').setAttribute('aria-busy', 'false');
 }
 
-function useLocalSupportedCurrency(config) {
-  const isLocalHost = ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname);
-  const supportedCurrencies = config.supportedCurrencies || [];
-  if (isLocalHost && config.checkoutEnabled && supportedCurrencies.length
-    && !supportedCurrencies.includes(selectedCurrency)) {
-    selectedCurrency = supportedCurrencies[0];
-    renderStoredPricing(selectedCurrency);
-  }
-}
-
 function updateVoucherControls() {
   const signInRequired = !currentUser;
   const verificationUnavailable = billingConfig?.entitlementEnabled === false;
@@ -186,8 +173,7 @@ async function loadPublicPricingConfig() {
     console.error('Pricing config could not be loaded.', error);
     window.__pricingConfig = {
       monthly: { currentPrice: PLAN_CONFIG.pro.monthly.price, actualPrice: PLAN_CONFIG.pro.monthly.price },
-      yearly: { currentPrice: PLAN_CONFIG.pro.yearly.price, actualPrice: PLAN_CONFIG.pro.yearly.price },
-      USD: PLAN_CONFIG.pro.currencies.USD
+      yearly: { currentPrice: PLAN_CONFIG.pro.yearly.price, actualPrice: PLAN_CONFIG.pro.yearly.price }
     };
     renderStoredPricing(selectedCurrency);
   }
@@ -234,6 +220,7 @@ function updatePurchaseControls() {
   if (active) {
     monthlyButton.textContent = 'Manage billing';
     const canSwitchToYearly = activePlan === 'monthly'
+      && (!entitlement.currency || entitlement.currency === 'INR')
       && entitlement.scheduledPlan !== 'yearly'
       && checkoutReady;
     yearlyButton.textContent = entitlement.scheduledPlan === 'yearly'
@@ -260,8 +247,8 @@ function updatePurchaseControls() {
     monthlyButton.textContent = 'Coming soon';
     yearlyButton.textContent = 'Coming soon';
     checkoutStatus.textContent = billingConfig?.checkoutEnabled
-      ? `${selectedCurrency} checkout is not available yet. Please select another currency or check back later.`
-      : 'Checkout is coming soon. Please check back later. Till then user voucher code is available for free access. Please contact support for more details.';
+      ? 'INR subscriptions are temporarily unavailable. You can continue with the Free plan or redeem a Pro voucher below.'
+      : 'Pro subscriptions are temporarily unavailable. You can continue with the Free plan or redeem a Pro voucher below if you have one.';
   } else if (!currentUser) {
     monthlyButton.textContent = 'Sign in to purchase monthly';
     yearlyButton.textContent = 'Sign in to purchase yearly';
@@ -298,7 +285,6 @@ async function refreshPricingState(user) {
   try {
     if (!billingConfig) {
       billingConfig = await loadBillingConfig();
-      useLocalSupportedCurrency(billingConfig);
     }
     if (billingConfig.entitlementEnabled) entitlement = await loadBillingEntitlement(user);
     if (currentUser?.uid !== user.uid) return;
@@ -320,8 +306,12 @@ async function scheduleYearlySwitch() {
   const date = entitlement.validUntil
     ? new Date(entitlement.validUntil).toLocaleDateString('en-IN')
     : 'the end of your current monthly period';
-  const currency = entitlement.currency === 'USD' ? 'USD' : 'INR';
-  const amount = Number(billingConfig.currencyPlans?.[currency]?.yearly?.amount);
+  if (entitlement.currency && entitlement.currency !== 'INR') {
+    checkoutStatus.textContent = 'Only INR subscriptions can be switched to yearly billing.';
+    return;
+  }
+  const currency = 'INR';
+  const amount = Number(billingConfig.currencyPlans?.INR?.yearly?.amount);
   const price = Number.isSafeInteger(amount) && amount > 0
     ? amount / 100
     : PLAN_CONFIG.pro.currencies[currency].yearly.price;
@@ -369,7 +359,7 @@ async function loadRazorpayCheckout() {
 
 async function startCheckout(planKey) {
   if (!billingConfig?.checkoutEnabled || !billingConfig.supportedCurrencies?.includes(selectedCurrency)) {
-    checkoutStatus.textContent = 'Checkout is coming soon. Please check back later. Till then user voucher code is available for free access. Please contact support for more details.';
+    checkoutStatus.textContent = 'Pro subscriptions are temporarily unavailable. You can continue with the Free plan or redeem a Pro voucher below if you have one.';
     return;
   }
   if (!currentUser) {
@@ -559,7 +549,6 @@ $('#pricingVoucherForm').addEventListener('submit', async event => {
 
 loadBillingConfig().then(config => {
   billingConfig = config;
-  useLocalSupportedCurrency(config);
   if (!config.checkoutEnabled) {
     checkoutStatus.textContent = 'Pro checkout is temporarily unavailable. Please try again later.';
   }
