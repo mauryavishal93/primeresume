@@ -2,6 +2,9 @@ import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { estimateExperienceYears, GENERIC_ATS_WEIGHTING, weightedScore } from './ats-scoring.js';
 import { buildCoverLetterDraft } from './cover-letter.js';
 import { buildCoverLetterPdf } from './cover-letter-pdf.js';
+import { RESUME_PDF_FORMATS } from './resume-pdf.js';
+import { resumeStateForPdfExport } from './tailored-resume.js';
+import { tailorResumeLocally } from './local-resume-tailoring.js';
 import { loadBillingConfig, loadBillingEntitlement } from './billing-client.js';
 import { alertModern, confirmModern, promptModern } from './modern-modal.js';
 import { canUseFeature, FEATURE_IDS, isProTemplate, PLAN_CONFIG, shouldPromptForJobDescriptionAtsUpgrade, TEMPLATE_IDS } from './plan-access.js';
@@ -61,6 +64,14 @@ function normalizeState(d){
  out.docName=str(d.docName).trim()?str(d.docName).slice(0,120):base.docName;
  out.importedSourceText=str(d.importedSourceText);
  if(new TextEncoder().encode(out.importedSourceText).length>200_000)throw Error('The saved original resume text exceeds the supported size.');
+ if(d.tailoredFor&&typeof d.tailoredFor==='object'){
+  out.tailoredFor={
+   jobTitle:str(d.tailoredFor.jobTitle).slice(0,120),
+   company:str(d.tailoredFor.company).slice(0,120),
+   jobDescription:str(d.tailoredFor.jobDescription).slice(0,12000),
+   sourceResumeId:str(d.tailoredFor.sourceResumeId).slice(0,200)
+  };
+ }
  out.template=templateDefs.some(t=>t.id===d.template)?d.template:base.template;
  out.layout=d.layout==='two'?'two':'single';out.mode=d.mode==='free'?'free':'flow';out.freePageCount=clamp(Math.floor(Number(d.freePageCount)||1),1,50,1);
  out.profile={...base.profile};for(const k of Object.keys(base.profile))if(typeof d.profile[k]==='string')out.profile[k]=d.profile[k];
@@ -117,7 +128,7 @@ let verifiedEntitlement=null,pendingProTemplate=null,pendingUpgradeFeature='';
 let billingPricingConfig=null;
 let cloudUser=null,activeCloudResumeId=null,activeCloudRevision=null,cloudSaveTimer=null,cloudSaving=false,cloudSavePending=false,cloudSaveBlocked=false,cloudResumes=[],proTemplateDownloadsRemaining=null,openCloudOnAuth=new URLSearchParams(location.search).get('open')==='cloud';
 let signOutPending=false;
-let pdfPreviewUrl=null,pdfPreviewBlob=null,pdfPreviewFilename='',pdfPreviewGeneration=0,templatePreviewGeneration=0,pdfPreviewUsesProTemplate=false;
+let pdfPreviewUrl=null,pdfPreviewBlob=null,pdfPreviewFilename='',pdfPreviewGeneration=0,templatePreviewGeneration=0,pdfPreviewUsesProTemplate=false,pdfPreviewOptions={format:'a4',margin:0,pageNumbers:false},pendingTailoredCopy=null,pendingTailoredUid=null,pendingTailoredGeneration=null;
 const $esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const lines=v=>String(v||'').split(/\n/).map(x=>x.trim()).filter(Boolean);
 const detailLines=v=>String(v||'').replace(/\r\n?/g,'\n').split('\n');
@@ -150,6 +161,11 @@ function insertPointerLine(sectionId,afterLine){
 }
 function toast(msg){$('toast').textContent=msg;$('toast').classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('toast').classList.remove('show'),2300)}
 function updateProLabel(){const isPro=canUseFeature(FEATURE_IDS.ALL_TEMPLATES,verifiedEntitlement);const badge=$('proBrandBadge');if(badge)badge.hidden=!isPro;document.title=isPro?`${baseDocumentTitle} | Pro`:baseDocumentTitle}
+function requireProFeature(featureId,title,description){
+ if(canUseFeature(featureId,verifiedEntitlement))return true;
+ showUpgrade(featureId,title,description);
+ return false;
+}
 async function refreshEditorBillingStatus(user,generation){
  try{
   const config=await loadBillingConfig();
@@ -1688,8 +1704,8 @@ function downloadRecoveryData(){
  toast('Saved browser data backup downloaded');
 }
 
-function addSelectableText(doc,sheet,{renderingMode='fill'}={}){
- const bounds=sheet.getBoundingClientRect(),scale=210/bounds.width,range=document.createRange(),walker=document.createTreeWalker(sheet,NodeFilter.SHOW_TEXT);
+function addSelectableText(doc,sheet,{renderingMode='fill',placement}={}){
+ const bounds=sheet.getBoundingClientRect(),fit=placement||{bounds,scale:210/bounds.width,x:0,y:0},scale=fit.scale,range=document.createRange(),walker=document.createTreeWalker(sheet,NodeFilter.SHOW_TEXT);
  for(let node=walker.nextNode();node;node=walker.nextNode()){
   const text=node.nodeValue||'';if(!text.trim())continue;
   const style=getComputedStyle(node.parentElement),fontSize=parseFloat(style.fontSize)||12,family=style.fontFamily.toLowerCase();
@@ -1702,7 +1718,7 @@ function addSelectableText(doc,sheet,{renderingMode='fill'}={}){
   let line='',lineTop=null,lineLeft=0;
   const flush=()=>{
    const visibleLine=line.replace(/\s+$/,'');
-   if(visibleLine.trim())drawPdfText(doc,visibleLine,(lineLeft-bounds.left)*scale,(lineTop-bounds.top+fontSize*.86)*scale,{font,style:pdfStyle,size:pdfSize,color,renderingMode});
+   if(visibleLine.trim())drawPdfText(doc,visibleLine,fit.x+(lineLeft-bounds.left)*scale,fit.y+(lineTop-bounds.top+fontSize*.86)*scale,{font,style:pdfStyle,size:pdfSize,color,renderingMode});
    line='';lineTop=null;
   };
   for(let offset=0;offset<text.length;){
@@ -1720,18 +1736,18 @@ function addSelectableText(doc,sheet,{renderingMode='fill'}={}){
   flush();
  }
 }
-function addPDFLinks(doc,sheet){
- const bounds=sheet.getBoundingClientRect(),scaleX=210/bounds.width,scaleY=297/bounds.height;
+function addPDFLinks(doc,sheet,{placement}={}){
+ const bounds=sheet.getBoundingClientRect(),fit=placement||{bounds,scale:210/bounds.width,x:0,y:0},scale=fit.scale;
  sheet.querySelectorAll('.contact a[href]').forEach(anchor=>{
   for(const rect of anchor.getClientRects()){
    if(!rect.width||!rect.height)continue;
-   doc.link((rect.left-bounds.left)*scaleX,(rect.top-bounds.top)*scaleY,rect.width*scaleX,rect.height*scaleY,{url:anchor.href});
+   doc.link(fit.x+(rect.left-bounds.left)*scale,fit.y+(rect.top-bounds.top)*scale,rect.width*scale,rect.height*scale,{url:anchor.href});
   }
  });
 }
-function addPdfDecorations(doc,_sheet,image){
+function addPdfDecorations(doc,_sheet,image,placement){
  if(!image)throw new Error('The resume page image is unavailable for PDF export.');
- doc.addImage(image,'JPEG',0,0,210,297,undefined,'MEDIUM');
+ doc.addImage(image,'JPEG',placement?.x||0,placement?.y||0,placement?.width||210,placement?.height||297,undefined,'MEDIUM');
 }
 function normalizePdfCaptureColors(clonedDocument){
  clonedDocument.querySelectorAll('.sheet [contenteditable]').forEach(element=>{
@@ -1758,7 +1774,9 @@ function normalizePdfCaptureColors(clonedDocument){
   try{stripUnsupportedColors(stylesheet.cssRules);}catch(error){console.warn('Could not sanitize PDF capture stylesheet.',error);}
  }
 }
-async function exportPDF(templateId=null){
+async function exportPDF(templateId=null,options=null){
+ if(options&&!requireProFeature(FEATURE_IDS.PREMIUM_EXPORTS,'Premium export options','Configure PDF page size, margins, and page numbers with Pro.'))return;
+ pdfPreviewOptions=options?{...options}:{format:'a4',margin:0,pageNumbers:false};
  const originalState=state,originalSelection=selectedId,originalZoom=zoom;
  if(templateId){
   const template=templateDefs.find(item=>item.id===templateId);
@@ -1773,6 +1791,7 @@ async function exportPDF(templateId=null){
  const generation=++pdfPreviewGeneration;
  const btn=$('pdfBtn'),status=$('pdfPreviewStatus'),frame=$('pdfPreviewFrame'),downloadBtn=$('downloadPdfPreview');
  openPdfPreview();
+ setFeatureProgress('pdfPreviewProgress',{title:'Preparing your PDF preview',message:'Getting the resume pages ready…',value:8});
  $('pdfPreviewTitle').textContent='Preview your resume PDF';
  status.textContent='Preparing your PDF preview…';
  frame.hidden=true;
@@ -1787,7 +1806,10 @@ async function exportPDF(templateId=null){
   const {default:html2canvas}=await import('html2canvas');
   const {jsPDF}=await import('jspdf');
   if(generation!==pdfPreviewGeneration)return;
-  for(const sheet of sheets){
+  for(let pageIndex=0;pageIndex<sheets.length;pageIndex++){
+   const sheet=sheets[pageIndex];
+   const pageProgress=12+Math.round(pageIndex/Math.max(1,sheets.length)*62);
+   setFeatureProgress('pdfPreviewProgress',{title:'Preparing your PDF preview',message:`Capturing resume page ${pageIndex+1} of ${sheets.length}…`,value:pageProgress});
    const images=[...sheet.querySelectorAll('img')];
    await Promise.all(images.map(image=>image.decode()));
    if(generation!==pdfPreviewGeneration)return;
@@ -1798,16 +1820,20 @@ async function exportPDF(templateId=null){
     canvas.width=0;canvas.height=0;
    }
   }
+  setFeatureProgress('pdfPreviewProgress',{title:'Finishing your PDF',message:'Adding searchable text and links…',value:86});
   const {blob}=await buildResumePdf(jsPDF,renderedPages,{
    addPdfDecorations,
    addSelectableText,
    addPDFLinks,
-   resumeState:state,
+   resumeState:resumeStateForPdfExport(state),
+   ...pdfPreviewOptions,
   });
   if(generation!==pdfPreviewGeneration)return;
   showPdfPreview(blob,`${(state.docName||'resume').replace(/[^a-z0-9-_]+/gi,'-')}.pdf`,sheets.length,'Preview your resume PDF',renderedPages.map(page=>page.image));
+  hideFeatureProgress('pdfPreviewProgress');
  }catch(e){
   console.error(e);
+  setFeatureProgress('pdfPreviewProgress',{title:'PDF preview could not be created',message:e.message||'Close this window and try again.',state:'error'});
   status.textContent=e.message||'PDF preview could not be created. Close this window and try again.';
  }finally{
   $('sheets').classList.remove('exporting');
@@ -1847,7 +1873,8 @@ function showPdfPreview(blob,filename,pageCount,title,previewPages=[]){
     ? ' · Free Pro-template allowance will be checked when downloading'
     : ` · ${proTemplateDownloadsRemaining} free Pro-template PDF download${proTemplateDownloadsRemaining===1?'':'s'} remaining`
   : '';
- $('pdfPreviewStatus').textContent=`Text is selectable and searchable. ${pageCount} A4 page${pageCount===1?'':'s'}${trialText}. Review before downloading — the button is ready when you are.`;
+ const paperLabel=RESUME_PDF_FORMATS[pdfPreviewOptions.format]?.label||'A4';
+ $('pdfPreviewStatus').textContent=`Text is selectable and searchable. ${pageCount} ${paperLabel} page${pageCount===1?'':'s'}${trialText}. Review before downloading — the button is ready when you are.`;
  $('downloadPdfPreview').disabled=false;
  $('downloadPdfPreview').textContent='Download PDF';
 }
@@ -1890,6 +1917,7 @@ function closePdfPreview(){
  $('pdfPreviewPages').hidden=true;
  $('openPdfPreview').removeAttribute('href');
  $('downloadPdfPreview').disabled=true;
+ hideFeatureProgress('pdfPreviewProgress');
  pdfPreviewBlob=null;
  pdfPreviewFilename='';
  if(pdfPreviewUrl){URL.revokeObjectURL(pdfPreviewUrl);pdfPreviewUrl=null}
@@ -2201,9 +2229,338 @@ function renderAtsResults(report){
  container.innerHTML=`<div class="ats-score-row"><div class="ats-score">${hasScore?report.score:'—'}<small>score</small></div><div class="ats-score-meta"><strong>${report.generic?'Generic ATS readiness':'ATS readiness'}</strong><div>${report.generic?'Resume-only estimate; not matched to a job description.':hasScore?'Weighted score based on the 9 ATS criteria':'Paste a target job description to calculate compatibility.'}</div><div class="ats-progress"><span style="width:${hasScore?report.score:0}%"></span></div></div></div>${comparisonDetails}<div class="ats-section-title">${criteriaTitle}</div><div class="ats-criteria-grid">${criteria}</div><div class="ats-section-title">Findings</div><div class="ats-findings">${findings}</div><div class="ats-note">${note}</div>`;
 }
 function openAts(){
+ if(!$('jobDescription').value.trim()&&state.tailoredFor?.jobDescription)$('jobDescription').value=state.tailoredFor.jobDescription;
  $('atsModalBg').classList.add('show');
  $('atsModalBg').setAttribute('aria-hidden','false');
  $('jobDescription').focus();
+}
+function coverLetterStorageKey(){return `resumeOut:coverLetters:${cloudUser?.uid||'guest'}`}
+function getSavedCoverLetterDrafts(){
+ const raw=browserStorage.getItem(coverLetterStorageKey());
+ if(!raw)return [];
+ const drafts=JSON.parse(raw);
+ if(!Array.isArray(drafts))throw new Error('Saved cover-letter drafts are not in a readable format.');
+ return drafts.filter(draft=>draft&&typeof draft.id==='string'&&typeof draft.text==='string');
+}
+function refreshSavedCoverLetterDrafts(){
+ const select=$('savedCoverLetterDrafts');
+ try{
+  const drafts=getSavedCoverLetterDrafts();
+  select.replaceChildren(new Option('Choose a saved draft',''));
+  for(const draft of drafts){
+   const option=new Option(`${draft.name||'Untitled draft'}${draft.company?` · ${draft.company}`:''}`,draft.id);
+   select.add(option);
+  }
+ }catch(error){
+  console.error('Could not read saved cover-letter drafts.',error);
+  toast(error.message||'Could not read saved cover-letter drafts.');
+ }
+}
+async function saveCoverLetterDraft(){
+ if(!requireProFeature(FEATURE_IDS.ENHANCED_COVER_LETTERS,'Enhanced cover-letter tools','Save editable cover-letter drafts and use tone and length controls with Pro.'))return;
+ const text=$('coverLetterDraft').value.trim();
+ if(!text){toast('Generate or write a cover-letter draft first.');return}
+ const button=$('saveCoverLetterDraft');
+ button.disabled=true;
+ button.setAttribute('aria-busy','true');
+ try{
+  setFeatureProgress('coverLetterProgress',{title:'Saving your draft',message:'Keeping this draft in your browser…',value:25});
+  await nextPaint();
+  const drafts=getSavedCoverLetterDrafts();
+  const name=$('coverDraftName').value.trim().slice(0,100)||coverLetterFilename();
+  const draft={
+   id:globalThis.crypto?.randomUUID?.()||`${Date.now()}-${Math.random().toString(36).slice(2)}`,
+   name,
+   jobTitle:$('coverJobTitle').value.trim().slice(0,120),
+   company:$('coverCompany').value.trim().slice(0,120),
+   jobDescription:$('coverJobDescription').value.slice(0,12000),
+   tone:$('coverLetterTone').value,
+   length:$('coverLetterLength').value,
+   text,
+   updatedAt:Date.now()
+  };
+  const previous=drafts.findIndex(item=>item.name===name);
+  if(previous>=0)drafts.splice(previous,1);
+  browserStorage.setItem(coverLetterStorageKey(),JSON.stringify([draft,...drafts].slice(0,20)));
+  $('coverDraftName').value=name;
+  refreshSavedCoverLetterDrafts();
+  $('savedCoverLetterDrafts').value=draft.id;
+  setFeatureProgress('coverLetterProgress',{title:'Draft saved',message:'Saved on this device for your signed-in account.',value:100,state:'complete'});
+  toast('Cover-letter draft saved in this browser.');
+ }catch(error){
+  console.error('Could not save the cover-letter draft.',error);
+  setFeatureProgress('coverLetterProgress',{title:'Draft could not be saved',message:error.message||'Please try again.',state:'error'});
+  toast(error.message||'Could not save this cover-letter draft.');
+ }finally{
+  button.disabled=false;
+  button.removeAttribute('aria-busy');
+ }
+}
+async function loadCoverLetterDraft(){
+ if(!requireProFeature(FEATURE_IDS.ENHANCED_COVER_LETTERS,'Enhanced cover-letter tools','Load editable saved cover-letter drafts with Pro.'))return;
+ const id=$('savedCoverLetterDrafts').value;
+ if(!id){toast('Choose a saved draft first.');return}
+ const button=$('loadCoverLetterDraft');
+ button.disabled=true;
+ button.setAttribute('aria-busy','true');
+ try{
+  setFeatureProgress('coverLetterProgress',{title:'Loading your draft',message:'Reading your saved browser draft…',value:35});
+  await nextPaint();
+  const draft=getSavedCoverLetterDrafts().find(item=>item.id===id);
+  if(!draft)throw new Error('That saved cover-letter draft is no longer available.');
+  $('coverDraftName').value=draft.name||'';
+  $('coverJobTitle').value=draft.jobTitle||'';
+  $('coverCompany').value=draft.company||'';
+  $('coverJobDescription').value=draft.jobDescription||'';
+  $('coverLetterTone').value=['professional','confident','warm'].includes(draft.tone)?draft.tone:'professional';
+  $('coverLetterLength').value=['concise','standard','detailed'].includes(draft.length)?draft.length:'standard';
+  $('coverLetterDraft').value=draft.text;
+  setFeatureProgress('coverLetterProgress',{title:'Draft loaded',message:'Your letter is ready to review and edit.',value:100,state:'complete'});
+  toast('Saved draft loaded.');
+ }catch(error){
+  console.error('Could not load the saved cover-letter draft.',error);
+  setFeatureProgress('coverLetterProgress',{title:'Draft could not be loaded',message:error.message||'Please try again.',state:'error'});
+  toast(error.message||'Could not load this cover-letter draft.');
+ }finally{
+  button.disabled=false;
+  button.removeAttribute('aria-busy');
+ }
+}
+function openTailoredVersion(){
+ if(!requireProFeature(FEATURE_IDS.TAILORED_VERSIONS,'Tailored resume versions','Save separate, named resume copies linked to a role or job description with Pro.'))return;
+ if(!cloudUser){toast('Sign in with Google to save a tailored version to your cloud resumes.');return}
+ if(!cloudReady){toast('Your cloud resumes are still loading. Try again in a moment.');return}
+ hideFeatureProgress('tailoredProgress');
+ pendingTailoredCopy=null;
+ pendingTailoredUid=cloudUser.uid;
+ pendingTailoredGeneration=cloudSessionGeneration;
+ $('tailoredSuggestionPreview').hidden=true;
+ $('createTailoredVersion').disabled=true;
+ $('previewTailoredVersion').disabled=false;
+ $('previewTailoredVersion').hidden=false;
+ $('previewTailoredVersion').textContent='Analyze & preview';
+ $('tailoredVersionName').value=`${$('coverJobTitle').value.trim()||state.docName} — tailored`;
+ $('tailoredJobTitle').value=$('coverJobTitle').value.trim();
+ $('tailoredCompany').value=$('coverCompany').value.trim();
+ $('tailoredJobDescription').value=$('coverJobDescription').value.trim();
+ $('tailoredVersionModalBg').classList.add('show');
+ $('tailoredVersionModalBg').setAttribute('aria-hidden','false');
+ $('tailoredVersionName').focus();
+}
+function closeTailoredVersion({force=false}={}){
+ if(!force&&($('createTailoredVersion').disabled||$('previewTailoredVersion').disabled))return;
+ $('tailoredVersionModalBg').classList.remove('show');
+ $('tailoredVersionModalBg').setAttribute('aria-hidden','true');
+ pendingTailoredCopy=null;
+ pendingTailoredUid=null;
+ pendingTailoredGeneration=null;
+ hideFeatureProgress('tailoredProgress');
+}
+function invalidateTailoredPreview(){
+ if(!pendingTailoredCopy)return;
+ pendingTailoredCopy=null;
+ pendingTailoredUid=null;
+ pendingTailoredGeneration=null;
+ $('tailoredSuggestionPreview').hidden=true;
+ $('createTailoredVersion').disabled=true;
+ $('previewTailoredVersion').textContent='Analyze & preview';
+ hideFeatureProgress('tailoredProgress');
+}
+async function previewTailoredVersion(){
+ if(!requireProFeature(FEATURE_IDS.TAILORED_VERSIONS,'Tailored resume versions','Get local suggestions that prioritize existing resume content for a target job.'))return;
+ const name=$('tailoredVersionName').value.trim();
+ if(!name){toast('Enter a name for this tailored version.');$('tailoredVersionName').focus();return}
+ const button=$('previewTailoredVersion'),cancelButton=$('cancelTailoredVersion'),closeButton=$('closeTailoredVersion');
+ const uid=cloudUser?.uid,generation=cloudSessionGeneration;
+ const fields=['tailoredVersionName','tailoredJobTitle','tailoredCompany','tailoredJobDescription'].map($);
+ button.disabled=true;
+ cancelButton.disabled=true;
+ closeButton.disabled=true;
+ fields.forEach(field=>field.disabled=true);
+ button.setAttribute('aria-busy','true');
+ $('tailoredSuggestionPreview').hidden=true;
+ try{
+  setFeatureProgress('tailoredProgress',{title:'Analyzing your resume locally',message:'Finding words and experience related to the role…',value:18});
+  await nextPaint();
+  await new Promise(resolve=>setTimeout(resolve,220));
+  setFeatureProgress('tailoredProgress',{title:'Preparing your suggestions',message:'Prioritizing matching skills and existing bullet points…',value:58});
+  await nextPaint();
+  await new Promise(resolve=>setTimeout(resolve,180));
+  const result=tailorResumeLocally(state,{
+   name,
+   jobTitle:$('tailoredJobTitle').value,
+   company:$('tailoredCompany').value,
+   jobDescription:$('tailoredJobDescription').value,
+   sourceResumeId:activeCloudResumeId||''
+  });
+  if(cloudUser?.uid!==uid||cloudSessionGeneration!==generation)throw new Error('Your account changed. Reopen this dialog and preview the copy again.');
+  pendingTailoredCopy=result.resume;
+  pendingTailoredUid=uid;
+  pendingTailoredGeneration=generation;
+  const summary=$('tailoredSuggestionSummary');
+  summary.replaceChildren();
+  const heading=document.createElement('strong');
+  heading.textContent=result.analyzed
+   ?`${result.changes.length} suggested update${result.changes.length===1?'':'s'}`
+   :'No job details to compare yet';
+  const message=document.createElement('p');
+  message.textContent=result.message;
+  summary.append(heading,message);
+  if(result.matchedSkills.length){
+   const skillList=document.createElement('div');
+   skillList.className='tailored-skill-matches';
+   const label=document.createElement('span');
+   label.textContent='Relevant existing skills';
+   skillList.append(label);
+   for(const skill of result.matchedSkills){
+    const chip=document.createElement('span');
+    chip.className='tailored-skill-chip';
+    chip.textContent=skill;
+    skillList.append(chip);
+   }
+   summary.append(skillList);
+  }
+  if(result.changes.length){
+   const list=document.createElement('ul');
+   for(const change of result.changes){
+    const item=document.createElement('li');
+    item.textContent=change;
+    list.append(item);
+   }
+   summary.append(list);
+  }
+  $('tailoredSuggestionPreview').hidden=false;
+  $('createTailoredVersion').disabled=!result.analyzed;
+  if(result.analyzed)$('createTailoredVersion').focus();
+  else toast('Add a target role or job description before creating a tailored copy.');
+  setFeatureProgress('tailoredProgress',{title:'Suggestions ready',message:'Review the changes, then create the separate copy.',value:100,state:'complete'});
+ }catch(error){
+  console.error('Could not prepare local resume tailoring suggestions.',error);
+  pendingTailoredCopy=null;
+  pendingTailoredUid=null;
+  pendingTailoredGeneration=null;
+  setFeatureProgress('tailoredProgress',{title:'Could not prepare suggestions',message:error.message||'Please review the job details and try again.',state:'error'});
+  toast(error.message||'Could not prepare resume suggestions.');
+ }finally{
+  button.disabled=false;
+  button.removeAttribute('aria-busy');
+  cancelButton.disabled=false;
+  closeButton.disabled=false;
+  fields.forEach(field=>field.disabled=false);
+ }
+}
+async function createTailoredVersion(){
+ if(!requireProFeature(FEATURE_IDS.TAILORED_VERSIONS,'Tailored resume versions','Save separate, named resume copies linked to a role or job description with Pro.'))return;
+ if(!cloudUser||!cloudReady){toast('Sign in and wait for cloud resumes to load before creating a tailored version.');return}
+ const uid=cloudUser.uid,generation=cloudSessionGeneration;
+ if(!pendingTailoredCopy||pendingTailoredUid!==uid||pendingTailoredGeneration!==generation){toast('Analyze and review the local suggestions again before saving this tailored copy.');return}
+ if(!pendingTailoredCopy.tailoredFor?.jobTitle&&!pendingTailoredCopy.tailoredFor?.jobDescription){toast('Add a target role or job description before creating a tailored copy.');return}
+ const copy=pendingTailoredCopy;
+ const name=copy.docName;
+ const button=$('createTailoredVersion');
+ const previewButton=$('previewTailoredVersion');
+ const closeButton=$('closeTailoredVersion'),cancelButton=$('cancelTailoredVersion');
+ button.disabled=true;
+ previewButton.disabled=true;
+ closeButton.disabled=true;
+ cancelButton.disabled=true;
+ button.setAttribute('aria-busy','true');
+ button.textContent='Saving version…';
+ try{
+  setFeatureProgress('tailoredProgress',{title:'Creating your tailored version',message:'Preparing a separate copy of your resume…',value:18});
+  await nextPaint();
+  setFeatureProgress('tailoredProgress',{title:'Creating your tailored version',message:'Saving the new copy to your cloud resumes…',value:48});
+  await nextPaint();
+  const result=await saveResume(uid,null,name,copy,null);
+  if(cloudUser?.uid!==uid||cloudSessionGeneration!==generation)return;
+  setFeatureProgress('tailoredProgress',{title:'Finishing your new version',message:'Opening the tailored copy in the editor…',value:86});
+  cloudSessionGeneration++;
+  activeCloudResumeId=result.id;
+  activeCloudRevision=result.revision;
+  cloudSaveBlocked=false;
+  state=copy;
+  selectedId=null;
+  history=[];redoHistory=[];
+  setFeatureProgress('tailoredProgress',{title:'Your tailored copy is ready',message:'The new version is saved. Your original resume is unchanged.',value:100,state:'complete'});
+  closeTailoredVersion({force:true});
+  render();
+  void rememberLastWorkedResume(uid,result.id,cloudSessionGeneration);
+  setSaveState('All changes saved');
+  await refreshCloudResumes();
+  toast('Tailored version saved as a separate cloud resume.');
+ }catch(error){
+  console.error('Could not save the tailored resume version.',error);
+  setFeatureProgress('tailoredProgress',{title:'Could not save this version',message:error.message||'Check your connection and try again.',state:'error'});
+  toast(error.message||'Could not save the tailored resume version.');
+ }finally{
+  button.disabled=false;
+  previewButton.disabled=false;
+  closeButton.disabled=false;
+  cancelButton.disabled=false;
+  button.removeAttribute('aria-busy');
+  button.textContent='Create tailored copy';
+ }
+}
+function openPremiumExports(){
+ if(!requireProFeature(FEATURE_IDS.PREMIUM_EXPORTS,'Premium export options','Download an editable DOCX or configure PDF page size, margins, and page numbers with Pro.'))return;
+ hideFeatureProgress('premiumExportProgress');
+ $('premiumExportModalBg').classList.add('show');
+ $('premiumExportModalBg').setAttribute('aria-hidden','false');
+ $('downloadResumeDocx').focus();
+}
+function closePremiumExports({force=false}={}){
+ if(!force&&$('downloadResumeDocx').disabled)return;
+ $('premiumExportModalBg').classList.remove('show');
+ $('premiumExportModalBg').setAttribute('aria-hidden','true');
+ hideFeatureProgress('premiumExportProgress');
+}
+function selectedPremiumPdfOptions(){
+ const format=$('premiumPdfFormat').value;
+ if(!Object.hasOwn(RESUME_PDF_FORMATS,format))throw new Error('Choose a supported PDF page size.');
+ const margin=Number($('premiumPdfMargin').value);
+ if(![0,5,10].includes(margin))throw new Error('Choose a supported PDF outer margin.');
+ return {format,margin,pageNumbers:$('premiumPdfPageNumbers').checked};
+}
+async function downloadResumeDocx(){
+ if(!requireProFeature(FEATURE_IDS.PREMIUM_EXPORTS,'Premium export options','Download an editable DOCX resume with Pro.'))return;
+ const button=$('downloadResumeDocx');
+ const closeButton=$('closePremiumExports'),cancelButton=$('cancelPremiumExports');
+ const previewButton=$('previewPremiumPdf');
+ button.disabled=true;
+ closeButton.disabled=true;
+ cancelButton.disabled=true;
+ previewButton.disabled=true;
+ button.setAttribute('aria-busy','true');
+ button.textContent='Preparing DOCX…';
+ try{
+ setFeatureProgress('premiumExportProgress',{title:'Preparing your editable DOCX',message:'Building the Word document from your resume…',value:24});
+ await nextPaint();
+ const {buildResumeDocx}=await import('./resume-docx.js');
+ setFeatureProgress('premiumExportProgress',{title:'Preparing your editable DOCX',message:'Finishing your editable file…',value:72});
+ const blob=await buildResumeDocx(state);
+ download(`${(state.docName||'resume').replace(/[^a-z0-9-_]+/gi,'-')}.docx`,blob);
+ setFeatureProgress('premiumExportProgress',{title:'DOCX ready',message:'Your editable resume has been downloaded.',value:100,state:'complete'});
+ toast('Editable DOCX downloaded.');
+ }catch(error){
+ console.error('Could not create the editable DOCX resume.',error);
+ setFeatureProgress('premiumExportProgress',{title:'DOCX could not be created',message:error.message||'Please try again.',state:'error'});
+ toast(error.message||'Could not create the editable DOCX resume.');
+ }finally{
+ button.disabled=false;
+ closeButton.disabled=false;
+ cancelButton.disabled=false;
+ previewButton.disabled=false;
+ button.removeAttribute('aria-busy');
+ button.textContent='Download editable DOCX';
+ }
+}
+function previewPremiumPdf(){
+ if(!requireProFeature(FEATURE_IDS.PREMIUM_EXPORTS,'Premium export options','Configure PDF page size, margins, and page numbers with Pro.'))return;
+ try{
+  const options=selectedPremiumPdfOptions();
+  closePremiumExports();
+  void exportPDF(null,options);
+ }catch(error){toast(error.message||'Choose valid PDF export settings.')}
 }
 function closeAts(){
  ++atsCheckGeneration;
@@ -2212,33 +2569,86 @@ function closeAts(){
  $('atsModalBg').classList.remove('show');
  $('atsModalBg').setAttribute('aria-hidden','true');
 }
+function setFeatureProgress(id,{title,message,value=0,state='running'}={}){
+ const panel=$(id);
+ if(!panel)return;
+ panel.hidden=false;
+ panel.classList.toggle('is-complete',state==='complete');
+ panel.classList.toggle('is-error',state==='error');
+ panel.setAttribute('aria-busy',String(state==='running'));
+ const titleNode=$(`${id}Title`),messageNode=$(`${id}Message`),valueNode=$(`${id}Value`),track=valueNode?.parentElement;
+ if(titleNode&&title!==undefined)titleNode.textContent=title;
+ if(messageNode&&message!==undefined)messageNode.textContent=message;
+ const safeValue=Math.max(0,Math.min(100,Number(value)||0));
+ if(valueNode)valueNode.style.width=`${safeValue}%`;
+ if(track){track.setAttribute('aria-valuenow',String(safeValue));track.setAttribute('aria-label',`${title||'Feature'} ${state==='complete'?'complete':state==='error'?'failed':'progress'}`)}
+}
+function hideFeatureProgress(id){
+ const panel=$(id);
+ if(!panel)return;
+ panel.hidden=true;
+ panel.classList.remove('is-complete','is-error');
+ panel.setAttribute('aria-busy','false');
+}
+function nextPaint(){return new Promise(resolve=>requestAnimationFrame(resolve))}
 function openCoverLetter(){
  const jobDescription=$('coverJobDescription');
+ const tailored=state.tailoredFor||{};
+ if(!$('coverJobTitle').value.trim())$('coverJobTitle').value=tailored.jobTitle||'';
+ if(!$('coverCompany').value.trim())$('coverCompany').value=tailored.company||'';
+ if(!jobDescription.value.trim())jobDescription.value=tailored.jobDescription||'';
  if(!jobDescription.value.trim())jobDescription.value=$('jobDescription').value.trim();
  if(!$('coverJobTitle').value.trim()&&jobDescription.value.trim())$('coverJobTitle').value=extractJobTitle(jobDescription.value);
+ hideFeatureProgress('coverLetterProgress');
  $('coverLetterModalBg').classList.add('show');
  $('coverLetterModalBg').setAttribute('aria-hidden','false');
+ refreshSavedCoverLetterDrafts();
  $('coverJobTitle').focus();
 }
 function closeCoverLetter(){
  $('coverLetterModalBg').classList.remove('show');
  $('coverLetterModalBg').setAttribute('aria-hidden','true');
+ hideFeatureProgress('coverLetterProgress');
 }
-function generateCoverLetter(){
- const sections=state.sections.filter(section=>section.visible);
- const summary=sections.find(section=>section.type==='summary')?.content||'';
- const skills=sections.filter(section=>section.type==='skills').flatMap(section=>String(section.content||'').split(/[,;\n|]/).map(skill=>skill.trim()).filter(Boolean));
- const experience=sections.filter(section=>section.type==='experience').flatMap(section=>section.entries||[]);
- $('coverLetterDraft').value=buildCoverLetterDraft({
-  ...state.profile,
-  jobTitle:$('coverJobTitle').value,
-  company:$('coverCompany').value,
-  jobDescription:$('coverJobDescription').value,
-  summary,
-  skills,
-  experience
- });
- toast('Cover letter draft created');
+async function generateCoverLetter(){
+ const button=$('generateCoverLetter');
+ if(button.disabled)return;
+ const progressId='coverLetterProgress';
+ button.disabled=true;
+ button.setAttribute('aria-busy','true');
+ try{
+  setFeatureProgress(progressId,{title:'Building your cover letter',message:'Reviewing resume details…',value:12});
+  await nextPaint();
+  await new Promise(resolve=>setTimeout(resolve,130));
+  setFeatureProgress(progressId,{title:'Building your cover letter',message:'Matching the draft to your target role…',value:48});
+  await new Promise(resolve=>setTimeout(resolve,130));
+  const sections=state.sections.filter(section=>section.visible);
+  const summary=sections.find(section=>section.type==='summary')?.content||'';
+  const skills=sections.filter(section=>section.type==='skills').flatMap(section=>String(section.content||'').split(/[,;\n|]/).map(skill=>skill.trim()).filter(Boolean));
+  const experience=sections.filter(section=>section.type==='experience').flatMap(section=>section.entries||[]);
+  setFeatureProgress(progressId,{title:'Building your cover letter',message:'Assembling an editable draft locally…',value:76});
+  await nextPaint();
+  $('coverLetterDraft').value=buildCoverLetterDraft({
+   ...state.profile,
+   jobTitle:$('coverJobTitle').value,
+   company:$('coverCompany').value,
+   jobDescription:$('coverJobDescription').value,
+   summary,
+   skills,
+   experience,
+   tone:canUseFeature(FEATURE_IDS.ENHANCED_COVER_LETTERS,verifiedEntitlement)?$('coverLetterTone').value:'professional',
+   length:canUseFeature(FEATURE_IDS.ENHANCED_COVER_LETTERS,verifiedEntitlement)?$('coverLetterLength').value:'standard'
+  });
+  setFeatureProgress(progressId,{title:'Draft ready',message:'Review and edit your letter before sending.',value:100,state:'complete'});
+  toast('Cover letter draft created');
+ }catch(error){
+  console.error('Could not generate the cover-letter draft.',error);
+  setFeatureProgress(progressId,{title:'Draft could not be created',message:error.message||'Please try again.',state:'error'});
+  toast(error.message||'Could not create the cover-letter draft.');
+ }finally{
+  button.disabled=false;
+  button.removeAttribute('aria-busy');
+ }
 }
 async function copyCoverLetter(){
  const text=$('coverLetterDraft').value.trim();
@@ -2260,6 +2670,8 @@ async function previewCoverLetterPdf(){
  if(!text){toast('Generate a draft first');return}
  const button=$('downloadCoverLetterPdf');
  const generation=++pdfPreviewGeneration;
+ pdfPreviewOptions={format:'a4',margin:0,pageNumbers:false};
+ setFeatureProgress('pdfPreviewProgress',{title:'Preparing your cover-letter PDF',message:'Laying out the letter…',value:15});
  pdfPreviewUsesProTemplate=false;
  openPdfPreview();
  $('pdfPreviewTitle').textContent='Preview your cover letter PDF';
@@ -2270,19 +2682,24 @@ async function previewCoverLetterPdf(){
  $('downloadPdfPreview').disabled=true;
  try{
   button.disabled=true;
+  button.setAttribute('aria-busy','true');
   button.textContent='Preparing preview…';
   const {jsPDF}=await import('jspdf');
   if(generation!==pdfPreviewGeneration)return;
+  setFeatureProgress('pdfPreviewProgress',{title:'Preparing your cover-letter PDF',message:'Rendering a preview…',value:62});
   const doc=buildCoverLetterPdf(jsPDF,text);
   const blob=doc.output('blob');
   const previewPages=await renderMobilePdfPages(blob,generation);
   if(generation!==pdfPreviewGeneration)return;
   showPdfPreview(blob,`${coverLetterFilename()}.pdf`,doc.getNumberOfPages(),'Preview your cover letter PDF',previewPages);
+  hideFeatureProgress('pdfPreviewProgress');
  }catch(error){
   console.error(error);
+  if(generation===pdfPreviewGeneration)setFeatureProgress('pdfPreviewProgress',{title:'PDF preview could not be created',message:error.message||'Close this window and try again.',state:'error'});
   if(generation===pdfPreviewGeneration)$('pdfPreviewStatus').textContent=error.message||'Cover letter PDF preview could not be created. Close this window and try again.';
  }finally{
   button.disabled=false;
+  button.removeAttribute('aria-busy');
   button.textContent='Download .pdf';
  }
 }
@@ -2303,7 +2720,7 @@ function showUpgrade(featureId,title,description){
  updateUpgradePrice();
  pendingUpgradeFeature=featureId;
  const previewTemplate=pendingUpgradeFeature==='template'&&pendingProTemplate?templateDefs.find(item=>item.id===pendingProTemplate):null;
- $('continueFree').textContent=featureId.startsWith('template')?'Use free Template':'Use free ATS checks';
+ $('continueFree').textContent=featureId.startsWith('template')?'Use free Template':featureId==='job-description-ats'?'Use free ATS checks':'Continue free';
  $('previewUpgrade').hidden=!previewTemplate;
  $('previewUpgrade').textContent=previewTemplate?`Preview ${previewTemplate.name}`:'Preview template';
  $('upgradeModalBg').classList.add('show');
@@ -3544,6 +3961,26 @@ $('confirmCustom').addEventListener('click',()=>{transact(()=>addSection('custom
 $('cancelCustom').addEventListener('click',closeCustomSectionDialog);
 $('modalBg').addEventListener('click',e=>{if(e.target===$('modalBg'))closeCustomSectionDialog()});
 $('coverLetterBtn').addEventListener('click',openCoverLetter);$('closeCoverLetter').addEventListener('click',closeCoverLetter);$('coverLetterModalBg').addEventListener('click',e=>{if(e.target===$('coverLetterModalBg'))closeCoverLetter()});$('generateCoverLetter').addEventListener('click',generateCoverLetter);$('copyCoverLetter').addEventListener('click',copyCoverLetter);$('downloadCoverLetter').addEventListener('click',downloadCoverLetter);$('downloadCoverLetterPdf').addEventListener('click',previewCoverLetterPdf);
+$('coverLetterTone').addEventListener('change',event=>{if(!canUseFeature(FEATURE_IDS.ENHANCED_COVER_LETTERS,verifiedEntitlement)){event.target.value='professional';requireProFeature(FEATURE_IDS.ENHANCED_COVER_LETTERS,'Enhanced cover-letter tools','Choose a cover-letter tone and length, then save editable drafts with Pro.')}});
+$('coverLetterLength').addEventListener('change',event=>{if(!canUseFeature(FEATURE_IDS.ENHANCED_COVER_LETTERS,verifiedEntitlement)){event.target.value='standard';requireProFeature(FEATURE_IDS.ENHANCED_COVER_LETTERS,'Enhanced cover-letter tools','Choose a cover-letter tone and length, then save editable drafts with Pro.')}});
+$('saveCoverLetterDraft').addEventListener('click',saveCoverLetterDraft);
+$('loadCoverLetterDraft').addEventListener('click',loadCoverLetterDraft);
+$('tailorResumeBtn').addEventListener('click',openTailoredVersion);
+$('tailoredVersionName').addEventListener('input',invalidateTailoredPreview);
+$('tailoredJobTitle').addEventListener('input',invalidateTailoredPreview);
+$('tailoredCompany').addEventListener('input',invalidateTailoredPreview);
+$('tailoredJobDescription').addEventListener('input',invalidateTailoredPreview);
+$('closeTailoredVersion').addEventListener('click',closeTailoredVersion);
+$('cancelTailoredVersion').addEventListener('click',closeTailoredVersion);
+$('tailoredVersionModalBg').addEventListener('click',event=>{if(event.target===$('tailoredVersionModalBg'))closeTailoredVersion()});
+$('createTailoredVersion').addEventListener('click',createTailoredVersion);
+$('previewTailoredVersion').addEventListener('click',previewTailoredVersion);
+$('premiumExportBtn').addEventListener('click',openPremiumExports);
+$('closePremiumExports').addEventListener('click',closePremiumExports);
+$('cancelPremiumExports').addEventListener('click',closePremiumExports);
+$('premiumExportModalBg').addEventListener('click',event=>{if(event.target===$('premiumExportModalBg'))closePremiumExports()});
+$('downloadResumeDocx').addEventListener('click',downloadResumeDocx);
+$('previewPremiumPdf').addEventListener('click',previewPremiumPdf);
 $('pageLayout').addEventListener('change',e=>transact(()=>state.layout=e.target.value==='two'?'two':'single'));
 $('editMode').addEventListener('change',e=>transact(()=>{
  const nextMode=e.target.value==='free'?'free':'flow';

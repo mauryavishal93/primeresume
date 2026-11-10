@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { jsPDF } from 'jspdf';
-import { buildResumePdf, drawPdfText } from '../frontend/src/resume-pdf.js';
+import { buildResumePdf, drawPdfText, pdfPagePlacement, RESUME_PDF_FORMATS } from '../frontend/src/resume-pdf.js';
 import { readEmbeddedResumeProject } from '../frontend/src/resume-import-metadata.js';
 
 class UncompressedJsPDF extends jsPDF {
@@ -93,4 +93,30 @@ test('draws resume text with visible vector PDF text operators', () => {
   assert.match(pdf, /\(Sharp Vector Resume Text\) Tj/);
   assert.doesNotMatch(pdf, /3 Tr/);
   assert.doesNotMatch(pdf, /\/Subtype\s*\/Image/);
+});
+
+test('supports Letter pages, outer margins, page numbers, and aligned page content', async () => {
+  const sheet = { getBoundingClientRect: () => ({ left: 0, top: 0, width: 794, height: 1122 }) };
+  const placements = [];
+  const result = buildResumePdf(UncompressedJsPDF, [{ sheet, image: null }, { sheet, image: null }], {
+    format: 'letter',
+    margin: 10,
+    pageNumbers: true,
+    addPdfDecorations: (_doc, _sheet, _image, placement) => placements.push(placement),
+    addSelectableText: (_doc, _sheet, { placement }) => placements.push(placement),
+    addPDFLinks: (_doc, _sheet, { placement }) => placements.push(placement)
+  });
+  const pdf = Buffer.from(await result.blob.arrayBuffer()).toString('latin1');
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'letter' });
+
+  assert.equal(RESUME_PDF_FORMATS.letter.label, 'US Letter');
+  assert.ok(Math.abs(doc.internal.pageSize.getWidth() - 215.9) < 0.001);
+  assert.ok(Math.abs(doc.internal.pageSize.getHeight() - 279.4) < 0.001);
+  assert.equal(placements.length, 6);
+  assert.equal(placements[0], placements[1]);
+  assert.ok(placements[0].x >= 10);
+  assert.ok(placements[0].y >= 10);
+  assert.ok(placements[0].y + placements[0].height <= 269.4);
+  assert.match(pdf, /\(1 \/ 2\) Tj/);
+  assert.match(pdf, /\(2 \/ 2\) Tj/);
 });

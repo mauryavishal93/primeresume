@@ -16,7 +16,10 @@ const PRO_TEMPLATE_IDS = Object.freeze([
 
 export const FEATURE_IDS = Object.freeze({
   ALL_TEMPLATES: 'all-templates',
-  JOB_DESCRIPTION_ATS: 'job-description-ats'
+  JOB_DESCRIPTION_ATS: 'job-description-ats',
+  TAILORED_VERSIONS: 'tailored-versions',
+  ENHANCED_COVER_LETTERS: 'enhanced-cover-letters',
+  PREMIUM_EXPORTS: 'premium-exports'
 });
 
 export const PLAN_CONFIG = Object.freeze({
@@ -55,9 +58,9 @@ export const PRICING_FEATURES = Object.freeze([
   Object.freeze({ label: 'JSON import and export', free: 'Included', pro: 'Included' }),
   Object.freeze({ label: 'Browser autosave', free: 'Included', pro: 'Included' }),
   Object.freeze({ label: 'Existing optional cloud storage', free: 'Unchanged', pro: 'Unchanged' }),
-  Object.freeze({ label: 'Tailored resume versions', free: 'Not available', pro: 'Not available yet' }),
-  Object.freeze({ label: 'Enhanced cover-letter tools', free: 'Not available', pro: 'Not available yet' }),
-  Object.freeze({ label: 'Premium export options', free: 'Not available', pro: 'Not available yet' })
+  Object.freeze({ label: 'Tailored resume versions', free: 'Not available', pro: 'Included' }),
+  Object.freeze({ label: 'Enhanced cover-letter tools', free: 'Not available', pro: 'Included' }),
+  Object.freeze({ label: 'Premium export options', free: 'Not available', pro: 'Included' })
 ]);
 
 export function isProTemplate(templateId) {
@@ -65,7 +68,7 @@ export function isProTemplate(templateId) {
 }
 
 export function canUseFeature(featureId, entitlement, now = Date.now()) {
-  if (featureId !== FEATURE_IDS.ALL_TEMPLATES && featureId !== FEATURE_IDS.JOB_DESCRIPTION_ATS) {
+  if (!Object.values(FEATURE_IDS).includes(featureId)) {
     return false;
   }
 

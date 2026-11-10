@@ -53,8 +53,8 @@ test('PDF export captures the rendered resume and keeps its text layer searchabl
   assert.match(source, /style\.removeProperty\(property\)/);
   assert.doesNotMatch(source, /\.sheet \*, \.sheet \*::before, \.sheet \*::after \{ color: inherit !important; background: transparent !important/);
   assert.match(source, /renderedPages\.push\(\{sheet,image:canvas\.toDataURL\('image\/jpeg',\.94\)\}\)/);
-  assert.match(source, /doc\.addImage\(image,'JPEG',0,0,210,297/);
-  assert.match(pdfSource, /addSelectableText\(doc, sheet, \{ renderingMode: 'invisible' \}\)/);
+  assert.match(source, /doc\.addImage\(image,'JPEG',placement\?\.x\|\|0,placement\?\.y\|\|0,placement\?\.width\|\|210,placement\?\.height\|\|297/);
+  assert.match(pdfSource, /addSelectableText\(doc, sheet, \{ renderingMode: 'invisible', placement \}\)/);
 });
 
 test('mobile editor provides view tabs and shows one full-width panel above the canvas', () => {

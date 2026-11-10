@@ -40,6 +40,8 @@ if (location.hostname.toLowerCase() === 'buildmyportfolio.onrender.com') {
   <span>Import resume</span>
  </button>
  <button class="btn outline" id="coverLetterBtn">Cover letter</button>
+ <button class="btn outline" id="tailorResumeBtn" type="button">Tailor version</button>
+ <button class="btn outline" id="premiumExportBtn" type="button">Export options · Pro</button>
  <a class="btn outline" id="editorCommunityLink" href="/community.html">Community</a>
  <a class="btn outline" id="plansLink" href="/pricing.html">Plans</a>
  <button class="btn primary" id="pdfBtn">Export PDF</button>
@@ -303,9 +305,10 @@ if (location.hostname.toLowerCase() === 'buildmyportfolio.onrender.com') {
   </section>
 </div>
 <div class="modal-bg" id="coverLetterModalBg" aria-hidden="true">
-  <section class="modal cover-letter-modal" role="dialog" aria-modal="true" aria-labelledby="coverLetterTitle">
+  <section class="modal feature-modal cover-letter-modal" role="dialog" aria-modal="true" aria-labelledby="coverLetterTitle">
     <div class="cover-letter-head">
       <div>
+        <p class="feature-eyebrow"><span class="feature-eyebrow-mark" aria-hidden="true">✦</span> COVER LETTER STUDIO <span class="feature-pro-chip">PRO TOOLS</span></p>
         <h2 id="coverLetterTitle">Cover Letter Studio</h2>
         <p class="ats-subtitle">A first draft from your resume and target role. Review every detail before sending.</p>
       </div>
@@ -315,23 +318,83 @@ if (location.hostname.toLowerCase() === 'buildmyportfolio.onrender.com') {
       <div class="field"><label for="coverJobTitle">Job title</label><input id="coverJobTitle" placeholder="e.g. QA Engineer"></div>
       <div class="field"><label for="coverCompany">Company</label><input id="coverCompany" placeholder="Company name"></div>
     </div>
+    <div class="field-row cover-letter-fields">
+      <div class="field"><label for="coverLetterTone">Tone · Pro</label><select id="coverLetterTone"><option value="professional">Professional</option><option value="confident">Confident</option><option value="warm">Warm</option></select></div>
+      <div class="field"><label for="coverLetterLength">Length · Pro</label><select id="coverLetterLength"><option value="concise">Concise</option><option value="standard" selected>Standard</option><option value="detailed">Detailed</option></select></div>
+    </div>
     <div class="field">
       <label for="coverJobDescription">Job description</label>
       <textarea id="coverJobDescription" rows="5" placeholder="Paste the job description to identify relevant skills from your resume"></textarea>
     </div>
     <div class="modal-actions cover-letter-generate">
-      <button class="btn primary" id="generateCoverLetter">Generate draft</button>
+      <button class="btn primary feature-primary-action" id="generateCoverLetter"><span aria-hidden="true">✦</span> Generate draft</button>
+    </div>
+    <div class="feature-progress" id="coverLetterProgress" role="status" aria-live="polite" aria-busy="false" hidden>
+      <span class="feature-progress-spinner" aria-hidden="true"></span>
+      <span class="feature-progress-copy"><strong id="coverLetterProgressTitle">Preparing your draft</strong><span id="coverLetterProgressMessage">Reviewing your resume details…</span><span class="feature-progress-track" role="progressbar" aria-label="Cover letter progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="coverLetterProgressValue"></span></span></span>
     </div>
     <div class="field">
       <label for="coverLetterDraft">Editable cover letter</label>
       <textarea id="coverLetterDraft" rows="14" placeholder="Your draft will appear here"></textarea>
       <div class="small-note">Generated locally from your resume. No account or AI service is used.</div>
     </div>
-    <div class="modal-actions">
+    <div class="field-row cover-letter-fields">
+      <div class="field"><label for="coverDraftName">Draft name · Pro</label><input id="coverDraftName" maxlength="100" placeholder="Name this draft"></div>
+      <div class="field"><label for="savedCoverLetterDrafts">Saved drafts · Pro</label><select id="savedCoverLetterDrafts"><option value="">Choose a saved draft</option></select></div>
+    </div>
+    <p class="small-note">Saved drafts stay in this browser and are separated by Google account; they are not uploaded or synced to the cloud.</p>
+    <div class="modal-actions feature-footer cover-letter-actions">
       <button class="btn soft" id="copyCoverLetter">Copy</button>
       <button class="btn outline" id="downloadCoverLetter">Download .txt</button>
       <button class="btn outline" id="downloadCoverLetterPdf">Download .pdf</button>
+      <button class="btn outline" id="saveCoverLetterDraft" type="button">Save draft · Pro</button>
+      <button class="btn outline" id="loadCoverLetterDraft" type="button">Load saved · Pro</button>
     </div>
+  </section>
+</div>
+<div class="modal-bg" id="tailoredVersionModalBg" aria-hidden="true">
+  <section class="modal feature-modal tailored-modal" role="dialog" aria-modal="true" aria-labelledby="tailoredVersionTitle">
+    <div class="upgrade-modal-head">
+      <div><p class="feature-eyebrow"><span class="feature-eyebrow-mark" aria-hidden="true">↗</span> LOCAL RESUME TAILORING <span class="feature-pro-chip">PRO</span></p><h2 id="tailoredVersionTitle">Tailor a resume for a job</h2><p class="ats-subtitle">We’ll compare the role with your existing resume, suggest what to emphasize, and show a preview before creating a copy.</p></div>
+      <button class="size-btn" id="closeTailoredVersion" type="button" aria-label="Close tailored resume dialog">✕</button>
+    </div>
+    <div class="feature-info-card"><span class="feature-info-icon" aria-hidden="true">⌕</span><span><strong>Private, evidence-based suggestions</strong><small>Analysis runs in this browser. It only reorders your existing skills, experience, and bullets—no wording or facts are invented.</small></span></div>
+    <div class="field"><label for="tailoredVersionName">Version name</label><input id="tailoredVersionName" maxlength="120" required placeholder="e.g. Senior QA Engineer · Acme"></div>
+    <div class="field-row cover-letter-fields">
+      <div class="field"><label for="tailoredJobTitle">Target role <span class="field-optional">optional</span></label><input id="tailoredJobTitle" maxlength="120" placeholder="e.g. QA Engineer"></div>
+      <div class="field"><label for="tailoredCompany">Company <span class="field-optional">optional</span></label><input id="tailoredCompany" maxlength="120" placeholder="Only used to name your copy"></div>
+    </div>
+    <div class="field"><label for="tailoredJobDescription">Job description <span class="field-optional">optional, recommended for better suggestions</span></label><textarea id="tailoredJobDescription" rows="5" maxlength="12000" placeholder="Paste the role details. This helps identify which existing parts of your resume are most relevant."></textarea></div>
+    <div class="tailored-suggestion-preview" id="tailoredSuggestionPreview" hidden>
+      <div class="tailored-preview-heading"><span class="tailored-preview-icon" aria-hidden="true">✦</span><div><strong>Tailoring suggestions</strong><small>Review what will change in the new copy.</small></div></div>
+      <div id="tailoredSuggestionSummary" class="tailored-preview-summary" aria-live="polite"></div>
+      <p class="tailored-content-note"><strong>Your words stay yours.</strong> The local matcher can prioritize relevant details, but it does not rewrite, add, or remove resume facts.</p>
+    </div>
+    <p class="feature-privacy-note">A company name is not required. The role and description are analyzed locally; the saved copy and job description are stored with your Google cloud resumes.</p>
+    <div class="feature-progress" id="tailoredProgress" role="status" aria-live="polite" aria-busy="false" hidden>
+      <span class="feature-progress-spinner" aria-hidden="true"></span>
+      <span class="feature-progress-copy"><strong id="tailoredProgressTitle">Saving your tailored copy</strong><span id="tailoredProgressMessage">Preparing a separate version…</span><span class="feature-progress-track" role="progressbar" aria-label="Tailored resume progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="tailoredProgressValue"></span></span></span>
+    </div>
+    <div class="modal-actions feature-footer tailored-footer"><button class="btn soft" id="cancelTailoredVersion" type="button">Cancel</button><button class="btn outline" id="previewTailoredVersion" type="button">Analyze &amp; preview</button><button class="btn primary feature-primary-action" id="createTailoredVersion" type="button" disabled><span aria-hidden="true">↗</span> Create tailored copy</button></div>
+  </section>
+</div>
+<div class="modal-bg" id="premiumExportModalBg" aria-hidden="true">
+  <section class="modal feature-modal premium-export-modal" role="dialog" aria-modal="true" aria-labelledby="premiumExportTitle">
+    <div class="upgrade-modal-head">
+      <div><p class="eyebrow">PREMIUM EXPORTS · PRO</p><h2 id="premiumExportTitle">Export options</h2><p class="ats-subtitle">Choose an editable DOCX or adjust the PDF page layout.</p></div>
+      <button class="size-btn" id="closePremiumExports" type="button" aria-label="Close export options">✕</button>
+    </div>
+    <div class="feature-export-choice"><span class="feature-export-icon" aria-hidden="true">W</span><span><strong>Editable DOCX</strong><small>Open, refine, and share in your word processor.</small></span></div>
+    <div class="field-row cover-letter-fields">
+      <div class="field"><label for="premiumPdfFormat">PDF page size</label><select id="premiumPdfFormat"><option value="a4">A4</option><option value="letter">US Letter</option></select></div>
+      <div class="field"><label for="premiumPdfMargin">PDF outer margin</label><select id="premiumPdfMargin"><option value="0">None</option><option value="5">5 mm</option><option value="10">10 mm</option></select></div>
+    </div>
+    <label class="checkbox-field"><input id="premiumPdfPageNumbers" type="checkbox"> Add page numbers</label>
+    <div class="feature-progress" id="premiumExportProgress" role="status" aria-live="polite" aria-busy="false" hidden>
+      <span class="feature-progress-spinner" aria-hidden="true"></span>
+      <span class="feature-progress-copy"><strong id="premiumExportProgressTitle">Preparing your export</strong><span id="premiumExportProgressMessage">Building your editable file…</span><span class="feature-progress-track" role="progressbar" aria-label="Export progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="premiumExportProgressValue"></span></span></span>
+    </div>
+    <div class="modal-actions feature-footer"><button class="btn soft" id="cancelPremiumExports" type="button">Cancel</button><button class="btn outline" id="downloadResumeDocx" type="button">Download editable DOCX</button><button class="btn primary feature-primary-action" id="previewPremiumPdf" type="button">Preview custom PDF</button></div>
   </section>
 </div>
 <div class="modal-bg" id="pdfPreviewModalBg" aria-hidden="true">
@@ -340,6 +403,7 @@ if (location.hostname.toLowerCase() === 'buildmyportfolio.onrender.com') {
       <div>
         <h2 id="pdfPreviewTitle">Preview your resume PDF</h2>
         <p class="ats-subtitle" id="pdfPreviewStatus" aria-live="polite">Preparing your PDF preview…</p>
+        <div class="feature-progress pdf-feature-progress" id="pdfPreviewProgress" role="status" aria-live="polite" aria-busy="false" hidden><span class="feature-progress-spinner" aria-hidden="true"></span><span class="feature-progress-copy"><strong id="pdfPreviewProgressTitle">Preparing your PDF</strong><span id="pdfPreviewProgressMessage">Capturing your resume pages…</span><span class="feature-progress-track" role="progressbar" aria-label="PDF export progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="pdfPreviewProgressValue"></span></span></span></div>
       </div>
       <button class="size-btn" id="closePdfPreview" aria-label="Close PDF preview">✕</button>
     </div>

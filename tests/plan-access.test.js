@@ -121,7 +121,7 @@ test('homepage demo embeds an isolated live editor preview on both landing pages
   assert.match(editorCss, /\.google-signin \[data-auth-sign-in-label\],\.google-signin #googleSignInLabel\{position:absolute;width:1px;height:1px/);
 });
 
-test('essential Free features are included and future Pro features remain unavailable', () => {
+test('essential Free features stay included and the three new features are listed as Pro', () => {
   for (const label of [
     'Resume editor',
     'Standard PDF export',
@@ -132,7 +132,9 @@ test('essential Free features are included and future Pro features remain unavai
   ]) {
     assert.equal(PRICING_FEATURES.find(feature => feature.label === label)?.free, 'Included');
   }
-  assert.equal(PRICING_FEATURES.find(feature => feature.label === 'Tailored resume versions')?.pro, 'Not available yet');
+  for (const label of ['Tailored resume versions', 'Enhanced cover-letter tools', 'Premium export options']) {
+    assert.equal(PRICING_FEATURES.find(feature => feature.label === label)?.pro, 'Included');
+  }
 });
 
 test('pricing comparison renders included and unavailable features as accessible status icons', () => {
@@ -174,6 +176,9 @@ test('only recognized Pro features accept an active unexpired verified entitleme
 
   assert.equal(canUseFeature(FEATURE_IDS.ALL_TEMPLATES, entitlement, 1_000), true);
   assert.equal(canUseFeature(FEATURE_IDS.JOB_DESCRIPTION_ATS, entitlement, 1_000), true);
+  assert.equal(canUseFeature(FEATURE_IDS.TAILORED_VERSIONS, entitlement, 1_000), true);
+  assert.equal(canUseFeature(FEATURE_IDS.ENHANCED_COVER_LETTERS, entitlement, 1_000), true);
+  assert.equal(canUseFeature(FEATURE_IDS.PREMIUM_EXPORTS, entitlement, 1_000), true);
 });
 
 test('job-description ATS attempts prompt Free users to upgrade but not Pro users', () => {
@@ -331,7 +336,7 @@ test('Pro template preview offers PDF export without a template-application tria
 test('Free users preview Pro templates and can render a PDF without applying the template', () => {
   const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
   assert.match(source, /pendingProTemplate=null;\s*openTemplatePreview\(templateId\)/);
-  assert.match(source, /async function exportPDF\(templateId=null\)/);
+  assert.match(source, /async function exportPDF\(templateId=null,options=null\)/);
   assert.match(source, /void exportPDF\(templateId\)/);
   assert.match(source, /consumeProTemplateDownload\(cloudUser\.uid\)/);
   assert.match(source, /You have used both free Pro-template PDF downloads\. Export is disabled/);
