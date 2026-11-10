@@ -1,9 +1,5 @@
-export function preferredPricingCurrency(locale = globalThis.navigator?.language) {
-  try {
-    return new Intl.Locale(locale || 'en-US').region === 'IN' ? 'INR' : 'USD';
-  } catch {
-    return 'USD';
-  }
+export function preferredPricingCurrency() {
+  return 'INR';
 }
 
 export function formatCurrencyPrice(amount, currency, locale = globalThis.navigator?.language || 'en-US') {

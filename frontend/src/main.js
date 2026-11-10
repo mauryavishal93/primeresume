@@ -2311,7 +2311,7 @@ function showUpgrade(featureId,title,description){
  $('viewPlans').focus();
 }
 function updateUpgradePrice(){
- const currency=preferredPricingCurrency(),fallback=PLAN_CONFIG.pro.currencies[currency];
+ const currency=preferredPricingCurrency(),fallback=PLAN_CONFIG.pro.currencies.INR;
  const configured=billingPricingConfig?.currencyPlans?.[currency];
  const monthlyAmount=Number(configured?.monthly?.amount);
  const yearlyAmount=Number(configured?.yearly?.amount);

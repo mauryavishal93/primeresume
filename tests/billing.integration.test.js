@@ -369,6 +369,40 @@ test('active monthly subscribers can schedule yearly billing at the end of their
   }
 });
 
+test('non-INR subscriptions cannot schedule new yearly billing', async () => {
+  const subscriptionId = 'sub_switchusd';
+  const validUntil = Date.now() + 30 * 24 * 60 * 60 * 1000;
+  fakeDatabase.records.set(`billingSubscriptions/${subscriptionId}`, {
+    uid: 'user-4',
+    planKey: 'monthly',
+    planId: 'plan_monthly_usd_test',
+    currency: 'USD'
+  });
+  fakeDatabase.records.set('users/user-4/billing/entitlement', {
+    planId: 'pro',
+    billingPlan: 'monthly',
+    currency: 'USD',
+    validUntil,
+    subscriptionId
+  });
+
+  try {
+    const response = await request('/api/billing/change-plan', {
+      method: 'POST',
+      token: 'fourth-test-token',
+      body: { planKey: 'yearly' }
+    });
+
+    assert.equal(response.status, 409);
+    assert.match((await response.json()).error, /Plan changes are available only for INR subscriptions/);
+    assert.equal(fakeDatabase.records.get('users/user-4/billing/entitlement').scheduledPlan, undefined);
+  } finally {
+    fakeDatabase.records.delete(`billingSubscriptions/${subscriptionId}`);
+    fakeDatabase.records.delete('users/user-4/billing/entitlement');
+    fakeDatabase.records.delete('users/user-4/billing/checkout');
+  }
+});
+
 test('unsupported domestic-card plan changes preserve the current subscription and return a guided fallback', async () => {
   const subscriptionId = 'sub_switchdomestic';
   const validUntil = Date.now() + 30 * 24 * 60 * 60 * 1000;
@@ -543,8 +577,8 @@ test('admin regional prices create verified Razorpay plans and charge the config
   const dynamicBillingConfigResponse = await request('/api/billing/config');
   const dynamicBillingConfig = await dynamicBillingConfigResponse.json();
   assert.equal(dynamicBillingConfig.currencyPlans.INR.monthly.amount, 10900);
-  assert.equal(dynamicBillingConfig.currencyPlans.USD.monthly.amount, 425);
-  assert.ok(dynamicBillingConfig.supportedCurrencies.includes('USD'));
+  assert.equal(dynamicBillingConfig.currencyPlans.USD, undefined);
+  assert.deepEqual(dynamicBillingConfig.supportedCurrencies, ['INR']);
 
   const configuredMonthlyPlanId = process.env.RAZORPAY_PLAN_MONTHLY_ID;
   process.env.RAZORPAY_PLAN_MONTHLY_ID = 'sub_not_a_plan_id';
@@ -553,7 +587,7 @@ test('admin regional prices create verified Razorpay plans and charge the config
     const configWithSubscriptionIdBody = await configWithSubscriptionId.json();
     assert.equal(configWithSubscriptionIdBody.checkoutEnabled, true);
     assert.ok(configWithSubscriptionIdBody.supportedCurrencies.includes('INR'));
-    assert.ok(configWithSubscriptionIdBody.supportedCurrencies.includes('USD'));
+    assert.deepEqual(configWithSubscriptionIdBody.supportedCurrencies, ['INR']);
   } finally {
     process.env.RAZORPAY_PLAN_MONTHLY_ID = configuredMonthlyPlanId;
   }
@@ -561,7 +595,7 @@ test('admin regional prices create verified Razorpay plans and charge the config
   const stalePriceCheckout = await request('/api/billing/subscriptions', {
     method: 'POST',
     token: 'third-test-token',
-    body: { planKey: 'monthly', currency: 'USD', expectedAmount: 367 }
+    body: { planKey: 'monthly', currency: 'INR', expectedAmount: 9900 }
   });
   assert.equal(stalePriceCheckout.status, 409);
   assert.equal(fakeDatabase.records.has('users/user-3/billing/checkout'), false);
@@ -569,20 +603,20 @@ test('admin regional prices create verified Razorpay plans and charge the config
   const checkout = await request('/api/billing/subscriptions', {
     method: 'POST',
     token: 'third-test-token',
-    body: { planKey: 'monthly', currency: 'USD', expectedAmount: 425 }
+    body: { planKey: 'monthly', currency: 'INR', expectedAmount: 10900 }
   });
   const checkoutBody = await checkout.json();
   assert.equal(checkout.status, 201, JSON.stringify(checkoutBody));
-  assert.equal(checkoutBody.plan.amount, 425);
-  assert.equal(fakeDatabase.records.get('billingSubscriptions/sub_test1').planId, usdPlanId);
-  assert.equal(fakeDatabase.records.get('billingSubscriptions/sub_test1').amount, 425);
+  assert.equal(checkoutBody.plan.amount, 10900);
+  assert.equal(fakeDatabase.records.get('billingSubscriptions/sub_test1').planId, inrPlanId);
+  assert.equal(fakeDatabase.records.get('billingSubscriptions/sub_test1').amount, 10900);
 
   providerSubscription = {
     id: 'sub_test1',
-    plan_id: usdPlanId,
+    plan_id: inrPlanId,
     status: 'active',
     current_end: Math.floor(Date.now() / 1000) + 3600,
-    notes: { plan_key: 'monthly', currency: 'USD' }
+    notes: { plan_key: 'monthly', currency: 'INR' }
   };
   providerSubscriptions.set('sub_test1', providerSubscription);
   const signature = createHmac('sha256', environment.RAZORPAY_KEY_SECRET)
@@ -599,8 +633,8 @@ test('admin regional prices create verified Razorpay plans and charge the config
   });
   const verifiedBody = await verified.json();
   assert.equal(verified.status, 200, JSON.stringify(verifiedBody));
-  assert.equal(fakeDatabase.records.get('billingPayments/pay_test1').amount, 425);
-  assert.equal(fakeDatabase.records.get('billingPayments/pay_test1').currency, 'USD');
+  assert.equal(fakeDatabase.records.get('billingPayments/pay_test1').amount, 10900);
+  assert.equal(fakeDatabase.records.get('billingPayments/pay_test1').currency, 'INR');
 
   fakeDatabase.records.delete('billingSubscriptions/sub_test1');
   fakeDatabase.records.delete('users/user-3/billing/checkout');
@@ -688,12 +722,11 @@ test('admin pricing saves supported currencies when Razorpay rejects USD currenc
   }
 });
 
-test('international checkout selects the server-verified USD Razorpay plan', async () => {
+test('checkout accepts INR only and rejects requests for other currencies', async () => {
   const configResponse = await request('/api/billing/config');
   const config = await configResponse.json();
-  assert.deepEqual(config.supportedCurrencies, ['INR', 'USD']);
-  assert.equal(config.currencyPlans.USD.monthly.amount, 367);
-  assert.equal(config.currencyPlans.USD.yearly.amount, 4937);
+  assert.deepEqual(config.supportedCurrencies, ['INR']);
+  assert.equal(config.currencyPlans.USD, undefined);
 
   const unsupportedCurrency = await request('/api/billing/subscriptions', {
     method: 'POST',
@@ -701,50 +734,15 @@ test('international checkout selects the server-verified USD Razorpay plan', asy
     body: { planKey: 'monthly', currency: 'EUR' }
   });
   assert.equal(unsupportedCurrency.status, 400);
+  assert.match((await unsupportedCurrency.json()).error, /Only INR subscriptions are supported/);
 
-  const checkout = await request('/api/billing/subscriptions', {
+  const usdCheckout = await request('/api/billing/subscriptions', {
     method: 'POST',
     token: 'third-test-token',
     body: { planKey: 'monthly', currency: 'USD', expectedAmount: 367, amount: 1 }
   });
-  assert.equal(checkout.status, 201);
-  const result = await checkout.json();
-  assert.equal(result.plan.amount, 367);
-  assert.equal(result.plan.currency, 'USD');
-  assert.equal(fakeDatabase.records.get('billingSubscriptions/sub_test1').currency, 'USD');
-  assert.equal(fakeDatabase.records.get('billingSubscriptions/sub_test1').planId, 'plan_monthly_usd_test');
-  assert.equal(fakeDatabase.records.get('users/user-3/billing/checkout').currency, 'USD');
-  providerSubscription = {
-    id: 'sub_test1',
-    plan_id: 'plan_monthly_usd_test',
-    status: 'active',
-    current_end: Math.floor(Date.now() / 1000) + 3600,
-    notes: { plan_key: 'monthly', currency: 'USD' }
-  };
-  providerSubscriptions.set('sub_test1', providerSubscription);
-  const signature = createHmac('sha256', environment.RAZORPAY_KEY_SECRET)
-    .update('sub_test1|pay_test1')
-    .digest('hex');
-  const verified = await request('/api/billing/verify', {
-    method: 'POST',
-    token: 'third-test-token',
-    body: {
-      razorpaySubscriptionId: 'sub_test1',
-      razorpayPaymentId: 'pay_test1',
-      razorpaySignature: signature
-    }
-  });
-  const verifiedBody = await verified.json();
-  assert.equal(verified.status, 200, JSON.stringify(verifiedBody));
-  assert.equal(verifiedBody.entitlement.currency, 'USD');
-  assert.equal(fakeDatabase.records.get('billingPayments/pay_test1').currency, 'USD');
-  fakeDatabase.records.delete('billingSubscriptions/sub_test1');
-  fakeDatabase.records.delete('users/user-3/billing/checkout');
-  fakeDatabase.records.delete('users/user-3/billing/entitlement');
-  fakeDatabase.records.delete('billingPayments/pay_test1');
-  providerSubscription = null;
-  providerSubscriptions.delete('sub_test1');
-  nextSubscriptionId = 0;
+  assert.equal(usdCheckout.status, 400);
+  assert.match((await usdCheckout.json()).error, /Only INR subscriptions are supported/);
 });
 
 test('admin dashboard reports current subscriptions and captured revenue accurately', async () => {

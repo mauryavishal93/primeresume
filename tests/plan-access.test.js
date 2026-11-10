@@ -290,19 +290,25 @@ test('all site pages use the ResumeOut icon and styled text wordmark', () => {
   assert.match(logo, /#123FBA/);
 });
 
-test('monthly and yearly prices match the displayed INR subscriptions', () => {
+test('public pricing always uses INR while historical currencies remain formattable', () => {
   assert.equal(PLAN_CONFIG.pro.currency, 'INR');
   assert.deepEqual(PLAN_CONFIG.pro.monthly, { price: 99, interval: 'month' });
   assert.deepEqual(PLAN_CONFIG.pro.yearly, { price: 399, interval: 'year' });
   assert.equal(PLAN_CONFIG.pro.currencies.USD.monthly.price, 3.67);
   assert.equal(PLAN_CONFIG.pro.currencies.USD.yearly.price, 49.37);
   assert.equal(preferredPricingCurrency('en-IN'), 'INR');
-  assert.equal(preferredPricingCurrency('en-US'), 'USD');
-  assert.equal(preferredPricingCurrency('fr-FR'), 'USD');
+  assert.equal(preferredPricingCurrency('en-US'), 'INR');
+  assert.equal(preferredPricingCurrency('fr-FR'), 'INR');
   assert.equal(formatCurrencyPrice(3.67, 'USD', 'en-US'), '$3.67');
   assert.equal(formatCurrencyPrice(99, 'INR', 'en-IN'), '₹99');
 
   const pricingPage = readFileSync(new URL('../frontend/pricing.html', import.meta.url), 'utf8');
+  assert.match(pricingPage, /billed in Indian rupees \(INR\)/);
+  assert.doesNotMatch(pricingPage, /selected automatically from your browser locale/);
+  const pricingSource = readFileSync(new URL('../frontend/src/pricing.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(pricingSource, /useLocalSupportedCurrency/);
+  assert.doesNotMatch(pricingSource, /Till then user voucher code is available for free access/);
+  assert.match(pricingSource, /temporarily unavailable\. You can continue with the Free plan or redeem a Pro voucher below/);
   assert.doesNotMatch(pricingPage, /pricingCurrency|pricing-currency-picker/);
   assert.match(pricingPage, /Loading price/);
   const adminPage = readFileSync(new URL('../frontend/admin.html', import.meta.url), 'utf8');
