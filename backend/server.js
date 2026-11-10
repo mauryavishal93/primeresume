@@ -556,6 +556,17 @@ function providerPlanId(planKey, currency = 'INR', pricing = {}) {
   return isRazorpayPlanId(planId) ? planId : null;
 }
 
+function providerPlanIdCandidates(planKey, currency, pricing) {
+  const envKey = billingPlanEnvKey(planKey, currency);
+  const envPlanId = envKey ? (process.env[envKey] || '').trim() : '';
+  const savedPlanId = pricing?.providerPlanIds?.[currency]?.[planKey];
+  return [...new Set([
+    providerPlanId(planKey, currency, pricing),
+    savedPlanId,
+    envPlanId
+  ].filter(isRazorpayPlanId))];
+}
+
 function providerSubscriptionId(planKey, currency = 'INR') {
   const envKey = billingPlanEnvKey(planKey, currency);
   const envValue = envKey ? (process.env[envKey] || '').trim() : '';
@@ -580,27 +591,40 @@ function pricedBillingPlan(planKey, currency, pricing) {
 async function verifiedProviderPlan(planKey, currency = 'INR', pricing = {}) {
   const expected = pricedBillingPlan(planKey, currency, pricing);
   if (!expected) return null;
-  let resolvedPlanId = providerPlanId(planKey, currency, pricing);
-  if (!resolvedPlanId) {
+  const candidates = providerPlanIdCandidates(planKey, currency, pricing);
+  if (!candidates.length) {
     const subscriptionId = providerSubscriptionId(planKey, currency);
     if (!subscriptionId) {
       throw new Error(`The Razorpay ${currency} ${planKey} plan is not configured.`);
     }
     const subscription = await razorpayRequest(`/subscriptions/${encodeURIComponent(subscriptionId)}`);
-    resolvedPlanId = subscription?.plan_id;
+    const resolvedPlanId = subscription?.plan_id;
     if (!isRazorpayPlanId(resolvedPlanId)) {
       const error = new Error(`The configured Razorpay ${currency} ${planKey} subscription does not reference a valid plan.`);
       error.status = 503;
       throw error;
     }
+    candidates.push(resolvedPlanId);
   }
-  const plan = await razorpayRequest(`/plans/${encodeURIComponent(resolvedPlanId)}`);
-  if (!planMatchesRazorpay(plan, expected)) {
-    const error = new Error(`The Razorpay ${currency} ${planKey} plan does not match the configured price and billing interval.`);
-    error.status = 503;
-    throw error;
+
+  let lastError;
+  for (const candidate of candidates) {
+    let plan;
+    try {
+      plan = await razorpayRequest(`/plans/${encodeURIComponent(candidate)}`);
+    } catch (error) {
+      if (error?.status !== 404) throw error;
+      lastError = error;
+      continue;
+    }
+    if (planMatchesRazorpay(plan, expected)) return plan;
+
+    lastError = new Error(`The Razorpay ${currency} ${planKey} plan does not match the configured price and billing interval.`);
+    lastError.status = 503;
   }
-  return plan;
+
+  if (lastError) throw lastError;
+  throw new Error(`The Razorpay ${currency} ${planKey} plan could not be verified.`);
 }
 
 function subscriptionDocument(db, subscriptionId) {
