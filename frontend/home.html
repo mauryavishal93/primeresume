@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Build a professional resume with ResumeOut.com using templates, ATS guidance, cover letters, PDF export, and cloud saves.">
+    <meta name="description" content="Create a polished, ATS-ready resume with modern templates, cover-letter tools, and PDF export. Save your work in your browser or sync securely with Google sign-in.">
     <meta name="google-site-verification" content="cZBO9Dep1lxwuXy8ZdWLqV-8iwgojYIeHsuf8TBKeNU">
     <title>Resume Builder | ResumeOut.com</title>
     <link rel="icon" type="image/svg+xml" href="/images/resumeout-mark.svg">
@@ -116,6 +116,7 @@
         color: #a9bbcf;
       }
       .demo-window {
+        position: relative;
         width: min(100%, 1180px);
         margin: 22px auto 0;
         padding: 0;
@@ -125,11 +126,122 @@
         box-shadow: 0 26px 70px rgba(0,0,0,0.32);
         overflow: hidden;
       }
-      .home-demo-video {
+      .home-editor-preview {
         display: block;
         width: 100%;
-        height: auto;
+        height: clamp(680px, 72vw, 900px);
+        border: 0;
+        pointer-events: none;
         background: #06121d;
+      }
+      .demo-guide {
+        position: absolute;
+        z-index: 2;
+        inset: 0;
+        overflow: hidden;
+        pointer-events: none;
+      }
+      .demo-guide-cursor {
+        position: absolute;
+        top: 26%;
+        left: 12%;
+        width: 38px;
+        height: 48px;
+        color: #fff;
+        filter: drop-shadow(0 3px 4px rgba(0,0,0,.7));
+        animation: demo-cursor-tour 12s ease-in-out infinite;
+      }
+      .demo-guide-cursor svg {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+      .demo-guide-cursor::after {
+        position: absolute;
+        top: 10px;
+        left: 8px;
+        width: 24px;
+        height: 24px;
+        border: 2px solid #fff;
+        border-radius: 50%;
+        content: "";
+        opacity: 0;
+        animation: demo-cursor-click 12s ease-out infinite;
+      }
+      .demo-guide-step {
+        position: absolute;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        max-width: min(230px, 42%);
+        padding: 9px 13px 9px 9px;
+        border: 1px solid rgba(255,255,255,.2);
+        border-radius: 12px;
+        background: rgba(8,19,32,.92);
+        color: #f7fbff;
+        font-size: 13px;
+        font-weight: 750;
+        line-height: 1.3;
+        box-shadow: 0 8px 26px rgba(0,0,0,.28);
+        opacity: 0;
+        animation: demo-guide-caption 12s ease-in-out infinite;
+      }
+      .demo-guide-step:nth-of-type(1) { top: 34%; left: 3%; animation-delay: 0s; }
+      .demo-guide-step:nth-of-type(2) { top: 58%; left: 39%; animation-delay: 4s; }
+      .demo-guide-step:nth-of-type(3) { top: 34%; right: 2%; animation-delay: 8s; }
+      .demo-guide-step b {
+        display: grid;
+        width: 24px;
+        height: 24px;
+        flex: 0 0 24px;
+        place-items: center;
+        border-radius: 50%;
+        background: #8ce2d2;
+        color: #0c4038;
+        font-size: 12px;
+      }
+      @keyframes demo-cursor-tour {
+        0%, 8% { top: 25%; left: 12%; }
+        24%, 31% { top: 25%; left: 12%; }
+        40%, 48% { top: 50%; left: 51%; }
+        57%, 65% { top: 50%; left: 51%; }
+        74%, 82% { top: 25%; left: 88%; }
+        91%, 100% { top: 25%; left: 88%; }
+      }
+      @keyframes demo-cursor-click {
+        0%, 14%, 100% { transform: scale(.35); opacity: 0; }
+        17% { transform: scale(1.2); opacity: .8; }
+        23% { transform: scale(1.7); opacity: 0; }
+        49% { transform: scale(.35); opacity: 0; }
+        52% { transform: scale(1.2); opacity: .8; }
+        58% { transform: scale(1.7); opacity: 0; }
+        83% { transform: scale(.35); opacity: 0; }
+        86% { transform: scale(1.2); opacity: .8; }
+        92% { transform: scale(1.7); opacity: 0; }
+      }
+      @keyframes demo-guide-caption {
+        0%, 6%, 29%, 100% { transform: translateY(5px); opacity: 0; }
+        10%, 25% { transform: translateY(0); opacity: 1; }
+      }
+      @media (max-width: 700px) {
+        .home-editor-preview { height: clamp(190px, 58vw, 406px); }
+        .demo-guide-step { max-width: 58%; font-size: 11px; }
+        .demo-guide-step:nth-of-type(1) { top: 22%; left: 3%; }
+        .demo-guide-step:nth-of-type(2) { top: 56%; left: 30%; }
+        .demo-guide-step:nth-of-type(3) { top: 22%; right: 3%; }
+        @keyframes demo-cursor-tour {
+          0%, 8% { top: 26%; left: 24%; }
+          24%, 31% { top: 26%; left: 24%; }
+          40%, 48% { top: 49%; left: 54%; }
+          57%, 65% { top: 49%; left: 54%; }
+          74%, 82% { top: 27%; left: 72%; }
+          91%, 100% { top: 27%; left: 72%; }
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .demo-guide-cursor, .demo-guide-cursor::after, .demo-guide-step { animation: none; }
+        .demo-guide-cursor { top: 25%; left: 12%; }
+        .demo-guide-step:nth-of-type(1) { opacity: 1; }
       }
       .landing-cta {
         margin: 52px auto 0;
@@ -276,8 +388,8 @@
       <section class="landing-hero">
         <div class="landing-hero-copy">
           <p class="about-eyebrow landing-hero-eyebrow">Your next opportunity starts here</p>
-          <h1>Build a professional resume <span class="landing-gradient-text">that works as hard as you do.</span></h1>
-          <p>Create polished resumes with templates, ATS guidance, cover letters, PDF export, and secure cloud saves — all in one place.</p>
+          <h1>Create a resume <span class="landing-gradient-text">that helps you stand out.</span></h1>
+          <p>Build a polished, ATS-ready resume with modern templates, cover-letter tools, and PDF export. Save your work in your browser or sync it securely with Google sign-in.</p>
           <div class="hero-actions landing-hero-actions">
             <a class="btn primary landing-create-btn" href="/editor.html">Create my free resume <span aria-hidden="true">→</span></a>
             <a class="btn outline landing-explore-btn" href="#templates">Explore templates</a>
@@ -316,8 +428,16 @@
           <p>ResumeOut.com helps you structure your experience, tailor your content, and keep a reliable backup while you move through the hiring process.</p>
         </div>
 
-        <div class="demo-window" aria-label="Cursor-guided ResumeOut.com resume editor walkthrough">
-          <img class="home-demo-video" src="/images/homepage-demo.svg" alt="Cursor-guided preview of the resume editor: choose a template on the left, edit your resume in the center, adjust profile settings on the right, and sign in with Google for cloud saves." />
+        <div class="demo-window" role="img" aria-label="Live sample resume preview with a cursor guide to choosing a template, editing resume details, and customizing the design">
+          <iframe class="home-editor-preview" src="/editor.html?homepageDemo=1" title="ResumeOut.com editor preview with sample resume content" loading="lazy" tabindex="-1" aria-hidden="true"></iframe>
+          <div class="demo-guide" aria-hidden="true">
+            <span class="demo-guide-step"><b>1</b> Choose a template</span>
+            <span class="demo-guide-step"><b>2</b> Edit your resume details</span>
+            <span class="demo-guide-step"><b>3</b> Customize your design</span>
+            <span class="demo-guide-cursor">
+              <svg viewBox="0 0 32 40" aria-hidden="true"><path d="M4 3.5v27l7.2-6.8 4.7 11 5.2-2.2-4.8-10.7 10.1-.7L4 3.5Z" fill="#fff" stroke="#102333" stroke-linejoin="round" stroke-width="2.5"/></svg>
+            </span>
+          </div>
         </div>
       </section>
 

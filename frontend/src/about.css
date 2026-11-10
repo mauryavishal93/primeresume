@@ -263,13 +263,15 @@ button,a{font:inherit}
  .about-brand-name{font-size:16px}
  .about-nav{grid-area:nav;display:flex;width:100%;min-width:0;flex-wrap:wrap;align-items:center;justify-content:flex-start;gap:6px;margin:0}
  .about-nav .btn{min-height:40px;padding:7px 10px;font-size:12px;line-height:1.2}
- .about-nav .google-signin{height:40px;max-width:100%;padding:0 10px;gap:7px;font-size:12px}
+ .about-nav .google-signin{position:relative;width:40px;min-width:40px;max-width:40px;height:40px;flex:0 0 40px;justify-content:center;padding:0;gap:0}
+ .about-nav .google-signin [data-auth-sign-in-label]{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+ .about-nav .google-signin-logo{width:20px;height:20px;flex-basis:20px}
  .about-nav .theme-switch{min-height:40px}
  .about-nav>.site-account-menu{position:absolute;top:8px;right:12px;margin:0}
  .about-nav>.landing-header-actions .btn{min-height:40px}
- .landing-page .about-nav{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"auth community" "actions actions";align-items:center;justify-content:stretch;gap:6px 5px}
+ .landing-page .about-nav{display:grid;grid-template-columns:40px auto;grid-template-areas:"auth community" "actions actions";align-items:center;justify-content:start;gap:6px 5px}
  .landing-page .about-nav>.auth-actions{grid-area:auth;min-width:0}
- .landing-page .about-nav>.auth-actions .google-signin{width:100%;max-width:100%;height:40px;padding:0 8px;font-size:11px;gap:5px}
+ .landing-page .about-nav>.auth-actions .google-signin{width:40px;max-width:40px}
  .landing-page .about-nav>a[href="/community.html"]{grid-area:community;min-height:40px;padding:6px 8px;font-size:11px}
  .landing-page .about-nav>.landing-header-actions{display:grid;grid-area:actions;grid-template-columns:repeat(2,minmax(0,1fr));justify-self:stretch;flex:initial;width:100%;max-width:none;gap:6px}
  .landing-page .about-nav>.landing-header-actions .btn{width:100%;min-width:0;min-height:40px;padding:6px 4px;font-size:11px}

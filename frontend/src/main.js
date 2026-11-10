@@ -24,7 +24,7 @@ import {
  cloudConfigured, consumeProTemplateDownload, deleteResume, getAccountProfile, getLastWorkedResumeId, getProTemplateDownloadStatus, googleSignInErrorMessage, listResumes, observeAuth, saveResume, setLastWorkedResumeId,
  signInWithGoogle, signOutUser
 } from './firebase-cloud.js';
-import { setAccountAvatar } from './account-avatar.js';
+import { getAccountPhotoUrls, setAccountAvatar } from './account-avatar.js';
 import { zoomFromPinch } from './zoom.js';
 
 (()=>{'use strict';
@@ -32,6 +32,10 @@ const $=id=>document.getElementById(id),deep=x=>JSON.parse(JSON.stringify(x)),ui
 const baseDocumentTitle=document.title;
 const clamp=(v,min,max,def)=>{v=Number(v);return Number.isFinite(v)?Math.max(min,Math.min(max,v)):def};
 const PAGE_W=794,PAGE_H=1122,DEFAULT_MARGIN=32,FONTS=['Arial','Georgia','Verdana','Trebuchet MS','Times New Roman','Courier New'];
+const homepageDemoMode=new URLSearchParams(location.search).get('homepageDemo')==='1';
+document.documentElement.classList.toggle('homepage-demo',homepageDemoMode);
+document.body.classList.toggle('homepage-demo',homepageDemoMode);
+fitHomepageDemoViewport();
 const KNOWN_TYPES=['summary','experience','education','skills','projects','certifications','custom'];
 const SKILL_STYLES=[['tags','Tags'],['pills','Pills'],['outlined','Outlined'],['list','Simple list'],['inline','Inline'],['grid','Grid'],['soft','Soft color'],['gradient','Gradient'],['underline','Underline'],['numbered','Numbered'],['compact','Compact'],['dense','Dense (space-saving)']];
 function normalizeSkillStyle(style){return style==='cards'?'dense':SKILL_STYLES.some(([value])=>value===style)?style:'tags'}
@@ -98,11 +102,14 @@ function normalizeState(d){
  }
  return out;
 }
-let state=fresh(),selectedId=null,selectedSectionAnchor=null,zoom=1,mobileAutoFitZoom=true,history=[],redoHistory=[],draggingId=null,saveTimer=null,panelWidth=260,collapsed=false,leftWidth=260,leftCollapsed=false,leftTab='templates',rightTab='design',touchPoints=new Map(),pinchStart=null,pinchUsed=false,onboardingDismissed=false,sectionTypographyCalloutEnabled=false,customSectionTrigger=null,inspectorEntriesExpanded=false;
+let state=fresh(),selectedId=null,selectedSectionAnchor=null,zoom=1,mobileAutoFitZoom=true,history=[],redoHistory=[],draggingId=null,saveTimer=null,panelWidth=260,collapsed=false,leftWidth=260,leftCollapsed=false,leftTab='templates',rightTab='design',touchPoints=new Map(),pinchStart=null,pinchUsed=false,onboardingDismissed=homepageDemoMode,sectionTypographyCalloutEnabled=false,customSectionTrigger=null,inspectorEntriesExpanded=false;
 let resumeMouseSelection=null;
 let pendingResumeImport=null,resumeImportBusy=false;
 let localPersistenceBlocked=false,recoverySnapshot=null;
-const browserStorage={getItem:(...args)=>window.localStorage.getItem(...args),setItem:(...args)=>window.localStorage.setItem(...args),removeItem:(...args)=>window.localStorage.removeItem(...args)};
+const demoStorage=new Map();
+const browserStorage=homepageDemoMode
+ ?{getItem:key=>demoStorage.get(key)??null,setItem:(key,value)=>demoStorage.set(key,value),removeItem:key=>demoStorage.delete(key)}
+ :{getItem:(...args)=>window.localStorage.getItem(...args),setItem:(...args)=>window.localStorage.setItem(...args),removeItem:(...args)=>window.localStorage.removeItem(...args)};
 const guestResumeStorage=createGuestResumeStorage(browserStorage,normalizeState);
 let lastWorkedResumeWrite=Promise.resolve();
 let guestResumeLoaded=false,guestResumeDirty=false,wizardResumeDraftPending=false,authGeneration=0,authStateResolved=false,cloudSessionGeneration=0,cloudReady=false,cloudDraftDirty=false;
@@ -461,14 +468,14 @@ async function updateCloudAccount(user,error){
   $('accountUserEmail').textContent=user.email||'';
   $('accountAvatar').textContent=initial;
   $('accountAvatarLarge').textContent=initial;
-  setAccountAvatar($('accountAvatar'),initial,user.photoURL||'');
-  setAccountAvatar($('accountAvatarLarge'),initial,user.photoURL||'');
+  setAccountAvatar($('accountAvatar'),initial,getAccountPhotoUrls(user));
+  setAccountAvatar($('accountAvatarLarge'),initial,getAccountPhotoUrls(user));
   const accountUid=user.uid;
   void getAccountProfile(user).then(profile=>{
    if(cloudUser?.uid!==accountUid)return;
-   const photo=profile.photoDataUrl||user.photoURL||'';
-   setAccountAvatar($('accountAvatar'),initial,photo);
-   setAccountAvatar($('accountAvatarLarge'),initial,photo);
+   const photos=getAccountPhotoUrls(user,profile.photoDataUrl);
+   setAccountAvatar($('accountAvatar'),initial,photos);
+   setAccountAvatar($('accountAvatarLarge'),initial,photos);
   }).catch(profileError=>console.error('Could not load the account profile image.',profileError));
  }else{
   $('accountUserName').textContent='Guest';
@@ -1055,13 +1062,29 @@ function renderSheets(){
  updateSectionTypographyCallout();
 }
 function fitMobileZoom(){
- if(!mobileAutoFitZoom||!window.matchMedia('(max-width:800px)').matches)return;
+ if(homepageDemoMode||!mobileAutoFitZoom||!window.matchMedia('(max-width:800px)').matches)return;
  const root=$('sheets'),style=getComputedStyle(root),width=root.clientWidth-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight);
  if(width<=0)return;
  const fitted=Math.max(.3,Math.min(1,width/PAGE_W));
  if(Math.abs(fitted-zoom)<.005)return;
  zoom=fitted;
  renderSheets();
+}
+function fitHomepageDemoZoom(){
+ if(!homepageDemoMode)return;
+ const root=$('sheets'),style=getComputedStyle(root);
+ const width=root.clientWidth-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight);
+ const height=root.clientHeight-parseFloat(style.paddingTop)-parseFloat(style.paddingBottom);
+ if(width<=0||height<=0)return;
+ const fitted=Math.min(1,width/PAGE_W,height/PAGE_H);
+ if(Math.abs(fitted-zoom)<.005)return;
+ zoom=fitted;
+ renderSheets();
+}
+function fitHomepageDemoViewport(){
+ if(!homepageDemoMode||!window.matchMedia('(max-width:700px)').matches)return;
+ const scale=Math.min(window.innerWidth/1100,window.innerHeight/700);
+ document.body.style.setProperty('--homepage-demo-scale',String(scale));
 }
 function updateSectionTypographyCallout(){
  let callout=$('sectionTypographyCallout');
@@ -1359,8 +1382,8 @@ function setMobilePanel(panel){
  if(next==='templates')setTab(next);
  else if(next==='design'&&rightTab!=='design')setRightTab('design');
 }
-function savePrefs(){try{localStorage.setItem('resumeStudioUI',JSON.stringify({leftWidth,panelWidth,leftCollapsed,collapsed,leftTab,rightTab,onboardingDismissed,sectionTypographyCalloutEnabled}))}catch(error){console.error('Could not save editor preferences.',error)}}
-function loadPrefs(){try{const u=JSON.parse(localStorage.getItem('resumeStudioUI')||'null');if(u){leftWidth=clamp(u.leftWidth,LW[0],LW[1],260);panelWidth=clamp(u.panelWidth,RW[0],RW[1],300);leftCollapsed=!!u.leftCollapsed;collapsed=!!u.collapsed;leftTab=u.leftTab==='sections'?'sections':'templates';rightTab=u.rightTab==='section'?'section':'design';onboardingDismissed=u.onboardingDismissed===true;sectionTypographyCalloutEnabled=u.sectionTypographyCalloutEnabled===true}}catch(error){console.error('Could not load editor preferences.',error)}}
+function savePrefs(){if(homepageDemoMode)return;try{localStorage.setItem('resumeStudioUI',JSON.stringify({leftWidth,panelWidth,leftCollapsed,collapsed,leftTab,rightTab,onboardingDismissed,sectionTypographyCalloutEnabled}))}catch(error){console.error('Could not save editor preferences.',error)}}
+function loadPrefs(){if(homepageDemoMode)return;try{const u=JSON.parse(localStorage.getItem('resumeStudioUI')||'null');if(u){leftWidth=clamp(u.leftWidth,LW[0],LW[1],260);panelWidth=clamp(u.panelWidth,RW[0],RW[1],300);leftCollapsed=!!u.leftCollapsed;collapsed=!!u.collapsed;leftTab=u.leftTab==='sections'?'sections':'templates';rightTab=u.rightTab==='section'?'section':'design';onboardingDismissed=u.onboardingDismissed===true;sectionTypographyCalloutEnabled=u.sectionTypographyCalloutEnabled===true}}catch(error){console.error('Could not load editor preferences.',error)}}
 function updateSectionTypographyToggle(){const toggle=$('sectionTypographyToggle');toggle.setAttribute('aria-checked',String(sectionTypographyCalloutEnabled));toggle.setAttribute('aria-label',`${sectionTypographyCalloutEnabled?'Hide':'Show'} section text sizes`);toggle.querySelector('.section-typography-label').textContent=sectionTypographyCalloutEnabled?'On':'Off'}
 function render(){renderTemplates();renderSectionList();renderSheets();renderInspector();$('docName').value=state.docName;$('pageLayout').value=state.layout;$('editMode').value=state.mode;updateUndoButton()}
 /* Selecting only toggles highlight classes: no re-layout, so the page never jumps while you click around. */
@@ -3638,7 +3661,7 @@ setResumeToolbarCollapsed(mobileToolbarQuery.matches);
 resumeToolbarToggle.addEventListener('click',()=>setResumeToolbarCollapsed(resumeToolbar.dataset.collapsed!=='true'));
 mobileToolbarQuery.addEventListener('change',event=>setResumeToolbarCollapsed(event.matches));
 let resizing=null;
-window.addEventListener('resize',()=>{fitMobileZoom();updateSectionTypographyCallout()});
+window.addEventListener('resize',()=>{fitHomepageDemoViewport();fitHomepageDemoZoom();fitMobileZoom();updateSectionTypographyCallout()});
 document.addEventListener('scroll',updateSectionTypographyCallout,true);
 function gripDown(side){return e=>{if(side==='l'?leftCollapsed:collapsed){side==='l'?toggleLeft():togglePanel();return}resizing=side;e.preventDefault()}}
 $('panelGrip').addEventListener('pointerdown',gripDown('r'));$('leftGrip').addEventListener('pointerdown',gripDown('l'));
@@ -3656,7 +3679,9 @@ document.addEventListener('keydown',e=>{
  if(modifier&&(key==='y'||(key==='z'&&e.shiftKey))){e.preventDefault();redo();return}
  if(e.key==='Escape'){if($('modalBg').classList.contains('show'))closeCustomSectionDialog();closeResumeImport();closeAts();closeCoverLetter();closePdfPreview();closeCloudModal();closeUpgrade()}
 });
-const savedProject=guestResumeStorage.load();
+const savedProject=homepageDemoMode
+ ?{state:null,key:null,raw:null,error:null,failedKey:null}
+ :guestResumeStorage.load();
 if(savedProject.state)state=savedProject.state;
 guestResumeLoaded=Boolean(savedProject.state);
 let wizardDraftLoaded=false,wizardDraftError='',wizardDraftWarning='';
@@ -3702,7 +3727,7 @@ if(wizardDraftLoaded&&!onboardingDismissed){
  savePrefs();
 }
 $('onboardingCard').hidden=onboardingDismissed;
-if(window.matchMedia('(max-width:800px)').matches){leftCollapsed=true;collapsed=true}
+if(!homepageDemoMode&&window.matchMedia('(max-width:800px)').matches){leftCollapsed=true;collapsed=true}
 render();
 {
  const lc=leftCollapsed;
@@ -3711,12 +3736,15 @@ render();
  applyPanels();
 }
 fitMobileZoom();
+fitHomepageDemoZoom();
 updateBrowserPersistenceUI();
 if(guestResumeStorage.preferenceError)setSaveState('Unable to save changes');
 if(wizardDraftError)toast(`${wizardDraftError} Please return to the wizard and try again.`);
 else if(wizardDraftWarning)toast(wizardDraftWarning);
-if(!cloudConfigured)updateCloudAccount(null,new Error('Add the Firebase web-app settings to enable cloud saving.'));
-else observeAuth(updateCloudAccount);
+if(!homepageDemoMode){
+ if(!cloudConfigured)updateCloudAccount(null,new Error('Add the Firebase web-app settings to enable cloud saving.'));
+ else observeAuth(updateCloudAccount);
+}
 const pageParams=new URLSearchParams(location.search);
 if(pageParams.get('tool')==='cover-letter')openCoverLetter();
 if(pageParams.get('open')==='import')openResumeImportPrompt();

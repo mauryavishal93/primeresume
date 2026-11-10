@@ -1,5 +1,5 @@
 import { cloudConfigured, observeAuth, getAccountProfile, saveAccountProfile } from './firebase-cloud.js';
-import { setAccountAvatar } from './account-avatar.js';
+import { getAccountPhotoUrl, setAccountAvatar } from './account-avatar.js';
 
 const form = document.querySelector('#accountForm');
 const fields = document.querySelector('#accountFields');
@@ -88,7 +88,7 @@ async function updateAccountPage(user, error) {
 
   nameInput.value = user.displayName?.trim() || '';
   emailInput.value = user.email || '';
-  fallbackPhotoUrl = user.photoURL || '';
+  fallbackPhotoUrl = getAccountPhotoUrl(user);
   showStatus('Loading your account details…');
   try {
     const profile = await getAccountProfile(user);
