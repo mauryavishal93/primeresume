@@ -1121,6 +1121,60 @@ test('checkout resolves a configured subscription ID to its verified recurring p
   }
 });
 
+test('checkout uses the configured default-price plan when Firestore has a stale plan ID', async () => {
+  const configuredMonthlyPlanId = process.env.RAZORPAY_PLAN_MONTHLY_ID;
+  const configuredYearlyPlanId = process.env.RAZORPAY_PLAN_YEARLY_ID;
+  const pricingRecord = 'appConfig/pricing';
+  const hadPricingRecord = fakeDatabase.records.has(pricingRecord);
+  const previousPricing = fakeDatabase.records.get(pricingRecord);
+  const checkoutKey = 'users/user-4/billing/checkout';
+  const previousCheckout = fakeDatabase.records.get(checkoutKey);
+  const entitlementKey = 'users/user-4/billing/entitlement';
+  const previousEntitlement = fakeDatabase.records.get(entitlementKey);
+  const previousNextSubscriptionId = nextSubscriptionId;
+  process.env.RAZORPAY_PLAN_MONTHLY_ID = 'plan_monthly_test';
+  process.env.RAZORPAY_PLAN_YEARLY_ID = 'plan_yearly_test';
+  fakeDatabase.records.set(pricingRecord, {
+    monthly: { actualPrice: 99, currentPrice: 99 },
+    yearly: { actualPrice: 399, currentPrice: 399 },
+    providerPlanIds: {
+      INR: { monthly: 'plan_stale_monthly', yearly: 'plan_stale_yearly' }
+    }
+  });
+  fakeDatabase.records.delete(checkoutKey);
+  fakeDatabase.records.delete(entitlementKey);
+
+  let createdSubscriptionId;
+  try {
+    const checkoutResponse = await request('/api/billing/subscriptions', {
+      method: 'POST',
+      token: 'fourth-test-token',
+      body: { planKey: 'monthly', currency: 'INR', expectedAmount: 9900 }
+    });
+    const checkout = await checkoutResponse.json();
+    assert.equal(checkoutResponse.status, 201, JSON.stringify(checkout));
+    createdSubscriptionId = checkout.subscriptionId;
+    assert.equal(
+      fakeDatabase.records.get(`billingSubscriptions/${createdSubscriptionId}`).planId,
+      'plan_monthly_test'
+    );
+  } finally {
+    process.env.RAZORPAY_PLAN_MONTHLY_ID = configuredMonthlyPlanId;
+    process.env.RAZORPAY_PLAN_YEARLY_ID = configuredYearlyPlanId;
+    if (createdSubscriptionId) {
+      fakeDatabase.records.delete(`billingSubscriptions/${createdSubscriptionId}`);
+      providerSubscriptions.delete(createdSubscriptionId);
+    }
+    nextSubscriptionId = previousNextSubscriptionId;
+    if (previousCheckout) fakeDatabase.records.set(checkoutKey, previousCheckout);
+    else fakeDatabase.records.delete(checkoutKey);
+    if (previousEntitlement) fakeDatabase.records.set(entitlementKey, previousEntitlement);
+    else fakeDatabase.records.delete(entitlementKey);
+    if (hadPricingRecord) fakeDatabase.records.set(pricingRecord, previousPricing);
+    else fakeDatabase.records.delete(pricingRecord);
+  }
+});
+
 test('checkout replaces expired subscriptions and does not reopen authorized subscriptions', async () => {
   const checkoutKey = 'users/user-4/billing/checkout';
   const expiredId = 'sub_expiredcheckout';
