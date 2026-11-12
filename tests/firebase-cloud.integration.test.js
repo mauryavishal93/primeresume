@@ -6,6 +6,7 @@ import { chooseAuthenticatedResume } from '../frontend/src/resume-persistence.js
 function createFakeFirebase({ popupError = null, popupDelay = null, signOutError = null } = {}) {
   const records = new Map();
   const sharedResumes = new Map();
+  let activePopupError = popupError;
   let generatedId = 0;
   let generatedShareId = 0;
   const auth = {
@@ -44,7 +45,7 @@ function createFakeFirebase({ popupError = null, popupDelay = null, signOutError
           popupDelay.then(resolve, reject);
         });
       }
-      if (popupError) throw popupError;
+      if (activePopupError) throw activePopupError;
       signedInWith = provider;
     },
     signInWithRedirect: async (_auth, provider) => { redirectedWith = provider; },
@@ -172,6 +173,7 @@ function createFakeFirebase({ popupError = null, popupDelay = null, signOutError
     get popupCalls() { return popupCalls; },
     get redirectedWith() { return redirectedWith; },
     get signedOut() { return signedOut; },
+    setPopupError(error) { activePopupError = error; },
     setSignOutError(error) { signOutError = error; },
     emitAuth(user) { authObserver?.(user); }
   };
@@ -219,6 +221,13 @@ test('rapid Google sign-in requests open a fresh popup and canceled popup reques
   const canceledPopup = createFakeFirebase({ popupError: { code: 'auth/cancelled-popup-request' } });
   await assert.doesNotReject(canceledPopup.client.signInWithGoogle());
   assert.equal(canceledPopup.redirectedWith, undefined);
+
+  const closedPopup = createFakeFirebase({ popupError: { code: 'auth/popup-closed-by-user' } });
+  await assert.doesNotReject(closedPopup.client.signInWithGoogle());
+  assert.equal(closedPopup.redirectedWith, undefined);
+  closedPopup.setPopupError(null);
+  await closedPopup.client.signInWithGoogle();
+  assert.ok(closedPopup.signedInWith instanceof closedPopup.GoogleAuthProvider);
 });
 
 test('Firebase sign-out errors are surfaced and the same client can retry', async () => {

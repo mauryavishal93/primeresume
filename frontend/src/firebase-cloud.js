@@ -158,7 +158,7 @@ export function createFirebaseCloudClient({ config = firebaseConfig, loadSdk = l
       try {
         await authSdk.signInWithPopup(auth, provider);
       } catch (error) {
-        if (error?.code === 'auth/cancelled-popup-request') return;
+        if (['auth/cancelled-popup-request', 'auth/popup-closed-by-user'].includes(error?.code)) return;
         if (!['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment'].includes(error?.code)) {
           throw error;
         }
