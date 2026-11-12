@@ -1,4 +1,4 @@
-import { getFirebaseIdToken, observeAuth, signInWithGoogle } from './firebase-cloud.js';
+import { getFirebaseIdToken, isGoogleSignInCancellation, observeAuth, signInWithGoogle } from './firebase-cloud.js';
 import { alertModern, confirmModern } from './modern-modal.js';
 
 let currentUser;
@@ -197,7 +197,7 @@ function userMatchesPlan(user, plan) {
   const activation = user.activationSource || '';
   if (plan === 'pro') return !!user.isPro;
   if (plan === 'free') return !user.isPro;
-  if (plan === 'voucher') return activation === 'server-verified';
+  if (plan === 'voucher') return activation === 'voucher';
   if (plan === 'admin') return activation === 'admin';
   return true;
 }
@@ -305,7 +305,7 @@ function renderUsers() {
   }
 
   $('#user-list').innerHTML = rows.map(user => {
-    const activation = user.activationSource === 'server-verified' ? 'Voucher' : user.activationSource === 'admin' ? 'Admin granted' : user.isPro ? 'Payment plan' : '—';
+    const activation = user.activationSource === 'voucher' ? 'Voucher' : user.activationSource === 'admin' ? 'Admin granted' : user.isPro ? 'Payment plan' : '—';
     const paid = formatMoneyByCurrency(user.paidAmountByCurrency || { INR: user.paidAmount });
     const status = userIsActive(user) ? 'Active' : 'Inactive';
     const activeClass = userIsActive(user) ? 'pro' : '';
@@ -616,11 +616,14 @@ observeAuth((user, authError) => {
   $('#access p').textContent = 'Sign in with an administrator account to unlock revenue, billing, and user controls.';
   setDashboardStatus('Sign in required', 'idle');
 });
-$('#sign-in').addEventListener('click', () => signInWithGoogle().catch(error => alertModern({
-  title: 'Sign-in failed',
-  message: error.message,
-  variant: 'error'
-})));
+$('#sign-in').addEventListener('click', () => signInWithGoogle().catch(error => {
+  if (isGoogleSignInCancellation(error)) return;
+  return alertModern({
+    title: 'Sign-in failed',
+    message: error.message,
+    variant: 'error'
+  });
+}));
 $('#refresh').addEventListener('click', load);
 $('#forum-activity-refresh').addEventListener('click', () => void loadForumActivity({ reset: true }));
 $('#forum-activity-more').addEventListener('click', () => void loadForumActivity({ append: true }));

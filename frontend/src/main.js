@@ -21,7 +21,7 @@ import {
 } from './resume-persistence.js';
 import { buildResumePdf, drawPdfText } from './resume-pdf.js';
 import {
- cloudConfigured, consumeProTemplateDownload, createSharedResume, deleteResume, getAccountProfile, getLastWorkedResumeId, getProTemplateDownloadStatus, getSharedResume, googleSignInErrorMessage, listResumes, listSharedResumes, observeAuth, revokeSharedResume, saveResume, setLastWorkedResumeId,
+ cloudConfigured, consumeProTemplateDownload, createSharedResume, deleteResume, getAccountProfile, getLastWorkedResumeId, getProTemplateDownloadStatus, getSharedResume, googleSignInErrorMessage, isGoogleSignInCancellation, listResumes, listSharedResumes, observeAuth, revokeSharedResume, saveResume, setLastWorkedResumeId,
  signInWithGoogle, signOutUser
 } from './firebase-cloud.js';
 import { getAccountPhotoUrls, setAccountAvatar } from './account-avatar.js';
@@ -3863,7 +3863,7 @@ $('closeResumeImport').addEventListener('click',closeResumeImport);
 $('resumeImportModalBg').addEventListener('click',event=>{if(event.target===$('resumeImportModalBg'))closeResumeImport()});
  $('googleSignInBtn').addEventListener('click',async()=>{
   try{await signInWithGoogle()}
-  catch(error){toast(authErrorMessage(error))}
+  catch(error){if(!isGoogleSignInCancellation(error))toast(authErrorMessage(error))}
  });
   $('browserSaveToggle').addEventListener('change',event=>{
    if(cloudUser){updateBrowserPersistenceUI();return}

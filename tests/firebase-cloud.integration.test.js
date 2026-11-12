@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createFirebaseCloudClient, googleSignInErrorMessage } from '../frontend/src/firebase-cloud.js';
+import { createFirebaseCloudClient, googleSignInErrorMessage, isGoogleSignInCancellation } from '../frontend/src/firebase-cloud.js';
 import { chooseAuthenticatedResume } from '../frontend/src/resume-persistence.js';
 
 function createFakeFirebase({ popupError = null, popupDelay = null, signOutError = null } = {}) {
@@ -225,6 +225,12 @@ test('rapid Google sign-in requests open a fresh popup and canceled popup reques
   const closedPopup = createFakeFirebase({ popupError: { code: 'auth/popup-closed-by-user' } });
   await assert.doesNotReject(closedPopup.client.signInWithGoogle());
   assert.equal(closedPopup.redirectedWith, undefined);
+  const consentCancelled = createFakeFirebase({ popupError: { code: 'auth/user-cancelled' } });
+  await assert.doesNotReject(consentCancelled.client.signInWithGoogle());
+  assert.equal(consentCancelled.redirectedWith, undefined);
+  assert.equal(isGoogleSignInCancellation({ code: 'auth/user-cancelled' }), true);
+  assert.equal(isGoogleSignInCancellation({ message: 'Firebase: IdP denied access. (auth/user-cancelled).' }), true);
+  assert.equal(googleSignInErrorMessage({ code: 'auth/user-cancelled' }), '');
   closedPopup.setPopupError(null);
   await closedPopup.client.signInWithGoogle();
   assert.ok(closedPopup.signedInWith instanceof closedPopup.GoogleAuthProvider);

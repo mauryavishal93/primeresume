@@ -7,7 +7,13 @@ const firebaseConfig = {
 
 export const cloudConfigured = Object.values(firebaseConfig).every(value => typeof value === 'string' && value.length > 0);
 
+export function isGoogleSignInCancellation(error) {
+  return ['auth/cancelled-popup-request', 'auth/popup-closed-by-user', 'auth/user-cancelled'].includes(error?.code)
+    || /\(auth\/(?:cancelled-popup-request|popup-closed-by-user|user-cancelled)\)/.test(error?.message || '');
+}
+
 export function googleSignInErrorMessage(error, hostname = globalThis.location?.hostname || 'this domain') {
+  if (isGoogleSignInCancellation(error)) return '';
   switch (error?.code) {
     case 'auth/configuration-not-found':
     case 'auth/operation-not-allowed':
@@ -153,15 +159,17 @@ export function createFirebaseCloudClient({ config = firebaseConfig, loadSdk = l
 
   function signInWithGoogle() {
     return (async () => {
-      const { auth, authSdk } = await getServices();
-      const provider = new authSdk.GoogleAuthProvider();
       try {
+        const { auth, authSdk } = await getServices();
+        const provider = new authSdk.GoogleAuthProvider();
         await authSdk.signInWithPopup(auth, provider);
       } catch (error) {
-        if (['auth/cancelled-popup-request', 'auth/popup-closed-by-user'].includes(error?.code)) return;
+        if (isGoogleSignInCancellation(error)) return;
         if (!['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment'].includes(error?.code)) {
           throw error;
         }
+        const { auth, authSdk } = await getServices();
+        const provider = new authSdk.GoogleAuthProvider();
         await authSdk.signInWithRedirect(auth, provider);
       }
     })();

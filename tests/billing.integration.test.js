@@ -94,6 +94,7 @@ let origin;
 let fakeDatabase;
 let providerSubscription;
 const providerSubscriptions = new Map();
+const providerInvoices = new Map();
 let nextSubscriptionId = 0;
 let nextDynamicPlanId = 0;
 const dynamicProviderPlans = new Map();
@@ -125,6 +126,13 @@ before(async () => {
     db: fakeDatabase.db
   };
   app.locals.razorpayRequest = async (endpoint, { method = 'GET', body } = {}) => {
+    const invoiceList = endpoint.match(/^\/invoices\?subscription_id=([^&]+)&count=(\d+)&skip=(\d+)$/);
+    if (invoiceList) {
+      const [, subscriptionId, count, skip] = invoiceList;
+      const items = (providerInvoices.get(decodeURIComponent(subscriptionId)) || [])
+        .slice(Number(skip), Number(skip) + Number(count));
+      return { count: items.length, items };
+    }
     if (endpoint === '/plans' && method === 'POST') {
       nextDynamicPlanId += 1;
       const plan = {
@@ -620,8 +628,22 @@ test('admin regional prices create verified Razorpay plans and charge the config
   };
   providerSubscriptions.set('sub_test1', providerSubscription);
   const signature = createHmac('sha256', environment.RAZORPAY_KEY_SECRET)
+    .update('pay_test1|sub_test1')
+    .digest('hex');
+  const reversedSignature = createHmac('sha256', environment.RAZORPAY_KEY_SECRET)
     .update('sub_test1|pay_test1')
     .digest('hex');
+  const reversedVerification = await request('/api/billing/verify', {
+    method: 'POST',
+    token: 'third-test-token',
+    body: {
+      razorpaySubscriptionId: 'sub_test1',
+      razorpayPaymentId: 'pay_test1',
+      razorpaySignature: reversedSignature
+    }
+  });
+  assert.equal(reversedVerification.status, 400);
+  assert.equal((await reversedVerification.json()).error, 'Payment signature verification failed.');
   const verified = await request('/api/billing/verify', {
     method: 'POST',
     token: 'third-test-token',
@@ -749,10 +771,13 @@ test('admin dashboard reports current subscriptions and captured revenue accurat
   const now = Date.now();
   const testRecords = [
     ['users/user-1/billing/entitlement', {
-      planId: 'pro', billingPlan: 'monthly', status: 'active', source: 'razorpay', validUntil: now + 30 * 86400000
+      planId: 'pro', billingPlan: 'monthly', status: 'active', source: 'server-verified', validUntil: now + 30 * 86400000
     }],
     ['users/user-2/billing/entitlement', {
       planId: 'pro', billingPlan: 'yearly', status: 'expired', source: 'razorpay', validUntil: now - 86400000
+    }],
+    ['users/user-3/billing/entitlement', {
+      planId: 'pro', billingPlan: 'voucher', status: 'active', source: 'server-verified', validUntil: now + 30 * 86400000
     }],
     ['billingPayments/payment-current', {
       uid: 'user-1', status: 'captured', amount: 9900, currency: 'INR', planKey: 'monthly', createdAt: now
@@ -772,10 +797,10 @@ test('admin dashboard reports current subscriptions and captured revenue accurat
     const dashboard = await response.json();
 
     assert.equal(dashboard.totals.users, 3);
-    assert.equal(dashboard.totals.pro, 1);
-    assert.equal(dashboard.totals.regular, 2);
+    assert.equal(dashboard.totals.pro, 2);
+    assert.equal(dashboard.totals.regular, 1);
     assert.equal(dashboard.totals.newUsers30Days, 2);
-    assert.equal(dashboard.totals.conversionRate, 33.3);
+    assert.equal(dashboard.totals.conversionRate, 66.7);
     assert.equal(dashboard.totals.monthlyPro, 1);
     assert.equal(dashboard.totals.yearlyPro, 0);
     assert.equal(dashboard.totals.earnings, 49800);
@@ -784,6 +809,10 @@ test('admin dashboard reports current subscriptions and captured revenue accurat
     assert.equal(dashboard.totals.paymentCount, 2);
     assert.equal(dashboard.recentPayments.length, 2);
     assert.equal(dashboard.recentPayments[0].id, 'payment-current');
+    assert.equal(dashboard.users.find(user => user.uid === 'user-1').activationSource, 'payment');
+    const voucherUser = dashboard.users.find(user => user.uid === 'user-3');
+    assert.equal(voucherUser.plan, 'voucher');
+    assert.equal(voucherUser.activationSource, 'voucher');
     assert.equal(dashboard.users.find(user => user.uid === 'user-2').isPro, false);
   } finally {
     for (const [key] of testRecords) fakeDatabase.records.delete(key);
@@ -936,7 +965,7 @@ test('subscription checkout, payment verification, and signed webhook lifecycle 
   };
   providerSubscriptions.set('sub_test1', providerSubscription);
   const signature = createHmac('sha256', environment.RAZORPAY_KEY_SECRET)
-    .update('sub_test1|pay_test1')
+    .update('pay_test1|sub_test1')
     .digest('hex');
   const verified = await request('/api/billing/verify', {
     method: 'POST',
@@ -1078,6 +1107,55 @@ test('subscription checkout, payment verification, and signed webhook lifecycle 
     body: JSON.stringify(activatedEvent)
   });
   assert.equal(invalidSignature.status, 400);
+});
+
+test('admin account details reconcile paid Razorpay invoices missing from local payment history', async () => {
+  const uid = 'user-4';
+  const subscriptionId = 'sub_invoicereconcile';
+  const paymentId = 'pay_invoicereconcile';
+  const paidAt = Math.floor(Date.now() / 1000);
+  const validUntil = paidAt + 30 * 86400;
+  fakeDatabase.records.set(`billingSubscriptions/${subscriptionId}`, {
+    uid,
+    planKey: 'monthly',
+    currency: 'INR',
+    currentEnd: validUntil * 1000
+  });
+  fakeDatabase.records.set(`users/${uid}/billing/entitlement`, {
+    planId: 'pro',
+    billingPlan: 'monthly',
+    status: 'active',
+    source: 'server-verified',
+    subscriptionId,
+    validUntil: validUntil * 1000
+  });
+  providerInvoices.set(subscriptionId, [{
+    subscription_id: subscriptionId,
+    payment_id: paymentId,
+    status: 'paid',
+    amount_paid: 9900,
+    currency: 'INR',
+    paid_at: paidAt,
+    billing_end: validUntil
+  }]);
+
+  try {
+    const response = await request(`/api/admin/users/${uid}`, { token: 'admin-test-token' });
+    assert.equal(response.status, 200);
+    const details = await response.json();
+    assert.equal(fakeDatabase.records.get(`billingPayments/${paymentId}`)?.amount, 9900);
+    assert.equal(details.paidAmount, 9900);
+    assert.equal(details.payments[0].id, paymentId);
+    assert.ok(details.accessHistory.some(item => item.paymentId === paymentId));
+    assert.equal(fakeDatabase.records.get(`billingPayments/${paymentId}`).status, 'captured');
+    assert.equal(fakeDatabase.records.get(`billingPayments/${paymentId}`).subscriptionId, subscriptionId);
+  } finally {
+    providerInvoices.delete(subscriptionId);
+    fakeDatabase.records.delete(`billingSubscriptions/${subscriptionId}`);
+    fakeDatabase.records.delete(`users/${uid}/billing/entitlement`);
+    fakeDatabase.records.delete(`billingPayments/${paymentId}`);
+    fakeDatabase.records.delete(`billingAccessHistory/${paymentId}`);
+  }
 });
 
 test('checkout resolves a configured subscription ID to its verified recurring plan', async () => {

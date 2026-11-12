@@ -20,6 +20,10 @@ test('admin dashboard groups management tools into left-nav categories', () => {
   assert.match(html, /data-admin-category="community"[\s\S]*?id="forum-activity-list"/);
 });
 
+test('voucher-based Pro accounts are labeled as Voucher in the plan and activation column', () => {
+  assert.match(source, /activationSource === 'voucher' \? 'Voucher'/);
+});
+
 test('admin category navigation switches panels and adapts to narrow screens', () => {
   assert.match(source, /function selectAdminCategory\(category\)/);
   assert.match(source, /panel\.hidden = panel\.dataset\.adminCategory !== category/);

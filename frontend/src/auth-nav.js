@@ -1,4 +1,4 @@
-import { cloudConfigured, getAccountProfile, googleSignInErrorMessage, observeAuth, signInWithGoogle, signOutUser } from './firebase-cloud.js';
+import { cloudConfigured, getAccountProfile, googleSignInErrorMessage, isGoogleSignInCancellation, observeAuth, signInWithGoogle, signOutUser } from './firebase-cloud.js';
 import { loadBillingConfig, loadBillingEntitlement } from './billing-client.js';
 import { canUseFeature, FEATURE_IDS } from './plan-access.js';
 import { confirmModern } from './modern-modal.js';
@@ -266,6 +266,7 @@ signInButton?.addEventListener('click', async () => {
   try {
     await signInWithGoogle();
   } catch (error) {
+    if (isGoogleSignInCancellation(error)) return;
     console.error('Google sign-in failed.', error);
     if (status) {
       status.textContent = googleSignInErrorMessage(error);

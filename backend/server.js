@@ -738,6 +738,70 @@ async function recordBillingActivity(db, uid, activity) {
   return occurredAt;
 }
 
+async function reconcileSubscriptionInvoices(db, uid, subscriptionId, mapping) {
+  const paymentSnapshot = await db.collection('billingPayments').where('uid', '==', uid).get();
+  const hasRecordedPayment = (paymentSnapshot.docs || []).some(document => {
+    const payment = document.data() || {};
+    return payment.subscriptionId === subscriptionId
+      && ['captured', 'success'].includes(payment.status)
+      && Number.isSafeInteger(payment.amount)
+      && payment.amount > 0;
+  });
+  if (hasRecordedPayment) return;
+
+  const pageSize = 100;
+  for (let skip = 0; skip < 1200; skip += pageSize) {
+    const invoiceCollection = await razorpayRequest(
+      `/invoices?subscription_id=${encodeURIComponent(subscriptionId)}&count=${pageSize}&skip=${skip}`
+    );
+    if (!Array.isArray(invoiceCollection?.items)) {
+      throw new Error('Razorpay returned an invalid subscription invoice list.');
+    }
+
+    const paidInvoices = invoiceCollection.items.filter(invoice => (
+      invoice?.subscription_id === subscriptionId
+      && invoice.status === 'paid'
+      && typeof invoice.payment_id === 'string'
+      && /^pay_[A-Za-z0-9]+$/.test(invoice.payment_id)
+      && Number.isSafeInteger(invoice.amount_paid)
+      && invoice.amount_paid > 0
+    ));
+    await Promise.all(paidInvoices.map(async invoice => {
+      const createdAt = Number(invoice.paid_at || invoice.created_at) > 0
+        ? Number(invoice.paid_at || invoice.created_at) * 1000
+        : Date.now();
+      const validUntil = Number(invoice.billing_end) > 0
+        ? Number(invoice.billing_end) * 1000
+        : Number(mapping.currentEnd) || null;
+      const currency = typeof invoice.currency === 'string' ? invoice.currency : mapping.currency || 'INR';
+      const payment = {
+        uid,
+        providerPaymentId: invoice.payment_id,
+        subscriptionId,
+        planKey: mapping.planKey,
+        status: 'captured',
+        amount: invoice.amount_paid,
+        currency,
+        paymentMode: 'unknown',
+        source: 'razorpay',
+        createdAt
+      };
+      await Promise.all([
+        db.doc(`billingPayments/${invoice.payment_id}`).set(payment, { merge: true }),
+        db.doc(`billingAccessHistory/${invoice.payment_id}`).set({
+          ...payment,
+          validFrom: createdAt,
+          validUntil,
+          paymentId: invoice.payment_id,
+          status: validUntil > Date.now() ? 'active' : 'paid'
+        }, { merge: true })
+      ]);
+    }));
+
+    if (invoiceCollection.items.length < pageSize) return;
+  }
+}
+
 function normalizePlanPrice(rawValue, fallback) {
   const numeric = Number(rawValue);
   if (!Number.isFinite(numeric) || numeric < 0) return fallback;
@@ -2541,7 +2605,13 @@ app.get('/api/admin/dashboard', requireFirebaseUser, requireAdmin, async (reques
         ...user,
         isPro: active,
         plan: active ? entitlement.billingPlan || 'pro' : 'free',
-        activationSource: entitlement?.source || null,
+        activationSource: entitlement?.billingPlan === 'voucher'
+          ? 'voucher'
+          : entitlement?.source === 'admin'
+            ? 'admin'
+            : active
+              ? 'payment'
+              : null,
         validUntil: entitlement?.validUntil || null,
         paidAmount: paidAmountByCurrency.INR || 0,
         paidAmountByCurrency,
@@ -2636,12 +2706,32 @@ app.get('/api/admin/users/:uid', requireFirebaseUser, requireAdmin, async (reque
       typeof db.collection === 'function' ? db.collection('billingAccessHistory').get().catch(() => ({ docs: [] })) : Promise.resolve({ docs: [] })
     ]);
     const entitlement = entitlementSnapshot.exists ? entitlementSnapshot.data() : null;
-    const payments = (paymentsSnapshot.docs || []).map(document => ({ id: document.id, ...(document.data() || {}) })).filter(payment => payment.uid === uid);
+    let payments = (paymentsSnapshot.docs || []).map(document => ({ id: document.id, ...(document.data() || {}) })).filter(payment => payment.uid === uid);
     const activity = (activitySnapshot.docs || []).map(document => ({ id: document.id, ...(document.data() || {}) })).sort((a, b) => Number(b.occurredAt || b.createdAt || 0) - Number(a.occurredAt || a.createdAt || 0));
-    const accessHistory = (accessHistorySnapshot.docs || [])
+    let accessHistory = (accessHistorySnapshot.docs || [])
       .map(document => ({ id: document.id, ...(document.data() || {}) }))
       .filter(record => record.uid === uid)
       .sort((left, right) => Number(right.createdAt) - Number(left.createdAt));
+    if (entitlement?.subscriptionId
+      && /^sub_[A-Za-z0-9]+$/.test(entitlement.subscriptionId)
+      && !payments.some(payment => payment.subscriptionId === entitlement.subscriptionId
+        && ['captured', 'success'].includes(String(payment.status)))) {
+      const mappingSnapshot = await subscriptionDocument(db, entitlement.subscriptionId).get();
+      if (mappingSnapshot.exists && mappingSnapshot.data()?.uid === uid) {
+        await reconcileSubscriptionInvoices(db, uid, entitlement.subscriptionId, mappingSnapshot.data());
+        const [updatedPayments, updatedAccessHistory] = await Promise.all([
+          db.collection('billingPayments').get(),
+          db.collection('billingAccessHistory').get()
+        ]);
+        payments = (updatedPayments.docs || [])
+          .map(document => ({ id: document.id, ...(document.data() || {}) }))
+          .filter(payment => payment.uid === uid);
+        accessHistory = (updatedAccessHistory.docs || [])
+          .map(document => ({ id: document.id, ...(document.data() || {}) }))
+          .filter(record => record.uid === uid)
+          .sort((left, right) => Number(right.createdAt) - Number(left.createdAt));
+      }
+    }
     let voucher = null;
     if (entitlement?.voucherId) {
       const voucherSnapshot = await db.doc(`adminVouchers/${entitlement.voucherId}`).get();
@@ -3020,12 +3110,6 @@ app.post('/api/billing/verify', requireBillingConfig, requireFirebaseUser, async
       return;
     }
 
-    const message = `${razorpaySubscriptionId}|${razorpayPaymentId}`;
-    if (!validRazorpaySignature(message, razorpaySignature, process.env.RAZORPAY_KEY_SECRET)) {
-      response.status(400).json({ error: 'Payment signature verification failed.' });
-      return;
-    }
-
     const mapping = mappingSnapshot.data();
     const currency = mapping.currency || 'INR';
     const basePlan = billingPlan(mapping.planKey, currency);
@@ -3043,6 +3127,12 @@ app.post('/api/billing/verify', requireBillingConfig, requireFirebaseUser, async
       razorpayRequest(`/payments/${encodeURIComponent(razorpayPaymentId)}`),
       razorpayRequest(`/plans/${encodeURIComponent(mapping.planId)}`)
     ]);
+    const message = `${razorpayPaymentId}|${subscription.id}`;
+    if (subscription.id !== razorpaySubscriptionId
+      || !validRazorpaySignature(message, razorpaySignature, process.env.RAZORPAY_KEY_SECRET)) {
+      response.status(400).json({ error: 'Payment signature verification failed.' });
+      return;
+    }
     if (subscription.plan_id !== mapping.planId
       || !planMatchesRazorpay(providerPlan, expectedPlan)
       || payment.subscription_id !== razorpaySubscriptionId
