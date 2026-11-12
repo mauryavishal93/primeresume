@@ -131,8 +131,8 @@ test('mobile editor header grid rules do not reposition links inside the account
 test('mobile editor gives header actions readable, touch-friendly rows', () => {
   const html = readFileSync(new URL('../frontend/editor.html', import.meta.url), 'utf8');
   assert.match(html, /id="editorCommunityLink" href="\/community\.html">Community<\/a>/);
-  assert.match(styles, /grid-template-columns:repeat\(10,minmax\(0,1fr\)\) 42px;grid-template-areas:"brand brand brand brand brand brand docname docname docname docname account" "cloud cloud community community community cover cover cover plans plans \." "import import import import import pdf pdf pdf pdf pdf \.";gap:5px/);
-  assert.match(styles, /\.topbar:has\(#googleSignInBtn\[hidden\]\)\{grid-template-areas:"brand brand brand brand brand brand docname docname docname docname account" "community community community cover cover cover plans plans plans plans \." "import import import import import pdf pdf pdf pdf pdf \."\}/);
+  assert.match(styles, /grid-template-columns:repeat\(10,minmax\(0,1fr\)\) 42px;grid-template-areas:"brand brand brand brand brand brand docname docname docname docname account" "cloud cloud community community community cover cover cover plans plans plans" "import import import import import import pdf pdf pdf pdf pdf";gap:5px/);
+  assert.match(styles, /\.topbar:has\(#googleSignInBtn\[hidden\]\)\{grid-template-areas:"brand brand brand brand brand brand docname docname docname docname account" "community community community community cover cover cover plans plans plans plans" "import import import import import import pdf pdf pdf pdf pdf"\}/);
   assert.match(styles, /\.topbar:has\(#googleSignInBtn\[hidden\]\) \.cloud-actions\{display:none\}/);
   assert.match(styles, /\.topbar \.cloud-actions\{grid-area:cloud;justify-content:center;min-width:0\}/);
   assert.match(styles, /\.topbar \.cloud-actions \.btn\{box-sizing:border-box;width:40px;min-width:40px;max-width:40px;height:40px;min-height:40px;flex:0 0 40px;justify-content:center;gap:0;padding:0\}/);
