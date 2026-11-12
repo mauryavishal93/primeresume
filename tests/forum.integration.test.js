@@ -33,6 +33,12 @@ function createFakeDatabase() {
         filters: [...filters, { field, operator, value }]
       }),
       startAfter: cursorSnapshot => withOptions({ startAfterPath: cursorSnapshot.ref.path }),
+      count: () => ({
+        get: async () => {
+          const result = await collectionReference(path).get();
+          return { data: () => ({ count: result.docs.length }) };
+        }
+      }),
       get: async () => {
         const depth = path.split('/').length + 1;
         let documents = [...records.entries()]
@@ -202,6 +208,10 @@ test('public community feed and authenticated post, rating, and comment ownershi
   assert.equal(comment.response.status, 201);
   assert.equal(comment.data.comment.authorName, 'Sam Reader');
   assert.equal(comment.data.comment.isOwner, true);
+  const feedWithComment = await request('/api/forum/posts');
+  const reviewWithCommentCount = feedWithComment.data.posts.find(post => post.id === reviewId);
+  assert.ok(reviewWithCommentCount);
+  assert.equal(reviewWithCommentCount.commentCount, 1);
 
   const authorCurrentPosts = await request('/api/forum/my-content?kind=posts', { token: 'author-token' });
   assert.equal(authorCurrentPosts.data.items.some(item => item.id === reviewId), true);
@@ -214,6 +224,10 @@ test('public community feed and authenticated post, rating, and comment ownershi
   const publicComments = await request(`/api/forum/posts/${reviewId}/comments`);
   assert.equal(publicComments.response.status, 200);
   assert.equal(publicComments.data.comments.length, 1);
+  assert.equal(publicComments.data.totalCount, 1);
+  const commentCountOnly = await request(`/api/forum/posts/${reviewId}/comments?countOnly=1`);
+  assert.equal(commentCountOnly.response.status, 200);
+  assert.equal(commentCountOnly.data.totalCount, 1);
   assert.equal(publicComments.data.comments[0].isOwner, false);
   const readerComments = await request(`/api/forum/posts/${reviewId}/comments`, { token: 'reader-token' });
   assert.equal(readerComments.data.comments[0].isOwner, true);
@@ -223,6 +237,33 @@ test('public community feed and authenticated post, rating, and comment ownershi
     { method: 'DELETE', token: 'author-token' }
   );
   assert.equal(forbiddenDeleteComment.response.status, 403);
+
+  const forbiddenEditComment = await request(
+    `/api/forum/posts/${reviewId}/comments/${comment.data.comment.id}`,
+    { method: 'PATCH', token: 'author-token', body: { content: 'Someone else should not edit this comment.' } }
+  );
+  assert.equal(forbiddenEditComment.response.status, 403);
+  const invalidCommentEdit = await request(
+    `/api/forum/posts/${reviewId}/comments/${comment.data.comment.id}`,
+    { method: 'PATCH', token: 'reader-token', body: { content: '   ' } }
+  );
+  assert.equal(invalidCommentEdit.response.status, 400);
+  const editComment = await request(
+    `/api/forum/posts/${reviewId}/comments/${comment.data.comment.id}`,
+    { method: 'PATCH', token: 'reader-token', body: { content: 'I agree and updated my comment.' } }
+  );
+  assert.equal(editComment.response.status, 200);
+  assert.equal(editComment.data.comment.content, 'I agree and updated my comment.');
+  assert.equal(editComment.data.comment.isOwner, true);
+  assert.ok(editComment.data.comment.updatedAt);
+  const editedPublicComments = await request(`/api/forum/posts/${reviewId}/comments`);
+  assert.equal(editedPublicComments.data.comments[0].content, 'I agree and updated my comment.');
+  const readerHistoryAfterCommentEdit = await request('/api/forum/activity', { token: 'reader-token' });
+  const commentEditActivity = readerHistoryAfterCommentEdit.data.events.find(event =>
+    event.commentId === comment.data.comment.id && event.eventType === 'comment_edited'
+  );
+  assert.deepEqual(commentEditActivity.before, { content: 'I agree with this review.' });
+  assert.deepEqual(commentEditActivity.after, { content: 'I agree and updated my comment.' });
 
   const edit = await request(`/api/forum/posts/${reviewId}`, {
     method: 'PATCH',
@@ -291,12 +332,15 @@ test('public community feed and authenticated post, rating, and comment ownershi
   assert.equal(deniedAdminHistory.response.status, 403);
   const adminHistory = await request('/api/admin/forum/activity', { token: 'admin-token' });
   assert.equal(adminHistory.response.status, 200);
-  assert.equal(adminHistory.data.events.length, 9);
+  assert.equal(adminHistory.data.events.length, 10);
   assert.equal(adminHistory.data.events.some(event => event.userUid === 'author-1'), true);
   assert.equal(adminHistory.data.events.some(event => event.userUid === 'reader-2'), true);
+  assert.equal(adminHistory.data.events.some(event => event.eventType === 'comment_edited'), true);
   const deletedPost = adminHistory.data.events.find(event => event.eventType === 'post_deleted');
   assert.equal(deletedPost.before.content, 'The editor helped me organize my experience and improve my resume.');
-  const cascadeDelete = adminHistory.data.events.find(event => event.eventType === 'comment_deleted');
+  const cascadeDelete = adminHistory.data.events.find(event =>
+    event.eventType === 'comment_deleted' && event.reason === 'post_deleted'
+  );
   assert.equal(cascadeDelete.reason, 'post_deleted');
   assert.equal(cascadeDelete.before.content, 'One last note before removing this review.');
 
@@ -411,6 +455,48 @@ test('public community feed and authenticated post, rating, and comment ownershi
   assert.equal(adminCurrentPosts.response.status, 200);
   assert.equal(adminCurrentPosts.response.headers.get('cache-control'), 'no-store');
   assert.equal(adminCurrentPosts.data.items.find(item => item.id === 'legacy-author-post').authorUid, 'author-1');
+  for (let index = 0; index < 27; index += 1) {
+    database.records.set(`forumPosts/admin-filter-review-${String(index).padStart(2, '0')}`, {
+      type: 'review',
+      title: `Moderation fixture ${index}`,
+      content: 'Searchable admin moderation fixtures.',
+      rating: 5,
+      authorUid: 'moderation-author',
+      authorName: 'Moderation Author',
+      createdAt: index,
+      updatedAt: index
+    });
+  }
+  database.records.set('forumPosts/admin-filter-deleted-review', {
+    type: 'review',
+    title: 'Deleted moderation fixture',
+    content: 'Searchable deleted moderation fixture.',
+    rating: 5,
+    authorUid: 'moderation-author',
+    authorName: 'Moderation Author',
+    createdAt: 100,
+    updatedAt: 100,
+    isDeleted: true
+  });
+  const filteredAdminPosts = await request('/api/admin/forum/content?kind=posts&type=review&status=active&search=moderation+fixture', { token: 'admin-token' });
+  assert.equal(filteredAdminPosts.response.status, 200);
+  assert.ok(filteredAdminPosts.data.items.length > 0, JSON.stringify(filteredAdminPosts.data));
+  assert.equal(filteredAdminPosts.data.items.length, 25);
+  assert.ok(filteredAdminPosts.data.nextCursor);
+  assert.equal(filteredAdminPosts.data.items.every(item =>
+    item.type === 'review' && !item.isDeleted && item.title.toLowerCase().includes('moderation fixture')
+  ), true);
+  const filteredAdminPostsPageTwo = await request(
+    `/api/admin/forum/content?kind=posts&type=review&status=active&search=moderation+fixture&cursor=${encodeURIComponent(filteredAdminPosts.data.nextCursor)}`,
+    { token: 'admin-token' }
+  );
+  assert.equal(filteredAdminPostsPageTwo.response.status, 200);
+  assert.equal(filteredAdminPostsPageTwo.data.items.length, 2);
+  const filteredDeletedAdminPosts = await request('/api/admin/forum/content?kind=posts&type=review&status=deleted&search=moderation+fixture', { token: 'admin-token' });
+  assert.equal(filteredDeletedAdminPosts.data.items.length, 1);
+  assert.equal(filteredDeletedAdminPosts.data.items[0].id, 'admin-filter-deleted-review');
+  const invalidAdminPostFilter = await request('/api/admin/forum/content?kind=posts&type=invalid', { token: 'admin-token' });
+  assert.equal(invalidAdminPostFilter.response.status, 400);
   const deniedAdminContent = await request('/api/admin/forum/content?kind=comments', { token: 'reader-token' });
   assert.equal(deniedAdminContent.response.status, 403);
 

@@ -424,16 +424,80 @@ body.admin-page {
   margin: 6px 0 10px;
 }
 
-.forum-content-grid {
+.forum-content-tabs {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 20px;
+  gap: 8px;
+  margin-bottom: 16px;
 }
 
-.forum-content-grid h3 {
-  margin: 0;
+.forum-content-tab {
+  appearance: none;
+  min-height: 42px;
+  padding: 9px 14px;
+  border: 1px solid var(--admin-border);
+  border-radius: 10px;
+  background: var(--admin-surface-2);
+  color: var(--admin-muted);
+  font: inherit;
+  font-size: .88rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.forum-content-tab.is-active {
+  border-color: var(--admin-primary-2);
+  background: color-mix(in srgb, var(--admin-primary-2) 12%, var(--admin-surface-2));
   color: var(--admin-text);
-  font-size: 1rem;
+}
+
+.forum-content-tab:focus-visible {
+  outline: 2px solid var(--admin-primary-2);
+  outline-offset: 2px;
+}
+
+.forum-content-panels > [role="tabpanel"] {
+  min-width: 0;
+}
+
+.forum-post-filters {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) repeat(2, minmax(130px, .45fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.forum-post-filters input,
+.forum-post-filters select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid var(--admin-border);
+  border-radius: 9px;
+  background: var(--admin-surface-2);
+  color: var(--admin-text);
+  font: inherit;
+  font-size: .84rem;
+}
+
+.forum-post-filters input:focus-visible,
+.forum-post-filters select:focus-visible {
+  outline: 2px solid var(--admin-primary-2);
+  outline-offset: 2px;
+}
+
+.forum-post-filters .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .forum-content-more,
@@ -1435,8 +1499,8 @@ tbody tr:hover {
     gap: 4px;
   }
 
-  .forum-content-grid {
-    grid-template-columns: 1fr;
+  .forum-post-filters {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .user-search {

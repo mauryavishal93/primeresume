@@ -6,6 +6,7 @@ let dashboard;
 let forumActivityCursor = null;
 let forumActivityLoading = false;
 let forumActivityRequest = 0;
+let forumPostSearchTimer = null;
 const forumContentStates = {
   posts: { cursor: null, loading: false, request: 0 },
   comments: { cursor: null, loading: false, request: 0 }
@@ -28,6 +29,18 @@ function selectAdminCategory(category) {
     if (isActive) button.setAttribute('aria-current', 'page');
     else button.removeAttribute('aria-current');
   });
+}
+
+function selectForumContentTab(tabName, { focus = false } = {}) {
+  for (const name of ['posts', 'comments']) {
+    const active = name === tabName;
+    const tab = $(`#forum-${name}-tab`);
+    tab.classList.toggle('is-active', active);
+    tab.setAttribute('aria-selected', String(active));
+    tab.tabIndex = active ? 0 : -1;
+    $(`#forum-${name}-panel`).hidden = !active;
+    if (active && focus) tab.focus();
+  }
 }
 
 document.querySelectorAll('[data-admin-category-link]').forEach(button => {
@@ -321,6 +334,7 @@ function forumActivityLabel(event) {
     post_edited: 'Edited post',
     post_deleted: 'Deleted post',
     comment_created: 'Published comment',
+    comment_edited: 'Edited comment',
     comment_deleted: event.reason === 'post_deleted' ? 'Comment deleted with post' : 'Deleted comment'
   })[event.eventType] || 'Community activity';
 }
@@ -349,11 +363,13 @@ function renderForumActivityEvent(event) {
   const actor = event.actorUid && event.actorUid !== event.userUid
     ? `<p class="forum-activity-actor">Action by ${escapeHtml(event.actorName || 'Unknown user')} (${escapeHtml(event.actorUid)})</p>`
     : '';
-  const snapshots = event.eventType === 'post_edited'
+  const snapshots = event.eventType === 'post_edited' || event.eventType === 'comment_edited'
     ? `${forumActivitySnapshot(event.before, 'Previous version')}${forumActivitySnapshot(event.after, 'Updated version')}`
     : forumActivitySnapshot(event.before || event.after, isDeleted ? 'Deleted content' : 'Content', !isDeleted);
   const title = event.postTitle
-    ? `<h3><a class="forum-post-link" href="/community.html?post=${encodeURIComponent(event.postId || '')}">${escapeHtml(event.postTitle)}</a></h3>`
+    ? `<h3>${event.eventType === 'post_deleted'
+      ? escapeHtml(event.postTitle)
+      : `<a class="forum-post-link" href="/community.html?post=${encodeURIComponent(event.postId || '')}">${escapeHtml(event.postTitle)}</a>`}</h3>`
     : '';
   const permanentDelete = event.eventType === 'post_deleted'
     ? `<button class="mini-button danger" type="button" data-permanent-delete="post" data-post-id="${escapeHtml(event.postId)}">Permanently delete post and history</button>`
@@ -413,7 +429,9 @@ function renderForumContentItem(kind, item) {
   const type = kind === 'posts'
     ? item.type === 'review' ? `Review · ${escapeHtml(item.rating)}/5 stars` : 'Discussion'
     : 'Comment';
-  const heading = `<h3><a class="forum-post-link" href="/community.html?post=${encodeURIComponent(kind === 'posts' ? item.id : item.postId || '')}">${escapeHtml(title || '')}</a></h3>`;
+  const heading = `<h3>${kind === 'posts' && item.isDeleted
+    ? escapeHtml(title || '')
+    : `<a class="forum-post-link" href="/community.html?post=${encodeURIComponent(kind === 'posts' ? item.id : item.postId || '')}">${escapeHtml(title || '')}</a>`}</h3>`;
   const deletion = item.isDeleted
     ? `<p class="forum-deleted-label">Deleted post${item.deletedAt ? ` · ${escapeHtml(new Date(item.deletedAt).toLocaleString())}` : ''}</p>`
     : '';
@@ -494,6 +512,11 @@ async function loadForumContent(kind, { reset = false, append = false } = {}) {
   try {
     const query = new URLSearchParams({ kind });
     if (append && state.cursor) query.set('cursor', state.cursor);
+    if (kind === 'posts') {
+      query.set('search', $('#forum-post-search').value.trim());
+      query.set('type', $('#forum-post-type').value);
+      query.set('status', $('#forum-post-status-filter').value);
+    }
     const page = await api(`/api/admin/forum/content?${query}`);
     if (requestId !== state.request) return;
     list.insertAdjacentHTML('beforeend', (page.items || []).map(item => renderForumContentItem(kind, item)).join(''));
@@ -502,7 +525,7 @@ async function loadForumContent(kind, { reset = false, append = false } = {}) {
     const deletedCount = kind === 'posts' ? (page.items || []).filter(item => item.isDeleted).length : 0;
     status.textContent = page.items?.length
       ? `${page.items.length} entr${page.items.length === 1 ? 'y' : 'ies'} shown${deletedCount ? ` (${deletedCount} deleted)` : ''}.`
-      : append ? `No older ${kind}.` : `No current ${kind}.`;
+      : append ? `No older ${kind}.` : kind === 'posts' ? 'No posts match these search and filter options.' : `No current ${kind}.`;
   } catch (error) {
     if (requestId !== state.request) return;
     console.error(`Could not load current community ${kind}.`, error);
@@ -605,6 +628,28 @@ $('#forum-content-refresh').addEventListener('click', () => {
   void loadForumContent('posts', { reset: true });
   void loadForumContent('comments', { reset: true });
 });
+for (const tab of document.querySelectorAll('.forum-content-tab')) {
+  tab.addEventListener('click', () => selectForumContentTab(tab.id === 'forum-posts-tab' ? 'posts' : 'comments'));
+  tab.addEventListener('keydown', event => {
+    const tabs = [...document.querySelectorAll('.forum-content-tab')];
+    const currentIndex = tabs.indexOf(tab);
+    const nextIndex = event.key === 'ArrowRight' || event.key === 'ArrowDown'
+      ? (currentIndex + 1) % tabs.length
+      : event.key === 'ArrowLeft' || event.key === 'ArrowUp'
+        ? (currentIndex - 1 + tabs.length) % tabs.length
+        : event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : -1;
+    if (nextIndex < 0) return;
+    event.preventDefault();
+    selectForumContentTab(tabs[nextIndex].id === 'forum-posts-tab' ? 'posts' : 'comments', { focus: true });
+  });
+}
+function refreshFilteredForumPosts() {
+  clearTimeout(forumPostSearchTimer);
+  forumPostSearchTimer = setTimeout(() => void loadForumContent('posts', { reset: true }), 250);
+}
+$('#forum-post-search').addEventListener('input', refreshFilteredForumPosts);
+$('#forum-post-type').addEventListener('change', () => void loadForumContent('posts', { reset: true }));
+$('#forum-post-status-filter').addEventListener('change', () => void loadForumContent('posts', { reset: true }));
 for (const list of ['#forum-activity-list', '#forum-posts-list', '#forum-comments-list']) {
   $(list).addEventListener('click', event => {
     const button = event.target.closest('[data-permanent-delete]');

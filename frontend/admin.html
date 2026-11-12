@@ -308,15 +308,37 @@
             <p class="forum-content-description">Review community posts and comments, including deleted posts.</p>
             <button id="forum-content-refresh" class="admin-button secondary" type="button">Refresh content</button>
           </div>
-          <div class="forum-content-grid">
-            <section aria-labelledby="forum-posts-title">
-              <h3 id="forum-posts-title">Posts and reviews</h3>
+          <div class="forum-content-tabs" role="tablist" aria-label="Community content">
+            <button id="forum-posts-tab" class="forum-content-tab is-active" type="button" role="tab" aria-selected="true" aria-controls="forum-posts-panel" tabindex="0">Posts and reviews</button>
+            <button id="forum-comments-tab" class="forum-content-tab" type="button" role="tab" aria-selected="false" aria-controls="forum-comments-panel" tabindex="-1">Comments</button>
+          </div>
+          <div class="forum-content-panels">
+            <section id="forum-posts-panel" role="tabpanel" aria-labelledby="forum-posts-tab" tabindex="0">
+              <div class="forum-post-filters" role="search" aria-label="Search and filter community posts">
+                <label class="sr-only" for="forum-post-search">Search posts</label>
+                <input id="forum-post-search" type="search" maxlength="120" placeholder="Search post, author, or text">
+                <label>
+                  <span class="sr-only">Post type</span>
+                  <select id="forum-post-type">
+                    <option value="all">All types</option>
+                    <option value="review">Reviews</option>
+                    <option value="discussion">Discussions</option>
+                  </select>
+                </label>
+                <label>
+                  <span class="sr-only">Post status</span>
+                  <select id="forum-post-status-filter">
+                    <option value="all">All posts</option>
+                    <option value="active">Active</option>
+                    <option value="deleted">Deleted</option>
+                  </select>
+                </label>
+              </div>
               <p id="forum-posts-status" class="forum-activity-status" role="status" aria-live="polite">Waiting for data.</p>
               <div id="forum-posts-list" class="forum-activity-list"></div>
               <button id="forum-posts-more" class="admin-button secondary forum-content-more" type="button" hidden>Load older posts</button>
             </section>
-            <section aria-labelledby="forum-comments-title">
-              <h3 id="forum-comments-title">Comments</h3>
+            <section id="forum-comments-panel" role="tabpanel" aria-labelledby="forum-comments-tab" tabindex="0" hidden>
               <p id="forum-comments-status" class="forum-activity-status" role="status" aria-live="polite">Waiting for data.</p>
               <div id="forum-comments-list" class="forum-activity-list"></div>
               <button id="forum-comments-more" class="admin-button secondary forum-content-more" type="button" hidden>Load older comments</button>

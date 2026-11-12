@@ -190,7 +190,8 @@ function publicForumComment(document, viewerUid = null) {
     content,
     authorName: forumAuthorName({ name: data.authorName }),
     isOwner: Boolean(viewerUid && viewerUid === data.authorUid),
-    createdAt: Number.isFinite(data.createdAt) ? data.createdAt : 0
+    createdAt: Number.isFinite(data.createdAt) ? data.createdAt : 0,
+    updatedAt: Number.isFinite(data.updatedAt) ? data.updatedAt : null
   };
 }
 
@@ -389,7 +390,7 @@ function forumContentCursorPath(cursor, kind) {
   return validPath ? path : false;
 }
 
-async function loadForumContent(db, kind, cursor, userUid = null) {
+async function loadForumContent(db, kind, cursor, userUid = null, postFilters = {}) {
   const cursorPath = forumContentCursorPath(cursor, kind);
   if (cursorPath === false) return null;
   let query = kind === 'posts'
@@ -400,32 +401,43 @@ async function loadForumContent(db, kind, cursor, userUid = null) {
     const cursorSnapshot = await db.doc(cursorPath).get();
     if (!forumSnapshotExists(cursorSnapshot)
       || (userUid && cursorSnapshot.data().authorUid !== userUid)) return null;
-    query = query.startAfter(cursorSnapshot);
+    if (kind !== 'posts') query = query.startAfter(cursorSnapshot);
   }
-  let snapshot;
   const documents = [];
   let hasMore = false;
-  do {
+  let snapshot;
+  if (kind === 'posts') {
+    let scanAfter = cursorPath ? await db.doc(cursorPath).get() : null;
+    while (documents.length < 26) {
+      const scanQuery = scanAfter ? query.startAfter(scanAfter) : query;
+      snapshot = await scanQuery.limit(25).get();
+      const candidates = snapshot.docs.filter(document => {
+        const data = document.data();
+        if (userUid && data.isDeleted) return false;
+        if (!forumPostInput(data)) return false;
+        if (postFilters.status === 'active' && data.isDeleted) return false;
+        if (postFilters.status === 'deleted' && !data.isDeleted) return false;
+        if (postFilters.type !== 'all' && postFilters.type && data.type !== postFilters.type) return false;
+        if (postFilters.search) {
+          const searchable = `${data.title || ''} ${data.content || ''} ${data.authorName || ''} ${data.authorUid || ''}`.toLocaleLowerCase();
+          if (!searchable.includes(postFilters.search)) return false;
+        }
+        return true;
+      });
+      documents.push(...candidates.slice(0, 26 - documents.length));
+      if (documents.length >= 26) {
+        hasMore = true;
+        break;
+      }
+      if (snapshot.docs.length < 25) break;
+      scanAfter = snapshot.docs.at(-1);
+    }
+    if (documents.length === 26) documents.pop();
+  } else {
     snapshot = await query.limit(25).get();
-    const candidates = kind === 'posts' && userUid
-      ? snapshot.docs.filter(document => !document.data().isDeleted && forumPostInput(document.data()))
-      : snapshot.docs;
-    const remaining = 25 - documents.length;
-    documents.push(...candidates.slice(0, remaining));
-    if (kind !== 'posts' || !userUid) {
-      hasMore = snapshot.docs.length === 25;
-      break;
-    }
-    if (candidates.length > remaining) {
-      hasMore = true;
-      break;
-    }
-    if (documents.length === 25 || snapshot.docs.length < 25) {
-      hasMore = snapshot.docs.length === 25;
-      break;
-    }
-    query = query.startAfter(snapshot.docs.at(-1));
-  } while (true);
+    documents.push(...snapshot.docs);
+    hasMore = snapshot.docs.length === 25;
+  }
   const items = await Promise.all(documents.map(async document => {
     const data = document.data();
     const path = document.ref.path.split('/');
@@ -463,7 +475,7 @@ async function loadForumContent(db, kind, cursor, userUid = null) {
     };
   }));
   const validItems = items.filter(Boolean);
-  const nextCursorDocument = kind === 'posts' && userUid ? documents.at(-1) : snapshot.docs.at(-1);
+  const nextCursorDocument = kind === 'posts' ? documents.at(-1) : snapshot.docs.at(-1);
   return {
     items: validItems,
     nextCursor: hasMore
@@ -1142,9 +1154,16 @@ app.get('/api/admin/forum/content', requireFirebaseUser, requireAdmin, async (re
     response.status(400).json({ error: 'Choose posts or comments to view current community content.' });
     return;
   }
+  const search = typeof request.query.search === 'string' ? request.query.search.trim().toLocaleLowerCase() : '';
+  const type = typeof request.query.type === 'string' ? request.query.type : 'all';
+  const status = typeof request.query.status === 'string' ? request.query.status : 'all';
+  if (search.length > 120 || !['all', 'review', 'discussion'].includes(type) || !['all', 'active', 'deleted'].includes(status)) {
+    response.status(400).json({ error: 'The community post filters are invalid.' });
+    return;
+  }
   try {
     const { db } = await getFirebaseAdmin();
-    const page = await loadForumContent(db, kind, cursor);
+    const page = await loadForumContent(db, kind, cursor, null, { search, type, status });
     if (!page) {
       response.status(400).json({ error: 'This content page cursor is invalid or no longer available. Reload community content.' });
       return;
@@ -1255,7 +1274,10 @@ app.get('/api/forum/posts', optionalFirebaseUser, async (request, response) => {
     }
     const hasMore = posts.length > 50;
     const visiblePosts = posts.slice(0, 50);
-    const feedPosts = visiblePosts.map(item => item.post);
+    const feedPosts = await Promise.all(visiblePosts.map(async item => {
+      const count = await collection.doc(item.document.id).collection('comments').count().get();
+      return { ...item.post, commentCount: count.data().count };
+    }));
     const ratings = feedPosts.filter(post => post.type === 'review' && Number.isInteger(post.rating));
     response.json({
       posts: feedPosts,
@@ -1291,6 +1313,8 @@ app.get('/api/forum/posts', optionalFirebaseUser, async (request, response) => {
           response.status(404).json({ error: 'This post no longer exists.' });
           return;
         }
+        const commentCount = await db.collection('forumPosts').doc(postId).collection('comments').count().get();
+        post.commentCount = commentCount.data().count;
         response.json({ post });
       } catch (error) {
         console.error('Could not load community post.', error);
@@ -1492,6 +1516,11 @@ app.get('/api/forum/posts/:postId/comments', optionalFirebaseUser, async (reques
       return;
     }
     const collection = postReference.collection('comments');
+    if (request.query.countOnly === '1') {
+      const count = await collection.count().get();
+      response.json({ totalCount: count.data().count });
+      return;
+    }
     let query = collection.orderBy('createdAt', 'desc');
     if (cursor) {
       const cursorSnapshot = await collection.doc(cursor).get();
@@ -1502,9 +1531,11 @@ app.get('/api/forum/posts/:postId/comments', optionalFirebaseUser, async (reques
       query = query.startAfter(cursorSnapshot);
     }
     const snapshot = await query.limit(100).get();
+    const countSnapshot = await collection.count().get();
     response.json({
       comments: snapshot.docs.map(document => publicForumComment(document, request.user?.uid)).filter(Boolean),
-      nextCursor: snapshot.docs.length === 100 ? snapshot.docs.at(-1).id : null
+      nextCursor: snapshot.docs.length === 100 ? snapshot.docs.at(-1).id : null,
+      totalCount: countSnapshot.data().count
     });
   } catch (error) {
     console.error('Could not load community comments.', error);
@@ -1563,6 +1594,67 @@ app.post('/api/forum/posts/:postId/comments', requireFirebaseUser, async (reques
   } catch (error) {
     console.error('Could not create community comment.', error);
     response.status(500).json({ error: 'Your comment could not be published. Please try again.' });
+  }
+});
+
+app.patch('/api/forum/posts/:postId/comments/:commentId', requireFirebaseUser, async (request, response) => {
+  const { postId, commentId } = request.params;
+  const content = forumCommentInput(request.body);
+  if (!postId || postId.length > 150 || !commentId || commentId.length > 150 || !content) {
+    response.status(400).json({ error: 'Enter a comment of up to 2,000 characters.' });
+    return;
+  }
+  try {
+    const { db } = await getFirebaseAdmin();
+    const postReference = db.collection('forumPosts').doc(postId);
+    const postSnapshot = await postReference.get();
+    if (!forumSnapshotExists(postSnapshot) || postSnapshot.data().isDeleted) {
+      response.status(404).json({ error: 'This post no longer exists.' });
+      return;
+    }
+    const reference = postReference.collection('comments').doc(commentId);
+    const snapshot = await reference.get();
+    if (!forumSnapshotExists(snapshot)) {
+      response.status(404).json({ error: 'This comment no longer exists.' });
+      return;
+    }
+    const previous = snapshot.data();
+    if (previous.authorUid !== request.user.uid) {
+      response.status(403).json({ error: 'You can only edit your own comments.' });
+      return;
+    }
+    const updatedAt = Date.now();
+    const comment = { ...previous, content, updatedAt };
+    const batch = db.batch();
+    batch.set(reference, comment);
+    appendForumActivityWrites(batch, db, {
+      eventType: 'comment_edited',
+      userUid: request.user.uid,
+      userName: forumAuthorName(request.user),
+      actorUid: request.user.uid,
+      actorName: forumAuthorName(request.user),
+      postId,
+      postTitle: postSnapshot.data().title,
+      commentId,
+      reason: null,
+      before: { content: forumCommentInput(previous) },
+      after: { content },
+      occurredAt: updatedAt
+    });
+    await batch.commit();
+    response.json({
+      comment: {
+        id: commentId,
+        content,
+        authorName: forumAuthorName({ name: previous.authorName }),
+        isOwner: true,
+        createdAt: Number.isFinite(previous.createdAt) ? previous.createdAt : 0,
+        updatedAt
+      }
+    });
+  } catch (error) {
+    console.error('Could not edit community comment.', error);
+    response.status(500).json({ error: 'Your comment could not be updated. Please try again.' });
   }
 });
 

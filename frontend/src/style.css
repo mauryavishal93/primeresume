@@ -744,8 +744,8 @@ body.public-resume-pdf #incomingShareModalBg.show{z-index:101}
  #sectionTypographyCallout{display:none!important}
 }
 @media(max-width:520px){
- .topbar{grid-template-columns:repeat(12,minmax(0,1fr));grid-template-areas:"brand brand brand brand brand brand docname docname docname docname docname account" "cloud cloud community community community cover cover cover cover plans plans plans" "import import import import import import pdf pdf pdf pdf pdf pdf";gap:5px;padding:8px}
- .topbar:has(#googleSignInBtn[hidden]){grid-template-areas:"brand brand brand brand brand brand docname docname docname docname docname account" "community community community community cover cover cover cover plans plans plans plans" "import import import import import import pdf pdf pdf pdf pdf pdf"}
+ .topbar{grid-template-columns:repeat(10,minmax(0,1fr)) 42px;grid-template-areas:"brand brand brand brand brand brand docname docname docname docname account" "cloud cloud community community community cover cover cover plans plans ." "import import import import import pdf pdf pdf pdf pdf .";gap:5px;padding:8px}
+ .topbar:has(#googleSignInBtn[hidden]){grid-template-areas:"brand brand brand brand brand brand docname docname docname docname account" "community community community cover cover cover plans plans plans plans ." "import import import import import pdf pdf pdf pdf pdf ."}
  .topbar:has(#googleSignInBtn[hidden]) .cloud-actions{display:none}
  .topbar .brand{grid-area:brand;justify-content:flex-start;margin:0 0 0 4px}
  .topbar .docname{grid-area:docname;width:100%;min-width:0;padding:6px 4px;font-size:11px}

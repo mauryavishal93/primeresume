@@ -58,6 +58,7 @@ test('deleted post and comment activity entries are collapsed disclosures by def
   assert.match(source, /const isDeleted = event\.eventType\.endsWith\('_deleted'\)/);
   assert.match(renderEvent, /<details class="forum-activity-entry forum-deleted-entry"><summary>/);
   assert.match(renderEvent, /'Deleted content' : 'Content', !isDeleted/);
+  assert.match(renderEvent, /event\.eventType === 'post_deleted'[\s\S]*?escapeHtml\(event\.postTitle\)/);
   assert.doesNotMatch(renderEvent, /<details[^>]*\bopen(?:\s|>)/);
   assert.match(styles, /\.forum-deleted-entry\[open\] > summary::after/);
 });
@@ -70,4 +71,35 @@ test('admin community content exposes permanent deletion for posts and comments'
   assert.match(source, /This cannot be undone/);
   assert.match(source, /\/api\/admin\/forum\/permanent-delete/);
   assert.match(source, /method: 'POST'/);
+});
+
+test('admin community posts have searchable, type, and deleted-status filters', () => {
+  assert.match(html, /id="forum-post-search" type="search"/);
+  assert.match(html, /id="forum-post-type"[\s\S]*?<option value="review">Reviews<\/option>[\s\S]*?<option value="discussion">Discussions<\/option>/);
+  assert.match(html, /id="forum-post-status-filter"[\s\S]*?<option value="deleted">Deleted<\/option>/);
+  assert.match(source, /query\.set\('search', \$\('#forum-post-search'\)\.value\.trim\(\)\)/);
+  assert.match(source, /query\.set\('type', \$\('#forum-post-type'\)\.value\)/);
+  assert.match(source, /query\.set\('status', \$\('#forum-post-status-filter'\)\.value\)/);
+  assert.match(source, /\$\('#forum-post-search'\)\.addEventListener\('input', refreshFilteredForumPosts\)/);
+  assert.match(styles, /\.forum-post-filters\s*\{[\s\S]*?grid-template-columns:\s*minmax\(180px, 1fr\)/);
+});
+
+test('admin community posts and comments are separate accessible tabs', () => {
+  assert.match(html, /<div class="forum-content-tabs" role="tablist" aria-label="Community content">/);
+  assert.match(html, /id="forum-posts-tab"[^>]*role="tab" aria-selected="true" aria-controls="forum-posts-panel"/);
+  assert.match(html, />Posts and reviews<\/button>/);
+  assert.match(html, /id="forum-comments-tab"[^>]*role="tab" aria-selected="false" aria-controls="forum-comments-panel"/);
+  assert.match(html, />Comments<\/button>/);
+  assert.match(html, /id="forum-posts-panel" role="tabpanel" aria-labelledby="forum-posts-tab"/);
+  assert.match(html, /id="forum-comments-panel" role="tabpanel" aria-labelledby="forum-comments-tab"[^>]*hidden/);
+  assert.match(source, /function selectForumContentTab\(tabName/);
+  assert.match(source, /tab\.setAttribute\('aria-selected', String\(active\)\)/);
+  assert.match(source, /event\.key === 'ArrowRight' \|\| event\.key === 'ArrowDown'/);
+});
+
+test('admin current deleted posts display their title without a community hyperlink', () => {
+  const renderStart = source.indexOf('function renderForumContentItem(');
+  const deleteStart = source.indexOf('async function permanentlyDeleteForumContent(', renderStart);
+  const renderItem = source.slice(renderStart, deleteStart);
+  assert.match(renderItem, /kind === 'posts' && item\.isDeleted[\s\S]*?escapeHtml\(title \|\| ''\)/);
 });

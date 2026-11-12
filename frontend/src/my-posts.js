@@ -52,7 +52,8 @@ function actionLabel(event) {
   return ({
     post_created: 'Published post',
     post_edited: 'Edited post',
-    comment_created: 'Published comment'
+    comment_created: 'Published comment',
+    comment_edited: 'Edited comment'
   })[event.eventType] || 'Community activity';
 }
 
@@ -85,7 +86,7 @@ function renderEvent(event) {
   if (event.postId) addPostLink(article, event.postTitle || 'Community comment', event.postId);
   else addText(article, 'h2', '', event.postTitle || 'Community comment');
 
-  if (event.eventType === 'post_edited') {
+  if (event.eventType === 'post_edited' || event.eventType === 'comment_edited') {
     const versions = document.createElement('div');
     versions.className = 'history-versions';
     renderSnapshot(versions, 'Previous version', event.before);
