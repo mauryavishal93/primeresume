@@ -18,7 +18,7 @@ test('homepage redesign sections and existing walkthrough stay consistent on bot
     assert.match(html, /<div class="hero-actions landing-hero-actions">\s*<a class="btn primary landing-create-btn" href="\/editor\.html">Create my free resume <span aria-hidden="true">→<\/span><\/a>\s*<a class="btn outline landing-explore-btn" href="#templates">Explore templates<\/a>\s*<\/div>\s*<a class="landing-import-link" href="\/editor\.html\?open=import">Already have a resume\? Import it<\/a>/);
     assert.match(html, /<a class="landing-scratch-cta" href="\/resume-wizard\.html">\s*<span class="landing-scratch-title">Build my resume from scratch <span aria-hidden="true">→<\/span><\/span>\s*<span class="landing-scratch-subtitle">Guided step-by-step resume creation<\/span>\s*<\/a>/);
     assert.match(html, /<a class="btn outline landing-import-button" href="\/editor\.html\?open=import"><svg class="landing-import-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4"\/><path d="m7 9 5-5 5 5"\/><path d="M4 15v3a2 2 0 0 0 2 2h14"\/><\/svg>Import resume<\/a>/);
-    assert.match(html, /<div class="landing-header-actions">\s*<a class="btn outline" href="\/pricing\.html">Plans<\/a>\s*<a class="btn outline landing-import-button" href="\/editor\.html\?open=import">[\s\S]*?<\/a>\s*<a class="btn soft about-editor" href="\/editor\.html">Open editor<\/a>\s*<\/div>/);
+    assert.match(html, /<div class="landing-header-actions">\s*<a class="btn outline" href="\/pricing\.html">Plans<\/a>\s*<a class="btn outline landing-support-link" href="\/support\.html">Support<\/a>\s*<a class="btn outline landing-import-button" href="\/editor\.html\?open=import">[\s\S]*?<\/a>\s*<a class="btn soft about-editor" href="\/editor\.html">Open editor<\/a>\s*<\/div>/);
     for (const section of ['templates', 'how-it-works', 'features', 'pricing', 'faq']) {
       assert.match(html, new RegExp(`id="${section}"`));
       assert.match(html, new RegExp(`href="#${section}">`));
@@ -47,7 +47,7 @@ test('homepage redesign sections and existing walkthrough stay consistent on bot
   assert.match(aboutStyles, /\.landing-page \.about-nav\{display:grid;grid-template-columns:40px minmax\(0,auto\) minmax\(0,1fr\);grid-template-areas:"auth community actions"/);
   assert.match(aboutStyles, /\.landing-page \.about-nav>\.auth-actions \.google-signin\{width:40px;max-width:40px\}/);
   assert.match(aboutStyles, /\.about-nav \.google-signin \[data-auth-sign-in-label\]\{position:absolute;width:1px;height:1px/);
-  assert.match(aboutStyles, /\.about-nav>a\[href="\/support\.html"\],\.about-nav>\.landing-header-actions \.landing-import-button\{display:none\}/);
+  assert.match(aboutStyles, /\.about-nav>a\[href="\/support\.html"\],\.about-nav>\.landing-header-actions \.landing-import-button,\.landing-page \.about-nav>\.landing-header-actions \.landing-support-link\{display:none\}/);
   assert.match(aboutStyles, /\.landing-page \.about-nav>\.landing-header-actions\{display:grid;grid-area:actions;grid-template-columns:repeat\(2,minmax\(0,1fr\)\);justify-self:stretch;flex:initial;width:100%;min-width:0;max-width:none;gap:6px\}/);
   assert.match(aboutStyles, /\.landing-page \.about-nav>\.landing-header-actions \.btn\{width:100%;min-width:0;min-height:40px;padding:6px 4px;font-size:11px\}/);
   assert.match(aboutStyles, /\.about-page:not\(\.landing-page\):not\(\.admin-page\) \.about-nav\{display:grid;grid-template-columns:40px minmax\(0,auto\) repeat\(2,minmax\(0,1fr\)\);grid-template-areas:"auth community plans editor"/);
@@ -58,6 +58,34 @@ test('homepage redesign sections and existing walkthrough stay consistent on bot
     const html = readFileSync(new URL(`../frontend/${page}.html`, import.meta.url), 'utf8');
     assert.match(html, /<header class="about-header"/, `${page} should use the shared responsive header`);
     assert.match(html, /src="\/src\/auth-nav\.js"/, `${page} should show the shared account menu`);
+  }
+});
+
+test('home and Plans pages explain the Google sign-in Pro-template PDF allowance', () => {
+  for (const page of ['home.html', 'index.html']) {
+    const html = readFileSync(new URL(`../frontend/${page}`, import.meta.url), 'utf8');
+    assert.match(html, /Pro-template PDF downloads<\/span><span>2 after Google sign-in<\/span>/);
+    assert.match(html, /Sign in with Google for first 2 free Pro-template PDF downloads per account/);
+    assert.match(html, /Sign in with Google to get 2 lifetime downloads using Pro templates per account/);
+  }
+  const pricing = readFileSync(new URL('../frontend/pricing.html', import.meta.url), 'utf8');
+  const features = readFileSync(new URL('../frontend/src/plan-access.js', import.meta.url), 'utf8');
+  assert.match(pricing, /First 2 free Pro-template PDF downloads after Google sign-in, per account/);
+  assert.match(features, /label: 'Pro-template PDF downloads', free: '2 lifetime after Google sign-in', pro: 'Unlimited'/);
+});
+
+test('homepage navigation links to Support beside Plans on both entry points', () => {
+  for (const page of ['home.html', 'index.html']) {
+    const html = readFileSync(new URL(`../frontend/${page}`, import.meta.url), 'utf8');
+    assert.match(html, /href="\/pricing\.html">Plans<\/a>\s*<a class="btn outline landing-support-link" href="\/support\.html">Support<\/a>/);
+  }
+  assert.match(aboutStyles, /\.landing-page \.about-nav>\.landing-header-actions \.landing-support-link\{display:none\}/);
+});
+
+test('Community, Billing, and My posts pages link to Support beside Plans', () => {
+  for (const page of ['community.html', 'billing.html', 'my-posts.html']) {
+    const html = readFileSync(new URL(`../frontend/${page}`, import.meta.url), 'utf8');
+    assert.match(html, /href="\/pricing\.html">Plans<\/a>\s*<a class="btn outline" href="\/support\.html">Support<\/a>/);
   }
 });
 

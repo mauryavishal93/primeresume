@@ -256,7 +256,7 @@ button,a{font:inherit}
 :root[data-theme=dark] .about-pro-brand-badge{border-color:#806a3f;background:#302a1d;color:#e0c58c}
 :root[data-theme=light] .about-header{background:rgba(255,254,250,.94);border-color:#e4dccb;box-shadow:0 5px 20px rgba(67,53,29,.06)}
 @media(max-width:640px){
- .about-nav>a[href="/support.html"],.about-nav>.landing-header-actions .landing-import-button{display:none}
+ .about-nav>a[href="/support.html"],.about-nav>.landing-header-actions .landing-import-button,.landing-page .about-nav>.landing-header-actions .landing-support-link{display:none}
  .about-header{display:grid;grid-template-columns:minmax(0,1fr) 42px;grid-template-areas:"brand account" "nav nav";grid-template-rows:42px auto;align-items:center;gap:4px;padding:8px 12px}
  .about-brand{grid-area:brand;justify-self:start;gap:7px;margin:0}
  .about-brand .about-logo{width:32px;height:32px}

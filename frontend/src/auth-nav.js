@@ -74,6 +74,8 @@ function createAccountMenu() {
   const communityLink = addMenuItem(panel, 'a', 'account-menu-item', 'Community', '/community.html');
   if (location.pathname === '/community.html') communityLink.setAttribute('aria-current', 'page');
   const about = addMenuItem(panel, 'a', 'account-menu-item', 'About', '/about.html');
+  const supportLink = addMenuItem(panel, 'a', 'account-menu-item', 'Support', '/support.html');
+  if (location.pathname === '/support.html') supportLink.setAttribute('aria-current', 'page');
 
   const appearance = document.createElement('div');
   appearance.className = 'account-menu-theme';

@@ -379,6 +379,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 .cloud-actions{display:flex;align-items:center;gap:6px}
 .cloud-actions [hidden]{display:none!important}
 .google-signin{height:40px;padding:0 14px;background:#fff;border:1px solid #dadce0;border-radius:6px;color:#3c4043;font-size:14px;font-weight:500;letter-spacing:.15px;gap:10px;box-shadow:0 1px 2px #0000001a}
+.google-signin-compact{display:none}
 .google-signin:hover:not(:disabled){background:#f8faff;border-color:#d2e3fc;box-shadow:0 1px 3px #00000024}
 .google-signin:active:not(:disabled){background:#eef3fc;box-shadow:inset 0 1px 2px #0000001a}
 .google-signin-logo{width:18px;height:18px;flex:0 0 18px}
@@ -484,10 +485,12 @@ body.public-resume-pdf-ready .topbar,body.public-resume-pdf-ready .layout,body.p
 body.public-resume-pdf-ready #pdfPreviewModalBg.show{z-index:100;padding:0;background:#e9edf4}
 body.public-resume-pdf-ready .pdf-preview-modal{width:100%;height:100%;max-height:none;border-radius:0;padding:16px}
 body.public-resume-pdf-ready .pdf-preview-modal #cancelPdfPreview{display:none}
-body.public-resume-pdf-ready .pdf-preview-modal .modal-actions{justify-content:center}
-body.public-resume-pdf-ready .pdf-preview-modal #downloadPdfPreview{min-width:180px}
+body.public-resume-pdf-ready #pdfPreviewModalBg .pdf-preview-modal .modal-actions{display:flex!important;justify-content:center!important}
+body.public-resume-pdf-ready #pdfPreviewModalBg .pdf-preview-modal #downloadPdfPreview{flex:0 0 auto!important;width:auto!important;min-width:180px;margin-left:auto!important;margin-right:auto!important}
 body.public-resume-pdf #incomingShareModalBg.show{z-index:101}
-@media(max-width:600px){body.public-resume-pdf-ready .pdf-preview-modal{padding:max(8px,env(safe-area-inset-top)) 8px max(8px,env(safe-area-inset-bottom))}}
+@media(max-width:600px){
+ body.public-resume-pdf-ready .pdf-preview-modal{padding:max(8px,env(safe-area-inset-top)) 8px max(8px,env(safe-area-inset-bottom))}
+}
 @media(max-width:800px){.topbar{grid-template-areas:"brand docname docname docname docname" "cloud cloud cloud cloud cloud" "cover cover about pdf pdf"}.cloud-actions{grid-area:cloud;justify-content:center}.cloud-actions .btn{width:auto;padding:7px 9px}}
 .theme-switch{display:inline-flex;align-items:center;justify-content:center;gap:7px;flex:none;padding:5px 8px;border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--ink);font-size:12px;font-weight:700;line-height:1;cursor:pointer;transition:border-color .16s ease,background-color .16s ease}
 .theme-switch:hover{border-color:var(--purple)}
@@ -657,8 +660,8 @@ body.public-resume-pdf #incomingShareModalBg.show{z-index:101}
 @media(max-width:560px){.ats-processing-steps{grid-template-columns:repeat(2,minmax(0,1fr));row-gap:12px}}
 @media(prefers-reduced-motion:reduce){.ats-processing-spinner{animation:none}.ats-processing .ats-processing-track span{transition:none}}
 @media(min-width:801px) and (max-width:1100px){.topbar{gap:6px;padding:0 10px}.brand-name{display:inline}.docname{width:128px}.save-state{display:none}.topbar .btn{padding:7px 8px;font-size:12px}}
-@media(max-width:800px){.topbar{grid-template-areas:"brand brand docname docname docname" "cloud cloud cloud account account" "import import cover community plans" "pdf pdf pdf pdf pdf"}.topbar .cloud-actions{grid-area:cloud;justify-content:flex-start;min-width:0}.topbar .cloud-actions .btn{width:auto}.topbar #accountMenu{grid-area:account;justify-self:end}.topbar #importResumeBtn{grid-area:import}.topbar #coverLetterBtn{grid-area:cover}.topbar #editorCommunityLink{grid-area:community}.topbar #plansLink{grid-area:plans}.topbar #pdfBtn{grid-area:pdf}}
-@media(max-width:520px){.topbar{grid-template-columns:repeat(5,minmax(0,1fr));grid-template-areas:"brand brand docname docname docname" "cloud cloud cloud account account" "import import cover community plans" "pdf pdf pdf pdf pdf"}.topbar .cloud-actions .btn{padding:7px 6px}}
+@media(max-width:800px){.topbar{grid-template-columns:repeat(6,minmax(0,1fr));grid-template-areas:"brand brand brand docname docname account" "cloud cloud import import pdf pdf" "cover cover community community plans plans"}.topbar .cloud-actions{grid-area:cloud;justify-content:center;min-width:0}.topbar .cloud-actions .btn{width:auto}.topbar .cloud-actions .google-signin{box-sizing:border-box;width:100%;min-width:0;height:44px;min-height:44px;flex:1 1 auto;gap:4px;padding:6px 3px}.topbar .cloud-actions .google-signin .google-signin-compact{display:inline}.topbar #accountMenu{grid-area:account;justify-self:end}.topbar #importResumeBtn{grid-area:import}.topbar #coverLetterBtn{grid-area:cover}.topbar #editorCommunityLink{grid-area:community}.topbar #plansLink{grid-area:plans}.topbar #pdfBtn{grid-area:pdf}}
+@media(max-width:520px){.topbar{grid-template-columns:repeat(6,minmax(0,1fr));grid-template-areas:"brand brand brand docname docname account" "cloud cloud import import pdf pdf" "cover cover community community plans plans"}.topbar .cloud-actions .btn{padding:7px 6px}}
 .section-delete{display:grid;place-items:center;width:25px;height:25px;flex:0 0 25px;padding:0;border:1px solid transparent;border-radius:6px;background:transparent;color:#9b6b70;font-size:17px;line-height:1;opacity:.72}.section-delete:hover,.section-delete:focus-visible{border-color:#e4a5ad;background:#fff0f2;color:#b4233a;opacity:1}.section-row:hover .section-delete,.section-row:focus-within .section-delete{opacity:1}:root[data-theme=dark] .section-delete{color:#d39a9f}:root[data-theme=dark] .section-delete:hover,:root[data-theme=dark] .section-delete:focus-visible{border-color:#85434c;background:#3a2024;color:#ffb4bc}@media(max-width:800px){.section-delete{opacity:1}}
 .account-menu[hidden]{display:none!important}.account-menu-item[hidden]{display:none!important}.account-menu{position:relative;flex:0 0 auto;z-index:20}.account-menu>summary{list-style:none}.account-menu>summary::-webkit-details-marker{display:none}.account-menu-trigger{display:flex;align-items:center;gap:8px;min-height:40px;padding:4px 10px 4px 5px;border:1px solid var(--line);border-radius:9px;background:var(--panel);color:var(--ink);cursor:pointer}.account-menu-trigger:hover,.account-menu[open]>.account-menu-trigger{border-color:var(--accent)}.account-menu-trigger:focus-visible,.account-menu-item:focus-visible{outline:3px solid var(--focus);outline-offset:2px}.account-avatar{display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:var(--accent);color:#fff;font-size:12px;font-weight:800}.account-avatar img{width:100%;height:100%;border-radius:inherit;object-fit:cover}.account-trigger-name{max-width:130px;overflow:hidden;font-size:12px;font-weight:700;text-overflow:ellipsis;white-space:nowrap}.account-menu-chevron{color:var(--muted);font-size:14px}.account-menu-panel{position:absolute;top:calc(100% + 8px);right:0;display:none;width:min(300px,calc(100vw - 32px));padding:9px;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--ink);box-shadow:0 16px 42px rgba(0,0,0,.2)}.account-menu[open]>.account-menu-panel{display:grid;gap:4px}.account-menu-profile{display:flex;align-items:center;gap:10px;padding:8px 8px 12px;border-bottom:1px solid var(--line);margin-bottom:4px}.account-avatar-large{width:38px;height:38px;flex:0 0 auto}.account-menu-identity{display:grid;min-width:0;gap:2px}.account-menu-identity strong,.account-menu-identity span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.account-menu-identity strong{font-size:13px}.account-menu-identity span{color:var(--muted);font-size:11px}.account-menu-item{display:flex;align-items:center;width:100%;min-height:40px;padding:8px 10px;border:0;border-radius:7px;background:transparent;color:var(--ink);font:inherit;font-size:12px;text-align:left;text-decoration:none;cursor:pointer}.account-menu-item:hover{background:rgba(81,70,229,.1)}.account-menu-theme{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 10px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);font-size:12px;font-weight:650}.account-menu-theme+.account-menu-theme{border-top:0}.account-menu-theme .theme-switch{flex:none}.account-menu-signout{color:#b4233a}.account-menu-signout:hover{background:rgba(180,35,58,.09)}
 .section-typography-switch{display:inline-flex;align-items:center;justify-content:center;gap:7px;flex:none;padding:5px 8px;border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--ink);font-size:12px;font-weight:700;line-height:1;cursor:pointer;transition:border-color .16s ease,background-color .16s ease}
@@ -736,12 +739,15 @@ body.public-resume-pdf #incomingShareModalBg.show{z-index:101}
  #sectionTypographyCallout{display:none!important}
 }
 @media(max-width:520px){
- .topbar{grid-template-columns:repeat(6,minmax(0,1fr));grid-template-areas:"brand brand brand docname docname account" "cloud cloud cloud cloud cloud cloud" "import import import pdf pdf pdf" "cover cover community community plans plans";gap:7px;padding:8px}
+ .topbar{grid-template-columns:repeat(12,minmax(0,1fr));grid-template-areas:"brand brand brand brand brand brand docname docname docname docname docname account" "cloud cloud community community community cover cover cover cover plans plans plans" "import import import import import import pdf pdf pdf pdf pdf pdf";gap:5px;padding:8px}
+ .topbar:has(#googleSignInBtn[hidden]){grid-template-areas:"brand brand brand brand brand brand docname docname docname docname docname account" "community community community community cover cover cover cover plans plans plans plans" "import import import import import import pdf pdf pdf pdf pdf pdf"}
+ .topbar:has(#googleSignInBtn[hidden]) .cloud-actions{display:none}
  .topbar .brand{grid-area:brand;justify-content:flex-start;margin:0 0 0 4px}
  .topbar .docname{grid-area:docname;width:100%;min-width:0;padding:6px 4px;font-size:11px}
  .topbar .spacer,.topbar .save-state{display:none}
- .topbar .cloud-actions{grid-area:cloud;justify-content:flex-start;min-width:0}
- .topbar .cloud-actions .btn{width:auto;max-width:100%;min-height:40px;padding:7px 10px;font-size:12px}
+ .topbar .cloud-actions{grid-area:cloud;justify-content:center;min-width:0}
+ .topbar .cloud-actions .btn{box-sizing:border-box;width:40px;min-width:40px;max-width:40px;height:40px;min-height:40px;flex:0 0 40px;justify-content:center;gap:0;padding:0}
+ .topbar .cloud-actions .google-signin .google-signin-compact{display:none}
  .topbar #accountMenu{grid-area:account;justify-self:end}
  .topbar #importResumeBtn{grid-area:import}
  .topbar #coverLetterBtn{grid-area:cover}
@@ -750,12 +756,14 @@ body.public-resume-pdf #incomingShareModalBg.show{z-index:101}
  .topbar #pdfBtn{grid-area:pdf}
  .topbar>.btn,.topbar>#plansLink{width:100%;min-width:0;min-height:40px;padding:7px 5px;font-size:12px}
  .topbar>#importResumeBtn{grid-area:import;justify-content:center}
+ .topbar>#importResumeBtn,.topbar>#pdfBtn{box-sizing:border-box;min-height:44px;gap:4px;padding-right:3px;padding-left:3px;font-size:clamp(10px,3vw,12px)}
  .templates{grid-template-columns:repeat(2,minmax(0,1fr))}
  .left,.right{height:min(40vh,320px);min-height:180px;padding:10px 8px}
  .center{padding:10px 6px 20px}
 }
 @media(max-width:360px){.topbar #coverLetterBtn,.topbar #editorCommunityLink,.topbar #plansLink{padding-right:3px;padding-left:3px;font-size:11px}}
 #importResumeBtn svg{width:16px;height:16px;flex:0 0 16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+#pdfBtn svg{width:16px;height:16px;flex:0 0 16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 body.homepage-demo{height:100vh;min-height:0;overflow:hidden;background:#e8edf3}
 .homepage-demo .topbar,
 .homepage-demo .mobile-editor-nav,

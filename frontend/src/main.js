@@ -2115,6 +2115,7 @@ function showPdfPreview(blob,filename,pageCount,title,previewPages=[]){
  pdfPreviewBlob=blob;
  pdfPreviewFilename=filename;
  pdfPreviewUrl=URL.createObjectURL(blob);
+ if(publicPdfMode){location.replace(pdfPreviewUrl);return}
  $('pdfPreviewTitle').textContent=title;
  $('openPdfPreview').href=pdfPreviewUrl;
  const pages=$('pdfPreviewPages');

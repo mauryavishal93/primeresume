@@ -34,6 +34,11 @@ test('templates are allocated without overlap and match the published plan count
   assert.equal((registry.match(/^import .* from '\.\/[^']+\/template\.js';$/gm) || []).length, 25);
   assert.match(registry, /export const templateDefs = Object\.freeze/);
   assert.equal(PRICING_FEATURES.find(feature => feature.label === 'Resume templates')?.pro, 'All 25 templates');
+  assert.deepEqual(PRICING_FEATURES.find(feature => feature.label === 'Pro-template PDF downloads'), {
+    label: 'Pro-template PDF downloads',
+    free: '2 lifetime after Google sign-in',
+    pro: 'Unlimited'
+  });
   assert.equal(TEMPLATE_IDS.FREE.some(isProTemplate), false);
   assert.equal(TEMPLATE_IDS.PRO.every(isProTemplate), true);
 });
@@ -498,7 +503,7 @@ test('Firestore rules scope the last-worked resume preference to its signed-in a
   assert.match(rules, /request\.resource\.data\.lastWorkedResumeId is string/);
 });
 
-test('public resume links target the global PDF viewer and render a read-only PDF preview', () => {
+test('public resume links open generated PDFs in the browser viewer', () => {
   const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
   const styles = readFileSync(new URL('../frontend/src/style.css', import.meta.url), 'utf8');
   const server = readFileSync(new URL('../backend/server.js', import.meta.url), 'utf8');
@@ -512,9 +517,12 @@ test('public resume links target the global PDF viewer and render a read-only PD
   assert.match(source, /url\.searchParams\.set\('resourcekey',id\)/);
   assert.match(source, /if\(publicPdfMode\)\{[\s\S]*?setTimeout\(\(\)=>void exportPDF\(\),0\)/);
   assert.match(source, /publicPdfMode\?'Public resume PDF':'Preview your resume PDF'/);
+  assert.match(source, /pdfPreviewUrl=URL\.createObjectURL\(blob\);\s*if\(publicPdfMode\)\{location\.replace\(pdfPreviewUrl\);return\}/);
   assert.match(source, /window\.history\.replaceState\(null,'',location\.pathname\+location\.hash\)/);
   assert.doesNotMatch(source, /delete snapshot\.importedSourceText/);
   assert.match(styles, /body\.public-resume-pdf-ready \.topbar,body\.public-resume-pdf-ready \.layout/);
+  assert.match(styles, /body\.public-resume-pdf-ready #pdfPreviewModalBg \.pdf-preview-modal \.modal-actions\{display:flex!important;justify-content:center!important\}/);
+  assert.match(styles, /body\.public-resume-pdf-ready #pdfPreviewModalBg \.pdf-preview-modal #downloadPdfPreview\{flex:0 0 auto!important;width:auto!important;min-width:180px;margin-left:auto!important;margin-right:auto!important\}/);
   assert.match(server, /https:\/\/resumeout\.vercel\.app\$\{request\.originalUrl/);
   assert.match(server, /app\.get\('\/file\/d\/:shareId\/view'/);
   assert.match(editor, /https:\/\/resumeout\.vercel\.app\$\{location\.pathname/);

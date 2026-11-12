@@ -33,16 +33,17 @@ if (location.hostname.toLowerCase() === 'buildmyportfolio.onrender.com') {
     <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1a11 11 0 0 0-9.85 6.06L5.84 9.9c.87-2.6 3.3-4.53 6.16-4.53z"/>
    </svg>
    <span id="googleSignInLabel">Sign in with Google</span>
+   <span class="google-signin-compact" aria-hidden="true">Google</span>
   </button>
  </div>
  <button class="btn outline import-resume-btn" id="importResumeBtn" type="button" aria-label="Import an existing resume">
   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M4 15v3a2 2 0 0 0 2 2h14"/></svg>
-  <span>Import resume</span>
+   <span>Import</span>
  </button>
  <button class="btn outline" id="coverLetterBtn">Cover letter</button>
  <a class="btn outline" id="editorCommunityLink" href="/community.html">Community</a>
  <a class="btn outline" id="plansLink" href="/pricing.html">Plans</a>
- <button class="btn primary" id="pdfBtn">Export PDF</button>
+ <button class="btn primary" id="pdfBtn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v10"/><path d="m7 10 5 5 5-5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg><span>Export PDF</span></button>
  <details class="account-menu" id="accountMenu">
   <summary class="account-menu-trigger" aria-label="Open account menu">
    <span class="account-avatar" id="accountAvatar" aria-hidden="true">U</span>
@@ -58,6 +59,7 @@ if (location.hostname.toLowerCase() === 'buildmyportfolio.onrender.com') {
    <a class="account-menu-item" href="/billing.html">Billing</a>
    <a class="account-menu-item" href="/community.html">Community</a>
    <a class="account-menu-item" id="aboutLink" href="/about.html">About</a>
+   <a class="account-menu-item" href="/support.html">Support</a>
    <div class="account-menu-theme"><span>Appearance</span><button class="theme-switch" type="button" role="switch" data-theme-toggle aria-checked="true" aria-label="Dark theme"><span class="theme-switch-track" aria-hidden="true"><span class="theme-switch-thumb"></span></span><span class="theme-switch-label">Dark</span></button></div>
    <div class="account-menu-theme"><span>Section text sizes</span><button class="section-typography-switch" id="sectionTypographyToggle" type="button" role="switch" aria-checked="false" aria-label="Show section text sizes"><span class="section-typography-track" aria-hidden="true"><span class="section-typography-thumb"></span></span><span class="section-typography-label">Off</span></button></div>
   <button class="account-menu-item account-menu-signout" id="googleSignOutBtn" type="button" hidden>Sign out</button>

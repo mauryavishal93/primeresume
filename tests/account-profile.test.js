@@ -22,6 +22,8 @@ test('my account is available from the account menu on shared pages and in the e
     authNavigation.indexOf("'My account', '/my-account.html'") < authNavigation.indexOf("'My posts', '/my-posts.html'"),
     'My account should be the first shared account-menu link'
   );
+  assert.match(editor, /href="\/about\.html">About<\/a>\s*<a class="account-menu-item" href="\/support\.html">Support<\/a>/);
+  assert.match(authNavigation, /const about = addMenuItem\(panel, 'a', 'account-menu-item', 'About', '\/about\.html'\);\s*const supportLink = addMenuItem\(panel, 'a', 'account-menu-item', 'Support', '\/support\.html'\)/);
   assert.match(readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8'), /\$\('myAccountLink'\)\.hidden=!user/);
   assert.match(vite, /myAccount: fileURLToPath\(new URL\('\.\/frontend\/my-account\.html'/);
 });
