@@ -420,29 +420,83 @@
 }
 
 .community-comment-list {
+  position: relative;
   display: grid;
-  gap: 10px;
+  gap: 12px;
+  margin: 4px 0 0 5px;
+  padding-left: 20px;
+}
+
+.community-comment-list:not(:empty)::before {
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  left: 5px;
+  width: 2px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, rgba(211, 185, 121, .55), rgba(126, 150, 184, .24));
+  content: "";
 }
 
 .community-comment {
-  padding: 11px 12px;
-  border: 1px solid var(--about-line);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, .025);
+  position: relative;
+  padding: 12px 14px;
+  border: 1px solid rgba(126, 150, 184, .2);
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, .045), rgba(255, 255, 255, .018));
+  transition: border-color .18s ease, background-color .18s ease, transform .18s ease;
+}
+
+.community-comment::before {
+  position: absolute;
+  top: 18px;
+  left: -21px;
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--about-paper);
+  border-radius: 50%;
+  background: #d3b979;
+  box-shadow: 0 0 0 1px rgba(211, 185, 121, .38);
+  content: "";
+}
+
+.community-comment::after {
+  position: absolute;
+  top: 22px;
+  left: -12px;
+  width: 10px;
+  height: 1px;
+  background: rgba(211, 185, 121, .38);
+  content: "";
+}
+
+.community-comment:hover {
+  transform: translateY(-1px);
+  border-color: rgba(211, 185, 121, .38);
 }
 
 .community-comment-meta {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  align-items: flex-start;
+  justify-content: flex-start;
+  flex-wrap: wrap;
   gap: 8px;
-  margin-bottom: 4px;
+  margin-bottom: 7px;
   color: var(--about-muted);
   font-size: 11px;
 }
 
 .community-comment-meta strong {
   color: var(--about-ink);
+  font-size: 12px;
+}
+
+.community-comment-meta time {
+  margin-left: auto;
+}
+
+.community-comment-content {
+  font-size: 13px;
 }
 
 .community-comment-form {
@@ -596,7 +650,16 @@
 }
 
 :root[data-theme="light"] .community-comment {
-  background: #fafbfc;
+  border-color: #e4e8ef;
+  background: linear-gradient(135deg, #fff, #f8f9fc);
+}
+
+:root[data-theme="light"] .community-comment::before {
+  border-color: #fff;
+}
+
+:root[data-theme="light"] .community-comment:hover {
+  border-color: #d5c49d;
 }
 
 :root[data-theme="light"] .history-snapshot {
@@ -641,6 +704,25 @@
   .community-compose-panel,
   .community-post-card {
     padding: 17px;
+  }
+
+  .community-comment-list {
+    gap: 10px;
+    margin-left: 2px;
+    padding-left: 17px;
+  }
+
+  .community-comment::before {
+    left: -18px;
+  }
+
+  .community-comment::after {
+    left: -9px;
+    width: 7px;
+  }
+
+  .community-comment {
+    padding: 11px 12px;
   }
 
   .community-signed-in,
