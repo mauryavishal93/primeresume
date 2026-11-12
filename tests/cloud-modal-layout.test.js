@@ -24,3 +24,12 @@ test('cloud resume share and delete actions are accessible icon buttons', () => 
 test('toolbar share click opens the dialog without passing its click event as a link', () => {
   assert.match(main, /\$\('shareResumeBtn'\)\.addEventListener\('click',\(\)=>openShareResumeModal\(\)\)/);
 });
+
+test('active share list copies editable links from an icon instead of navigating from its label', () => {
+  assert.match(main, /editCopy\.append\(document\.createTextNode\('Open editable copy'\)\)/);
+  assert.match(main, /copyEdit\.dataset\.copyEditShare=share\.id/);
+  assert.match(main, /if\(copyEdit\)\{const link=resumeEditUrl\(copyEdit\.dataset\.copyEditShare\);void copyResumeShareLink\(link\)\}/);
+  assert.match(main, /const resumeEditUrl=\(id\)=>|function resumeEditUrl\(id\)/);
+  assert.match(main, /editCopy\.append\(copyEdit\)/);
+  assert.match(styles, /\.resume-share-edit-copy-button\{[^}]*width:24px[^}]*cursor:pointer/);
+});

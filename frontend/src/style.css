@@ -468,6 +468,11 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 .resume-share-item>div:first-child{display:grid;min-width:0;gap:3px}
 .resume-share-item strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .resume-share-item a{color:var(--purple);font-size:11px;overflow-wrap:anywhere}
+.resume-share-edit-copy{display:inline-flex;align-items:center;gap:5px;color:var(--purple);font-size:11px}
+.resume-share-edit-copy-button{display:inline-grid;width:24px;height:24px;flex:0 0 24px;place-items:center;padding:4px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink);cursor:pointer}
+.resume-share-edit-copy-button:hover{border-color:var(--purple);color:var(--purple)}
+.resume-share-edit-copy-button:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.resume-share-edit-copy-button svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .resume-share-item-actions{display:flex;flex:0 0 auto;gap:6px}
 .shared-copy-notice{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 12px;padding:12px 14px;border:1px solid #a9c8ff;border-radius:12px;background:#eef5ff;color:#203a64}
 .shared-copy-notice[hidden]{display:none}

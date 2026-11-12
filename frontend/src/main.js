@@ -445,12 +445,18 @@ async function refreshSharedResumeList(){
    link.target='_blank';
    link.rel='noopener noreferrer';
    details.append(title,link);
-   const editLink=document.createElement('a');
-   editLink.href=resumeEditUrl(share.id);
-   editLink.textContent='Open editable copy';
-   editLink.target='_blank';
-   editLink.rel='noopener noreferrer';
-   details.append(editLink);
+   const editCopy=document.createElement('span');
+   editCopy.className='resume-share-edit-copy';
+   editCopy.append(document.createTextNode('Open editable copy'));
+   const copyEdit=document.createElement('button');
+   copyEdit.className='resume-share-edit-copy-button';
+   copyEdit.type='button';
+   copyEdit.dataset.copyEditShare=share.id;
+   copyEdit.setAttribute('aria-label','Copy editable link');
+   copyEdit.title='Copy editable link';
+   copyEdit.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg>';
+   editCopy.append(copyEdit);
+   details.append(editCopy);
    const actions=document.createElement('div');
    actions.className='resume-share-item-actions';
    const copy=document.createElement('button');
@@ -3929,8 +3935,10 @@ $('resumeImportModalBg').addEventListener('click',event=>{if(event.target===$('r
  $('refreshSharedResumes').addEventListener('click',()=>void refreshSharedResumeList());
  $('sharedResumeList').addEventListener('click',event=>{
   const copy=event.target.closest('[data-copy-share]');
+  const copyEdit=event.target.closest('[data-copy-edit-share]');
   const revoke=event.target.closest('[data-revoke-share]');
   if(copy){const link=resumeShareUrl(copy.dataset.copyShare);void copyResumeShareLink(link)}
+  if(copyEdit){const link=resumeEditUrl(copyEdit.dataset.copyEditShare);void copyResumeShareLink(link)}
   if(revoke)void revokeResumeShare(revoke.dataset.revokeShare);
  });
  $('saveSharedCopyBtn').addEventListener('click',()=>void saveIncomingSharedCopy());
