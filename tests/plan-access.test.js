@@ -465,6 +465,8 @@ test('Razorpay checkout shows status-specific success, pending, and failure popu
   assert.match(pricingSource, /title: 'Payment successful'/);
   assert.match(pricingSource, /title: result\.pending \? 'Payment successful — activation pending' : 'Payment verification pending'/);
   assert.match(pricingSource, /title: 'Payment verification issue'/);
+  assert.match(pricingSource, /let recoveredEntitlement = null;[\s\S]*?loadBillingEntitlement\(checkoutUser, \{ forceRefresh: true \}\)[\s\S]*?if \(recoveredEntitlement\?\.status === 'active'\)[\s\S]*?title: 'Pro access is active'/);
+  assert.match(pricingSource, /We could not confirm this checkout yet\. Do not make another payment\./);
   assert.match(pricingSource, /title: 'Payment failed'/);
   assert.match(pricingSource, /authentication_failed:/);
   assert.match(pricingSource, /insufficient_funds:/);
