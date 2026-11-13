@@ -455,7 +455,6 @@ test('subscription checkout lets the Razorpay plan determine its payment currenc
   const checkoutOptions = pricingSource.match(/new window\.Razorpay\(\{[\s\S]*?\n    \}\);/)?.[0] || '';
   assert.match(checkoutOptions, /subscription_id: created\.subscriptionId/);
   assert.doesNotMatch(checkoutOptions, /currency\s*:/);
-  assert.match(pricingSource, /Razorpay checkout failed: \$\{details\}/);
   assert.match(pricingSource, /failure\.code[\s\S]*failure\.description[\s\S]*failure\.reason[\s\S]*failure\.step/);
 });
 
@@ -468,6 +467,9 @@ test('Razorpay checkout shows status-specific success, pending, and failure popu
   assert.match(pricingSource, /let recoveredEntitlement = null;[\s\S]*?loadBillingEntitlement\(checkoutUser, \{ forceRefresh: true \}\)[\s\S]*?if \(recoveredEntitlement\?\.status === 'active'\)[\s\S]*?title: 'Pro access is active'/);
   assert.match(pricingSource, /We could not confirm this checkout yet\. Do not make another payment\./);
   assert.match(pricingSource, /title: 'Payment failed'/);
+  assert.match(pricingSource, /incorrect_card_details: 'Please check your card number and expiry date, then try again\.'/);
+  assert.match(pricingSource, /checkoutStatus\.textContent = failureMessage\.message/);
+  assert.doesNotMatch(pricingSource, /Razorpay details: \$\{details\}|Razorpay checkout failed:/);
   assert.match(pricingSource, /authentication_failed:/);
   assert.match(pricingSource, /insufficient_funds:/);
   assert.match(pricingSource, /GATEWAY_ERROR/);

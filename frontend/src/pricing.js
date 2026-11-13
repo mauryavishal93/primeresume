@@ -17,8 +17,10 @@ function razorpayFailureMessage(failure) {
   const reason = typeof failure.reason === 'string' ? failure.reason.toLowerCase() : '';
   const code = typeof failure.code === 'string' ? failure.code.toUpperCase() : '';
   const step = typeof failure.step === 'string' ? failure.step.toLowerCase() : '';
+  const description = typeof failure.description === 'string' ? failure.description : '';
   const explanations = {
     authentication_failed: 'Bank authentication could not be completed. Retry and approve the payment in your bank app or OTP screen.',
+    incorrect_card_details: 'Please check your card number and expiry date, then try again.',
     card_declined: 'Your bank declined the card. Try another card or contact your bank.',
     insufficient_funds: 'The payment method has insufficient funds. Try another payment method.',
     international_transaction_not_allowed: 'Your payment method does not allow this transaction. Contact your bank or try another method.',
@@ -26,20 +28,20 @@ function razorpayFailureMessage(failure) {
     card_expired: 'The card has expired. Use a valid card or another payment method.',
     payment_failed: 'The payment provider could not complete this transaction. Retry or use another payment method.'
   };
+  const fallbackExplanation = step.includes('authentication')
+    ? explanations.authentication_failed
+    : code === 'GATEWAY_ERROR'
+      ? 'The payment gateway did not complete the request. Please retry in a moment.'
+      : code === 'SERVER_ERROR'
+        ? 'Razorpay is temporarily unavailable. Please retry in a moment.'
+        : 'Razorpay could not complete the payment. Please retry or use another payment method.';
   const explanation = explanations[reason]
-    || (step.includes('authentication')
-      ? explanations.authentication_failed
-      : code === 'GATEWAY_ERROR'
-        ? 'The payment gateway did not complete the request. Please retry in a moment.'
-        : code === 'SERVER_ERROR'
-          ? 'Razorpay is temporarily unavailable. Please retry in a moment.'
-          : 'Razorpay could not complete the payment. Please retry or use another payment method.');
-  const details = [failure.code, failure.description, failure.reason, failure.step]
-    .filter(value => typeof value === 'string' && value.trim())
-    .join(' — ');
+    || (/invalid card number|invalid card expiry|incorrect card details/i.test(description)
+      ? explanations.incorrect_card_details
+      : fallbackExplanation);
   return {
     title: 'Payment failed',
-    message: details ? `${explanation}\n\nRazorpay details: ${details}` : explanation
+    message: explanation
   };
 }
 
@@ -555,13 +557,8 @@ async function startCheckout(planKey) {
         reason: failure.reason,
         step: failure.step
       });
-      const details = [failure.code, failure.description, failure.reason, failure.step]
-        .filter(value => typeof value === 'string' && value.trim())
-        .join(' — ');
       const failureMessage = razorpayFailureMessage(failure);
-      checkoutStatus.textContent = details
-        ? `Razorpay checkout failed: ${details}`
-        : failureMessage.message;
+      checkoutStatus.textContent = failureMessage.message;
       void alertModern({
         ...failureMessage,
         confirmText: 'Try again',
