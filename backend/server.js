@@ -850,17 +850,19 @@ async function recordBillingActivity(db, uid, activity) {
   return occurredAt;
 }
 
-async function reconcileSubscriptionInvoices(db, uid, subscriptionId, mapping) {
-  const paymentSnapshot = await db.collection('billingPayments').where('uid', '==', uid).get();
-  const hasRecordedPayment = (paymentSnapshot.docs || []).some(document => {
-    const payment = document.data() || {};
-    return payment.subscriptionId === subscriptionId
-      && ['captured', 'success'].includes(payment.status)
-      && Number.isSafeInteger(payment.amount)
-      && payment.amount > 0;
-  });
-  if (hasRecordedPayment) return;
+function isRazorpayCapturedPayment(payment) {
+  return payment?.status === 'captured'
+    && typeof payment.id === 'string'
+    && /^pay_[A-Za-z0-9]+$/.test(payment.id)
+    && payment.providerPaymentId === payment.id
+    && typeof payment.subscriptionId === 'string'
+    && /^sub_[A-Za-z0-9]+$/.test(payment.subscriptionId)
+    && Number.isSafeInteger(payment.amount)
+    && payment.amount > 0
+    && (payment.currency === undefined || /^[A-Z]{3}$/.test(payment.currency));
+}
 
+async function reconcileSubscriptionInvoices(db, uid, subscriptionId, mapping) {
   const pageSize = 100;
   for (let skip = 0; skip < 1200; skip += pageSize) {
     const invoiceCollection = await razorpayRequest(
@@ -2946,7 +2948,7 @@ app.get('/api/admin/dashboard', requireFirebaseUser, requireAdmin, async (reques
       const adminRevoked = adminRevocationApplies(user.uid, entitlement, mappingSnapshot?.data());
       const active = !adminRevoked
         && hasActiveProEntitlement(entitlement, now);
-      const payments = paymentDocuments.filter(payment => payment.uid === user.uid && ['captured', 'success'].includes(String(payment.status)));
+      const payments = paymentDocuments.filter(payment => payment.uid === user.uid && isRazorpayCapturedPayment(payment));
       const paidAmountByCurrency = payments.reduce((amounts, payment) => {
         const currency = payment.currency || 'INR';
         amounts[currency] = (amounts[currency] || 0) + (Number(payment.amount) || 0);
@@ -2980,7 +2982,7 @@ app.get('/api/admin/dashboard', requireFirebaseUser, requireAdmin, async (reques
     }));
     const proCount = enriched.filter(user => user.isPro).length;
     const paidPayments = paymentDocuments
-      .filter(payment => ['captured', 'success'].includes(String(payment.status)))
+      .filter(isRazorpayCapturedPayment)
       .sort((a, b) => timestampOf(b.createdAt) - timestampOf(a.createdAt));
     const userByUid = new Map(enriched.map(user => [user.uid, user]));
     const activePro = enriched.filter(user => user.isPro);
@@ -2995,11 +2997,6 @@ app.get('/api/admin/dashboard', requireFirebaseUser, requireAdmin, async (reques
       totals[currency] = (totals[currency] || 0) + (Number(payment.amount) || 0);
       return totals;
     }, {});
-    const earningsThisMonth = paidPayments.reduce((total, payment) => (
-      timestampOf(payment.createdAt) >= monthStart.getTime()
-        ? total + (Number(payment.amount) || 0)
-        : total
-    ), 0);
     const recentPayments = paidPayments.slice(0, 8).map(payment => {
       const user = userByUid.get(payment.uid);
       return {
@@ -3117,10 +3114,7 @@ app.get('/api/admin/users/:uid', requireFirebaseUser, requireAdmin, async (reque
       .map(document => ({ id: document.id, ...(document.data() || {}) }))
       .filter(record => record.uid === uid)
       .sort((left, right) => Number(right.createdAt) - Number(left.createdAt));
-    if (entitlement?.subscriptionId
-      && /^sub_[A-Za-z0-9]+$/.test(entitlement.subscriptionId)
-      && !payments.some(payment => payment.subscriptionId === entitlement.subscriptionId
-        && ['captured', 'success'].includes(String(payment.status)))) {
+    if (entitlement?.subscriptionId && /^sub_[A-Za-z0-9]+$/.test(entitlement.subscriptionId)) {
       const mappingSnapshot = await subscriptionDocument(db, entitlement.subscriptionId).get();
       if (mappingSnapshot.exists && mappingSnapshot.data()?.uid === uid) {
         await reconcileSubscriptionInvoices(db, uid, entitlement.subscriptionId, mappingSnapshot.data());
@@ -3147,7 +3141,7 @@ app.get('/api/admin/users/:uid', requireFirebaseUser, requireAdmin, async (reque
       }
     }
     const paidAmountByCurrency = payments
-      .filter(payment => ['captured', 'success'].includes(String(payment.status)))
+      .filter(payment => isRazorpayCapturedPayment(payment))
       .reduce((amounts, payment) => {
         const currency = payment.currency || 'INR';
         amounts[currency] = (amounts[currency] || 0) + (Number(payment.amount) || 0);
@@ -4182,7 +4176,7 @@ app.post('/api/billing/verify', requireBillingConfig, requireFirebaseUser, async
           validUntil: entitlement.validUntil,
           paymentId: razorpayPaymentId,
           paymentMode: payment.method || subscription.payment_method || 'unknown',
-          amount: expectedAmount,
+          amount: payment.amount,
           currency,
           status: 'active',
           source: 'razorpay',
@@ -4197,7 +4191,7 @@ app.post('/api/billing/verify', requireBillingConfig, requireFirebaseUser, async
       }
       await db.doc(`billingPayments/${razorpayPaymentId}`).set({
         uid: request.user.uid, providerPaymentId: razorpayPaymentId, subscriptionId: razorpaySubscriptionId,
-        planKey: mapping.planKey, status: 'captured', amount: expectedAmount,
+        planKey: mapping.planKey, status: 'captured', amount: payment.amount,
         currency, paymentMode: payment.method || subscription.payment_method || 'unknown',
         createdAt: Number(payment.created_at) > 0 ? Number(payment.created_at) * 1000 : Date.now()
       }, { merge: true });
@@ -4205,7 +4199,7 @@ app.post('/api/billing/verify', requireBillingConfig, requireFirebaseUser, async
         type: 'payment', status: 'success', title: 'Subscription payment verified',
         detail: `${mapping.planKey === 'yearly' ? 'Yearly' : 'Monthly'} Pro access is active.`,
         planKey: mapping.planKey, providerSubscriptionId: razorpaySubscriptionId,
-        currency, amount: expectedAmount
+        currency, amount: payment.amount
       });
       response.json({ verified: true, entitlement });
       return;

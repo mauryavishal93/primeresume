@@ -843,14 +843,24 @@ test('admin dashboard reports current subscriptions and captured revenue accurat
     ['users/user-3/billing/entitlement', {
       planId: 'pro', billingPlan: 'voucher', status: 'inactive', source: 'server-verified', validUntil: now + 30 * 86400000
     }],
-    ['billingPayments/payment-current', {
-      uid: 'user-1', status: 'captured', amount: 9900, currency: 'INR', planKey: 'monthly', createdAt: now
+    ['billingPayments/pay_dashboardcurrent', {
+      uid: 'user-1', providerPaymentId: 'pay_dashboardcurrent', subscriptionId: 'sub_dashboardfallback',
+      status: 'captured', amount: 9900, currency: 'INR', planKey: 'monthly', createdAt: now
     }],
-    ['billingPayments/payment-old', {
-      uid: 'user-1', status: 'success', amount: 39900, currency: 'INR', planKey: 'yearly', createdAt: now - 45 * 86400000
+    ['billingPayments/pay_dashboardold', {
+      uid: 'user-1', providerPaymentId: 'pay_dashboardold', subscriptionId: 'sub_dashboardold',
+      status: 'captured', amount: 39900, currency: 'INR', planKey: 'yearly', createdAt: now - 45 * 86400000
     }],
-    ['billingPayments/payment-authorized', {
+    ['billingPayments/pay_dashboardauthorized', {
       uid: 'user-2', status: 'authorized', amount: 12000, currency: 'INR', planKey: 'monthly', createdAt: now
+    }],
+    ['billingPayments/manual_payment', {
+      uid: 'user-1', providerPaymentId: 'manual_payment', status: 'success', source: 'admin',
+      amount: 50000, currency: 'INR', createdAt: now
+    }],
+    ['billingPayments/pay_invalidamount', {
+      uid: 'user-1', providerPaymentId: 'pay_invalidamount', subscriptionId: 'sub_dashboardfallback',
+      status: 'captured', amount: 99.5, currency: 'INR', createdAt: now
     }]
   ];
   for (const [key, value] of testRecords) fakeDatabase.records.set(key, value);
@@ -872,7 +882,9 @@ test('admin dashboard reports current subscriptions and captured revenue accurat
     assert.equal(dashboard.totals.paymentsThisMonth, 1);
     assert.equal(dashboard.totals.paymentCount, 2);
     assert.equal(dashboard.recentPayments.length, 2);
-    assert.equal(dashboard.recentPayments[0].id, 'payment-current');
+    assert.equal(dashboard.recentPayments[0].id, 'pay_dashboardcurrent');
+    assert.equal(dashboard.users.find(user => user.uid === 'user-1').paidAmount, 49800);
+    assert.equal(dashboard.users.find(user => user.uid === 'user-1').paymentCount, 2);
     assert.equal(dashboard.users.find(user => user.uid === 'user-1').activationSource, 'payment');
     assert.equal(dashboard.users.find(user => user.uid === 'user-1').subscriptionId, 'sub_dashboardfallback');
     const voucherUser = dashboard.users.find(user => user.uid === 'user-3');
@@ -1816,10 +1828,11 @@ test('admin ban can proceed with cancellation pending and deletion waits for Raz
   }
 });
 
-test('admin account details reconcile paid Razorpay invoices missing from local payment history', async () => {
+test('admin account details reconcile later paid Razorpay invoices for existing subscriptions', async () => {
   const uid = 'user-4';
   const subscriptionId = 'sub_invoicereconcile';
   const paymentId = 'pay_invoicereconcile';
+  const previousPaymentId = 'pay_invoicereconcileprevious';
   const paidAt = Math.floor(Date.now() / 1000);
   const validUntil = paidAt + 30 * 86400;
   fakeDatabase.records.set(`billingSubscriptions/${subscriptionId}`, {
@@ -1836,11 +1849,29 @@ test('admin account details reconcile paid Razorpay invoices missing from local 
     subscriptionId,
     validUntil: validUntil * 1000
   });
+  fakeDatabase.records.set(`billingPayments/${previousPaymentId}`, {
+    uid,
+    providerPaymentId: previousPaymentId,
+    subscriptionId,
+    planKey: 'monthly',
+    status: 'captured',
+    amount: 9900,
+    currency: 'INR',
+    createdAt: (paidAt - 30 * 86400) * 1000
+  });
   providerInvoices.set(subscriptionId, [{
+    subscription_id: subscriptionId,
+    payment_id: previousPaymentId,
+    status: 'paid',
+    amount_paid: 9900,
+    currency: 'INR',
+    paid_at: paidAt - 30 * 86400,
+    billing_end: validUntil - 30 * 86400
+  }, {
     subscription_id: subscriptionId,
     payment_id: paymentId,
     status: 'paid',
-    amount_paid: 9900,
+    amount_paid: 10900,
     currency: 'INR',
     paid_at: paidAt,
     billing_end: validUntil
@@ -1850,9 +1881,10 @@ test('admin account details reconcile paid Razorpay invoices missing from local 
     const response = await request(`/api/admin/users/${uid}`, { token: 'admin-test-token' });
     assert.equal(response.status, 200);
     const details = await response.json();
-    assert.equal(fakeDatabase.records.get(`billingPayments/${paymentId}`)?.amount, 9900);
-    assert.equal(details.paidAmount, 9900);
-    assert.equal(details.payments[0].id, paymentId);
+    assert.equal(fakeDatabase.records.get(`billingPayments/${paymentId}`)?.amount, 10900);
+    assert.equal(details.paidAmount, 20800);
+    assert.ok(details.payments.some(payment => payment.id === paymentId));
+    assert.equal(details.payments.length, 2);
     assert.ok(details.accessHistory.some(item => item.paymentId === paymentId));
     assert.equal(fakeDatabase.records.get(`billingPayments/${paymentId}`).status, 'captured');
     assert.equal(fakeDatabase.records.get(`billingPayments/${paymentId}`).subscriptionId, subscriptionId);
@@ -1860,6 +1892,7 @@ test('admin account details reconcile paid Razorpay invoices missing from local 
     providerInvoices.delete(subscriptionId);
     fakeDatabase.records.delete(`billingSubscriptions/${subscriptionId}`);
     fakeDatabase.records.delete(`users/${uid}/billing/entitlement`);
+    fakeDatabase.records.delete(`billingPayments/${previousPaymentId}`);
     fakeDatabase.records.delete(`billingPayments/${paymentId}`);
     fakeDatabase.records.delete(`billingAccessHistory/${paymentId}`);
   }
