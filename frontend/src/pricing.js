@@ -6,7 +6,7 @@ import {
   scheduleBillingPlanChange,
   verifyBillingCheckout
 } from './billing-client.js';
-import { cloudConfigured, observeAuth, signInWithGoogle } from './firebase-cloud.js';
+import { cloudConfigured, googleSignInErrorMessage, isGoogleSignInCancellation, observeAuth, signInWithGoogle } from './firebase-cloud.js';
 import { alertModern, confirmModern } from './modern-modal.js';
 import { PLAN_CONFIG, PRICING_FEATURES } from './plan-access.js';
 import { formatCurrencyPrice, preferredPricingCurrency } from './pricing-currency.js';
@@ -55,6 +55,7 @@ const voucherStatus = $('#pricingVoucherStatus');
 let currentUser = null;
 let billingConfig = null;
 let entitlement = null;
+let entitlementResolved = false;
 const selectedCurrency = preferredPricingCurrency();
 
 $('#supportLink')?.addEventListener('click', event => {
@@ -136,10 +137,12 @@ function renderStoredPricing(currency = selectedCurrency) {
 function updateVoucherControls() {
   const signInRequired = !currentUser;
   const verificationUnavailable = billingConfig?.entitlementEnabled === false;
-  voucherInput.disabled = signInRequired || verificationUnavailable;
-  voucherButton.disabled = signInRequired || verificationUnavailable;
+  const proActive = entitlement?.status === 'active';
+  const planCheckPending = Boolean(currentUser) && !entitlementResolved;
+  voucherInput.disabled = signInRequired || verificationUnavailable || planCheckPending || proActive;
+  voucherButton.disabled = signInRequired || verificationUnavailable || planCheckPending || proActive;
   voucherSection.classList.toggle('voucher-disabled', voucherInput.disabled);
-  voucherSection.classList.toggle('voucher-pro-active', entitlement?.status === 'active');
+  voucherSection.classList.toggle('voucher-pro-active', proActive);
 
   if (signInRequired) {
     voucherInput.placeholder = 'Sign in to redeem a voucher';
@@ -149,10 +152,16 @@ function updateVoucherControls() {
     voucherInput.placeholder = 'Voucher redemption unavailable';
     voucherStatus.dataset.state = 'error';
     voucherStatus.textContent = 'Voucher redemption is unavailable because server-side account verification is not configured.';
-  } else if (entitlement?.status === 'active') {
-    voucherInput.placeholder = 'Enter voucher code';
+  } else if (planCheckPending) {
+    voucherInput.placeholder = 'Checking plan status…';
+    voucherStatus.dataset.state = '';
+    voucherStatus.textContent = 'Checking whether this account can redeem a voucher…';
+  } else if (proActive) {
+    voucherInput.placeholder = 'Voucher unavailable while Pro is active';
     voucherStatus.dataset.state = 'success';
-    voucherStatus.textContent = `Pro is already active. A valid voucher will start after your current access ends${entitlement.validUntil ? ` on ${new Date(entitlement.validUntil).toLocaleDateString('en-IN')}` : ''}.`;
+    voucherStatus.textContent = entitlement.lifetime
+      ? 'Voucher redemption is disabled while Lifetime Pro is active.'
+      : `Voucher redemption is disabled while Pro is active${entitlement.validUntil ? ` through ${new Date(entitlement.validUntil).toLocaleDateString('en-IN')}` : ' during the current plan period'}.`;
   } else {
     voucherInput.placeholder = 'Enter voucher code';
     voucherStatus.dataset.state = '';
@@ -231,18 +240,27 @@ function updatePurchaseControls() {
     monthlyButton.disabled = false;
     yearlyButton.disabled = entitlement.scheduledPlan === 'yearly';
     const validUntil = Number(entitlement.validUntil);
-    const validity = Number.isFinite(validUntil) && validUntil > 0
+    const validity = entitlement.lifetime
+      ? ''
+      : Number.isFinite(validUntil) && validUntil > 0
       ? ` through ${new Date(validUntil).toLocaleDateString('en-IN')}`
       : '';
     const planLabel = activePlan === 'monthly'
-      ? 'Monthly'
+      ? 'Pro Monthly'
       : activePlan === 'yearly'
-        ? 'Yearly'
-        : 'Pro';
+        ? 'Pro Yearly'
+        : activePlan === 'voucher'
+          ? entitlement.lifetime ? 'Pro Lifetime Voucher' : 'Pro Voucher'
+          : 'Pro';
+    const activationSource = entitlement.source === 'admin'
+      ? ' (Admin granted)'
+      : ['monthly', 'yearly'].includes(activePlan)
+        ? ' (Subscription)'
+        : '';
     const scheduledChange = entitlement.scheduledPlan === 'yearly'
       ? ` Yearly billing is scheduled${entitlement.scheduledAt ? ` for ${new Date(entitlement.scheduledAt).toLocaleDateString('en-IN')}` : ''}.`
       : '';
-    checkoutStatus.textContent = `Your active plan: Pro ${planLabel}${validity}.${scheduledChange}`;
+    checkoutStatus.textContent = `Your active plan: ${planLabel}${activationSource}${validity}.${scheduledChange}`;
   } else if (!checkoutReady) {
     monthlyButton.textContent = 'Coming soon';
     yearlyButton.textContent = 'Coming soon';
@@ -259,6 +277,7 @@ function updatePurchaseControls() {
     yearlyButton.textContent = 'Start yearly subscription';
     monthlyButton.disabled = false;
     yearlyButton.disabled = false;
+    checkoutStatus.textContent = 'No plan active';
   }
 
   const monthlyBadge = $('#monthlyPlanBadge');
@@ -275,6 +294,7 @@ function updatePurchaseControls() {
 async function refreshPricingState(user) {
   currentUser = user;
   entitlement = null;
+  entitlementResolved = !user;
   updatePurchaseControls();
   updateVoucherControls();
   if (!user) {
@@ -286,13 +306,19 @@ async function refreshPricingState(user) {
     if (!billingConfig) {
       billingConfig = await loadBillingConfig();
     }
-    if (billingConfig.entitlementEnabled) entitlement = await loadBillingEntitlement(user);
+    if (billingConfig.entitlementEnabled) {
+      entitlement = await loadBillingEntitlement(user, { forceRefresh: true });
+    }
     if (currentUser?.uid !== user.uid) return;
+    entitlementResolved = true;
     updatePurchaseControls();
     updateVoucherControls();
   } catch (error) {
     console.error('Could not load billing status.', error);
-    checkoutStatus.textContent = error.message;
+    entitlementResolved = false;
+    checkoutStatus.textContent = error.message === 'Could not load your plan status.'
+      ? 'No plan active'
+      : error.message;
     updatePurchaseControls();
     updateVoucherControls();
   }
@@ -363,8 +389,38 @@ async function startCheckout(planKey) {
     return;
   }
   if (!currentUser) {
-    checkoutStatus.textContent = 'Sign in with Google before starting a purchase.';
-    return;
+    monthlyButton.disabled = true;
+    yearlyButton.disabled = true;
+    checkoutStatus.textContent = 'Opening Google sign-in…';
+    try {
+      const credential = await signInWithGoogle();
+      if (credential?.user) {
+        currentUser = credential.user;
+      } else {
+        updatePurchaseControls();
+        if (credential === null) checkoutStatus.textContent = '';
+        return;
+      }
+      if (entitlement?.status === 'active') {
+        voucherStatus.dataset.state = 'error';
+        voucherStatus.textContent = 'Voucher redemption is disabled while Pro is active.';
+        return;
+      }
+      if (!entitlementResolved) {
+        voucherStatus.dataset.state = '';
+        voucherStatus.textContent = 'Wait until your plan status has been checked before redeeming a voucher.';
+        return;
+      }
+    } catch (error) {
+      if (!isGoogleSignInCancellation(error)) {
+        console.error('Google sign-in failed from the Plans page.', error);
+        checkoutStatus.textContent = googleSignInErrorMessage(error);
+      } else {
+        checkoutStatus.textContent = '';
+      }
+      updatePurchaseControls();
+      return;
+    }
   }
 
   monthlyButton.disabled = true;
@@ -397,6 +453,7 @@ async function startCheckout(planKey) {
             : null;
           if (result.entitlement?.status === 'active') {
             entitlement = result.entitlement;
+            entitlementResolved = true;
             updatePurchaseControls();
             updateVoucherControls();
           } else {
@@ -407,6 +464,7 @@ async function startCheckout(planKey) {
               if (updatedEntitlement?.status === 'active') {
                 confirmedEntitlement = updatedEntitlement;
                 entitlement = updatedEntitlement;
+                entitlementResolved = true;
                 break;
               }
             }
@@ -441,7 +499,31 @@ async function startCheckout(planKey) {
           }
         } catch (error) {
           console.error('Payment verification request failed.', error);
-          const message = `${error.message} If your payment completed, it will be reconciled through Razorpay.`;
+          let recoveredEntitlement = null;
+          for (let attempt = 0; attempt < 5; attempt += 1) {
+            try {
+              recoveredEntitlement = await loadBillingEntitlement(checkoutUser, { forceRefresh: true });
+              if (recoveredEntitlement?.status === 'active') break;
+            } catch (reconciliationError) {
+              console.warn('Could not refresh Pro access after checkout verification failed.', reconciliationError);
+            }
+            if (attempt < 4) await delay(2000);
+          }
+          if (recoveredEntitlement?.status === 'active') {
+            entitlement = recoveredEntitlement;
+            entitlementResolved = true;
+            updatePurchaseControls();
+            updateVoucherControls();
+            const message = 'Your account has active Pro access. If this checkout was for a renewal, Razorpay will reconcile its payment record.';
+            checkoutStatus.textContent = message;
+            await alertModern({
+              title: 'Pro access is active',
+              message,
+              confirmText: 'Continue'
+            });
+            return;
+          }
+          const message = 'We could not confirm this checkout yet. Do not make another payment. If Razorpay completed the payment, it will be reconciled shortly; check your plan status again or contact support if Pro access does not appear.';
           checkoutStatus.textContent = message;
           await alertModern({
             title: 'Payment verification issue',
@@ -523,6 +605,16 @@ $('#pricingVoucherForm').addEventListener('submit', async event => {
     voucherStatus.textContent = 'Sign in with Google before redeeming a voucher.';
     return;
   }
+  if (entitlement?.status === 'active') {
+    voucherStatus.dataset.state = 'error';
+    voucherStatus.textContent = 'Voucher redemption is disabled while Pro is active.';
+    return;
+  }
+  if (!entitlementResolved) {
+    voucherStatus.dataset.state = '';
+    voucherStatus.textContent = 'Wait until your plan status has been checked before redeeming a voucher.';
+    return;
+  }
   if (!code) return;
 
   voucherButton.disabled = true;
@@ -531,19 +623,20 @@ $('#pricingVoucherForm').addEventListener('submit', async event => {
   try {
     const result = await redeemBillingVoucher(currentUser, code);
     entitlement = result.entitlement;
+    entitlementResolved = true;
     voucherInput.value = '';
     updatePurchaseControls();
     updateVoucherControls();
     voucherStatus.dataset.state = 'success';
-    voucherStatus.textContent = result.queued
-      ? `Voucher accepted. It will add ${result.entitlement.pendingVoucherCount} voucher${result.entitlement.pendingVoucherCount === 1 ? '' : 's'} after your current Pro access ends${result.entitlement.pendingVoucherStartAt ? ` on ${new Date(result.entitlement.pendingVoucherStartAt).toLocaleDateString('en-IN')}` : ''}.`
+    voucherStatus.textContent = result.entitlement.lifetime
+      ? 'Voucher redeemed. Lifetime Pro access is active.'
       : `Voucher redeemed. Pro is active through ${new Date(result.entitlement.validUntil).toLocaleDateString('en-IN')}.`;
   } catch (error) {
     console.error('Could not redeem voucher from the Plans page.', error);
     voucherStatus.dataset.state = 'error';
     voucherStatus.textContent = error.message || 'Could not redeem this voucher.';
   } finally {
-    voucherButton.disabled = !currentUser || billingConfig?.entitlementEnabled === false;
+    updateVoucherControls();
   }
 });
 
@@ -570,6 +663,8 @@ if (!cloudConfigured) {
       console.error('Could not observe Firebase sign-in state.', error);
       currentUser = null;
       entitlement = null;
+      entitlementResolved = false;
+      entitlementResolved = false;
       checkoutStatus.textContent = 'Sign-in could not be initialized. Paid purchases are unavailable.';
       updatePurchaseControls();
       updateVoucherControls();

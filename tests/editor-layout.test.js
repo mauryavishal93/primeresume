@@ -24,6 +24,7 @@ test('sections panel restores its section rows and action button layout', () => 
 test('editor toolbar controls have compact icons and responsive grid positions', () => {
   assert.match(styles, /\.toolbar\{[^}]*justify-content:center/);
   assert.match(styles, /\.toolbar-btn svg\{width:16px;height:16px;flex:0 0 16px/);
+  assert.match(styles, /#pageLayout\{width:126px;max-width:126px\}/);
   assert.match(styles, /@container \(max-width:800px\)\{\.toolbar\{display:flex;align-items:center;justify-content:center;gap:6px\}/);
   assert.match(styles, /@container \(max-width:440px\)/);
 });
@@ -57,6 +58,14 @@ test('PDF export captures the rendered resume and keeps its text layer searchabl
   assert.match(pdfSource, /addSelectableText\(doc, sheet, \{ renderingMode: 'invisible' \}\)/);
 });
 
+test('PDF preview status summarizes the selectable page and free-download info concisely', () => {
+  const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
+  assert.match(source, /Selectable, searchable text · \$\{pageCount\} A4 page/);
+  assert.match(source, /Sign in for 2 free Pro PDFs/);
+  assert.match(source, /\$\{proTemplateDownloadsRemaining\} free Pro PDF\$\{proTemplateDownloadsRemaining===1\?'':'s'\} left/);
+  assert.doesNotMatch(source, /Review before downloading — the button is ready when you are/);
+});
+
 test('mobile editor provides view tabs and shows one full-width panel above the canvas', () => {
   const html = readFileSync(new URL('../frontend/editor.html', import.meta.url), 'utf8');
   const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
@@ -69,12 +78,15 @@ test('mobile editor provides view tabs and shows one full-width panel above the 
   assert.match(source, /document\.querySelectorAll\('\.mobile-editor-tab'\)\.forEach/);
   assert.match(source, /if\(next!=='resume'\)\{leftCollapsed=false;collapsed=false;applyPanels\(\)\}/);
   assert.match(source, /function fitMobileZoom\(\)/);
-  assert.match(source, /fitMobileZoom\(\);\s*updateBrowserPersistenceUI\(\)/);
+  assert.match(source, /fitMobileZoom\(\);[\s\S]*?fitHomepageDemoZoom\(\);[\s\S]*?updateBrowserPersistenceUI\(\)/);
   assert.match(styles, /grid-template-areas:"mobile-panel" "mobile-canvas"/);
   assert.match(styles, /\.mobile-editor-nav\{display:grid;grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
   assert.match(styles, /#layout\[data-mobile-panel=resume\] #leftPanel,#layout\[data-mobile-panel=resume\] #rightPanel/);
   assert.match(styles, /#layout\[data-mobile-panel=design\] #leftPanel\{display:none\}/);
   assert.match(styles, /#importResumeBtn svg\{width:16px;height:16px;flex:0 0 16px/);
+  assert.match(html, /id="importResumeBtn"[^>]*aria-label="Import an existing resume"[\s\S]*?<span>Import<\/span>/);
+  assert.match(html, /id="pdfBtn"><svg[^>]*aria-hidden="true"[\s\S]*?<span>Export PDF<\/span><\/button>/);
+  assert.match(html, /id="googleSignInLabel">Sign in with Google<\/span>\s*<span class="google-signin-compact" aria-hidden="true">Google<\/span>/);
 });
 
 test('mobile resume canvas aligns A4 pages and fits them below the desktop zoom floor', () => {
@@ -88,6 +100,11 @@ test('mobile resume canvas aligns A4 pages and fits them below the desktop zoom 
 test('editor account menu links to Community and My posts', () => {
   const html = readFileSync(new URL('../frontend/editor.html', import.meta.url), 'utf8');
   const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
+  assert.match(html, /<body class="auth-state-pending">/);
+  assert.match(styles, /body\.auth-state-pending:not\(\.account-avatar-cached\) #googleSignInBtn,body\.auth-state-pending #accountMenu:not\(\[data-auth-shell-visible\]\),body\.auth-signout-pending #googleSignInBtn,body\.auth-signout-pending #accountMenu\{visibility:hidden\}/);
+  assert.match(source, /async function updateCloudAccount\(user,error\)\{\s*authStateResolved=true;\s*document\.body\.classList\.remove\('auth-state-pending'\)/);
+  assert.match(source, /document\.body\.classList\.add\('auth-signout-pending'\);\s*button\.disabled=true;\s*button\.textContent='Signing out…';\s*await signOutUser\(\)/);
+  assert.match(source, /catch\(error\)\{document\.body\.classList\.remove\('auth-signout-pending'\)/);
   const accountMenu = html.slice(html.indexOf('id="accountMenu"'), html.indexOf('</details>', html.indexOf('id="accountMenu"')));
   const options = [
     'My cloud resumes',
@@ -95,6 +112,7 @@ test('editor account menu links to Community and My posts', () => {
     'Billing',
     'Community',
     'About',
+    'Support',
     'Appearance',
     'Sign out'
   ];
@@ -105,6 +123,11 @@ test('editor account menu links to Community and My posts', () => {
     previousIndex = optionIndex;
   }
   assert.match(accountMenu, /id="myPostsLink"[^>]*hidden/);
+  assert.match(accountMenu, /id="accountMenuSignInBtn"[^>]*hidden>Sign in with Google<\/button>/);
+  assert.match(accountMenu, /class="account-menu-profile" id="accountMenuProfile" hidden/);
+  assert.match(source, /\$\('accountMenuProfile'\)\.hidden=!user/);
+  assert.match(source, /\$\('accountMenuSignInBtn'\)\.hidden=!!user/);
+  assert.match(source, /\$\('accountMenuSignInBtn'\)\.addEventListener\('click',handleGoogleSignIn\)/);
   assert.match(source, /\$\('myPostsLink'\)\.hidden=true/);
   assert.match(source, /\$\('myPostsLink'\)\.hidden=!user/);
 });
@@ -121,20 +144,33 @@ test('mobile editor header grid rules do not reposition links inside the account
   assert.doesNotMatch(styles, /(?:^|})#aboutLink\{grid-area:about\}/);
   assert.match(styles, /\.topbar>\[data-theme-toggle\]\{grid-area:theme;width:100%\}/);
   assert.match(styles, /width:min\(300px,calc\(100vw - 32px\)\)/);
+  const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
+  assert.match(source, /window\.matchMedia\('\(max-width:640px\)'\)\.matches/);
+  assert.match(source, /panel\.style\.position='fixed'/);
+  assert.match(source, /panel\.style\.maxHeight=`calc\(100dvh - \$\{triggerBounds\.bottom\+16\}px\)`/);
+  assert.match(source, /accountMenu'\)\.addEventListener\('toggle',positionAccountMenuPanel\)/);
 });
 
 test('mobile editor gives header actions readable, touch-friendly rows', () => {
   const html = readFileSync(new URL('../frontend/editor.html', import.meta.url), 'utf8');
   assert.match(html, /id="editorCommunityLink" href="\/community\.html">Community<\/a>/);
-  assert.match(styles, /grid-template-areas:"brand brand brand docname docname account" "cloud cloud cloud cloud cloud cloud" "import import import pdf pdf pdf" "cover cover community community plans plans"/);
+  assert.match(styles, /grid-template-columns:repeat\(10,minmax\(0,1fr\)\) 42px;grid-template-areas:"brand brand brand brand brand brand docname docname docname docname account" "cloud cloud community community community cover cover cover plans plans plans" "import import import import import import pdf pdf pdf pdf pdf";gap:5px/);
+  assert.match(styles, /\.topbar:has\(#googleSignInBtn\[hidden\]\)\{grid-template-areas:"brand brand brand brand brand brand docname docname docname docname account" "community community community community cover cover cover plans plans plans plans" "import import import import import import pdf pdf pdf pdf pdf"\}/);
+  assert.match(styles, /\.topbar:has\(#googleSignInBtn\[hidden\]\) \.cloud-actions\{display:none\}/);
+  assert.match(styles, /\.topbar \.cloud-actions\{grid-area:cloud;justify-content:center;min-width:0\}/);
+  assert.match(styles, /\.topbar \.cloud-actions \.btn\{box-sizing:border-box;width:40px;min-width:40px;max-width:40px;height:40px;min-height:40px;flex:0 0 40px;justify-content:center;gap:0;padding:0\}/);
+  assert.match(styles, /\.topbar \.cloud-actions \.google-signin \.google-signin-compact\{display:none\}/);
   assert.match(styles, /\.topbar>\.btn,.topbar>#plansLink\{width:100%;min-width:0;min-height:40px;padding:7px 5px;font-size:12px\}/);
+  assert.match(styles, /\.topbar>#importResumeBtn,\.topbar>#pdfBtn\{box-sizing:border-box;min-height:44px;gap:4px;padding-right:3px;padding-left:3px;font-size:clamp\(10px,3vw,12px\)\}/);
+  assert.match(styles, /#pdfBtn svg\{width:16px;height:16px;flex:0 0 16px;fill:none;stroke:currentColor/);
   assert.match(styles, /\.topbar #editorCommunityLink\{grid-area:community\}/);
   assert.match(styles, /@media\(max-width:360px\)\{\.topbar #coverLetterBtn,.topbar #editorCommunityLink,.topbar #plansLink\{padding-right:3px;padding-left:3px;font-size:11px\}\}/);
 });
 
 test('mobile editor places the resume name immediately before the account icon', () => {
-  assert.match(styles, /@media\(max-width:520px\)\{[\s\S]*?grid-template-columns:repeat\(6,minmax\(0,1fr\)\);grid-template-areas:"brand brand brand docname docname account" "cloud cloud cloud cloud cloud cloud"/);
+  assert.match(styles, /@media\(max-width:520px\)\{[\s\S]*?grid-template-columns:repeat\(10,minmax\(0,1fr\)\) 42px;grid-template-areas:"brand brand brand brand brand brand docname docname docname docname account"/);
   assert.match(styles, /\.topbar \.docname\{grid-area:docname;width:100%;min-width:0;padding:6px 4px;font-size:11px\}/);
+  assert.match(styles, /\.topbar #accountMenu\{grid-area:account;justify-self:end\}/);
 });
 
 test('mobile editor brand gives the Pro badge room beside the resume name', () => {
@@ -155,6 +191,34 @@ test('resume editing tools collapse vertically on mobile only', () => {
   assert.match(source, /setResumeToolbarCollapsed\(mobileToolbarQuery\.matches\)/);
   assert.match(source, /resumeToolbarToggle\.addEventListener\('click'/);
   assert.match(source, /mobileToolbarQuery\.addEventListener\('change'/);
+});
+
+test('editor header uses icon-only sharing and concise JSON action labels', () => {
+  const html = readFileSync(new URL('../frontend/editor.html', import.meta.url), 'utf8');
+  assert.match(html, /id="loadBtn"[^>]*aria-label="Load JSON project" title="Load JSON"[\s\S]*?<svg[\s\S]*?<\/svg>\s*<\/button>/);
+  assert.match(html, /id="saveBtn"[^>]*aria-label="Download JSON project" title="Download JSON"[\s\S]*?<svg[\s\S]*?<\/svg>\s*<\/button>/);
+  assert.match(html, /id="shareResumeBtn"[^>]*aria-label="Share resume" title="Share resume"[\s\S]*?<svg[\s\S]*?<\/svg>\s*<\/button>/);
+  assert.doesNotMatch(html, /id="loadBtn"[\s\S]*?<span>JSON<\/span>/);
+  assert.doesNotMatch(html, /id="saveBtn"[\s\S]*?<span>JSON<\/span>/);
+  assert.doesNotMatch(html, /id="shareResumeBtn"[\s\S]*?<span>Share resume<\/span>/);
+});
+
+test('editor toolbar controls provide descriptive tooltips', () => {
+  const html = readFileSync(new URL('../frontend/editor.html', import.meta.url), 'utf8');
+  const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
+  for (const [id, title] of [
+    ['undoBtn', 'Undo'],
+    ['redoBtn', 'Redo'],
+    ['pageLayout', 'Choose a resume column layout'],
+    ['editMode', 'Choose how to edit resume content'],
+    ['atsBtn', 'ATS Check'],
+    ['zoomOut', 'Zoom out'],
+    ['zoomIn', 'Zoom in'],
+    ['zoomLabel', 'Current zoom level']
+  ]) {
+    assert.match(html, new RegExp(`id="${id}"[^>]*title="${title}"`));
+  }
+  assert.match(source, /\$\('zoomLabel'\)\.title=`Current zoom level: \$\{zoomPercent\}%`/);
 });
 
 test('typography popup is hidden only on mobile and positions using its rendered size', () => {
@@ -222,7 +286,8 @@ test('structured pages scroll smoothly and continue long text without losing edi
   assert.match(source, /function resumeEditableField\(target\)/);
   assert.match(source, /function detailSourceOffset\(section,entryIndex,node,offset\)/);
   assert.match(source, /function replaceEntryDetailSelection\(section,entryIndex,start,end,text,el\)/);
-  assert.match(source, /const ls=detailLines\(e\.details\);a\.push\(\{k:'entry',e\}\);ls\.forEach/);
+  assert.match(source, /detailLines\(e\.details\)\.map\(\(text,index\)=>\(\{text:text\.trim\(\),index\}\)\)\.filter\(line=>line\.text\)/);
+  assert.match(source, /a\.push\(\{k:'entry',e\}\);ls\.forEach/);
   assert.doesNotMatch(source, /if\(!hasDetail&&i===0\)return/);
   assert.match(source, /if\(a\.blank\)el\.classList\.add\('blank-line'\)/);
   assert.match(source, /focusTextLine\(section\.id,lineIndex\+1,0,true\)/);

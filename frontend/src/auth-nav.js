@@ -1,8 +1,9 @@
-import { cloudConfigured, getAccountProfile, googleSignInErrorMessage, observeAuth, signInWithGoogle, signOutUser } from './firebase-cloud.js';
-import { loadBillingConfig, loadBillingEntitlement } from './billing-client.js';
+import { cloudConfigured, getAccountProfile, googleSignInErrorMessage, isGoogleSignInCancellation, observeAuth, signInWithGoogle, signOutUser } from './firebase-cloud.js';
+import { clearBillingEntitlementCache, loadBillingConfig, loadBillingEntitlement } from './billing-client.js';
 import { canUseFeature, FEATURE_IDS } from './plan-access.js';
-import { confirmModern } from './modern-modal.js';
+import { alertModern, confirmModern } from './modern-modal.js';
 import { getAccountPhotoUrls, setAccountAvatar } from './account-avatar.js';
+import { cacheAccountPhoto, cacheAccountPhotoFromUrls, cacheProBadgeHint, clearCachedProBadgeHint, clearUserSessionCache, getCachedAccountAvatarHint, getCachedAccountPhoto, getCachedProBadgeHint } from './session-cache.js';
 
 const nav = document.querySelector('.about-nav');
 const signInButton = document.querySelector('[data-auth-sign-in]');
@@ -23,6 +24,12 @@ if (proBadge) {
   brand.append(proBadge);
 }
 
+const initialProBadgeHint = getCachedProBadgeHint();
+if (proBadge && initialProBadgeHint) {
+  proBadge.hidden = false;
+  document.title = `${originalTitle} | Pro`;
+}
+
 function addMenuItem(panel, tag, className, text, href) {
   const item = document.createElement(tag);
   item.className = className;
@@ -34,18 +41,18 @@ function addMenuItem(panel, tag, className, text, href) {
 
 function createAccountMenu() {
   if (!nav) return null;
-  const menu = document.createElement('details');
+  const menu = nav.querySelector('[data-account-menu-shell]') || document.createElement('details');
   menu.className = 'account-menu site-account-menu';
   menu.hidden = false;
 
-  const summary = document.createElement('summary');
+  const summary = menu.querySelector('summary') || document.createElement('summary');
   summary.className = 'account-menu-trigger';
   summary.setAttribute('aria-label', 'Open account menu');
-  const avatar = document.createElement('span');
+  const avatar = summary.querySelector('.account-avatar') || document.createElement('span');
   avatar.className = 'account-avatar';
   avatar.setAttribute('aria-hidden', 'true');
-  avatar.textContent = 'U';
-  summary.append(avatar);
+  if (!avatar.querySelector('img')) avatar.textContent = 'U';
+  if (!avatar.parentElement) summary.append(avatar);
 
   const panel = document.createElement('div');
   panel.className = 'account-menu-panel';
@@ -62,6 +69,9 @@ function createAccountMenu() {
   identity.append(name, email);
   profile.append(largeAvatar, identity);
   panel.append(profile);
+  const menuSignInButton = addMenuItem(panel, 'button', 'account-menu-item account-menu-signin', 'Sign in with Google');
+  menuSignInButton.type = 'button';
+  menuSignInButton.hidden = true;
 
   const accountLink = addMenuItem(panel, 'a', 'account-menu-item', 'My account', '/my-account.html');
   accountLink.hidden = true;
@@ -74,6 +84,8 @@ function createAccountMenu() {
   const communityLink = addMenuItem(panel, 'a', 'account-menu-item', 'Community', '/community.html');
   if (location.pathname === '/community.html') communityLink.setAttribute('aria-current', 'page');
   const about = addMenuItem(panel, 'a', 'account-menu-item', 'About', '/about.html');
+  const supportLink = addMenuItem(panel, 'a', 'account-menu-item', 'Support', '/support.html');
+  if (location.pathname === '/support.html') supportLink.setAttribute('aria-current', 'page');
 
   const appearance = document.createElement('div');
   appearance.className = 'account-menu-theme';
@@ -102,8 +114,9 @@ function createAccountMenu() {
   signOutButton.className = 'account-menu-item account-menu-signout';
   signOutButton.hidden = true;
   panel.append(signOutButton);
-  menu.append(summary, panel);
-  nav.append(menu);
+  if (!panel.parentElement) menu.append(panel);
+  if (!summary.parentElement) menu.append(summary);
+  if (!menu.parentElement) nav.append(menu);
 
   const positionMobilePanel = () => {
     if (!menu.open || !window.matchMedia('(max-width:640px)').matches) {
@@ -130,10 +143,17 @@ function createAccountMenu() {
     }
   });
 
-  return { menu, summary, avatar, largeAvatar, name, email, about, accountLink, billingLink, myPostsLink };
+  return { menu, summary, avatar, largeAvatar, profile, name, email, menuSignInButton, about, accountLink, billingLink, myPostsLink };
 }
 
 const accountMenu = createAccountMenu();
+const initialAccountAvatar = getCachedAccountAvatarHint();
+if (accountMenu && initialAccountAvatar) {
+  document.body.classList.add('account-avatar-cached');
+  accountMenu.profile.hidden = true;
+  setAccountAvatar(accountMenu.avatar, 'U', initialAccountAvatar.photoDataUrl);
+  setAccountAvatar(accountMenu.largeAvatar, 'U', initialAccountAvatar.photoDataUrl);
+}
 
 window.addEventListener('account-profile-updated', event => {
   const { uid, displayName, photoDataUrl } = event.detail || {};
@@ -142,13 +162,24 @@ window.addEventListener('account-profile-updated', event => {
   const initial = Array.from(accountName)[0]?.toLocaleUpperCase() || 'U';
   accountMenu.name.textContent = accountName;
   accountMenu.summary.setAttribute('aria-label', `Account menu for ${accountName}`);
-  const photos = getAccountPhotoUrls(currentUser, photoDataUrl);
+  const cachedPhoto = photoDataUrl || getCachedAccountPhoto(uid) || '';
+  const photos = getAccountPhotoUrls(currentUser, cachedPhoto);
+  if (photoDataUrl) cacheAccountPhoto(uid, photoDataUrl);
   setAccountAvatar(accountMenu.avatar, initial, photos);
   setAccountAvatar(accountMenu.largeAvatar, initial, photos);
+  void cacheAccountPhotoFromUrls(uid, getAccountPhotoUrls(currentUser));
 });
 
 function updateProBadge(entitlement) {
-  const hasPro = canUseFeature(FEATURE_IDS.ALL_TEMPLATES, entitlement);
+  const hasVerifiedPro = canUseFeature(FEATURE_IDS.ALL_TEMPLATES, entitlement);
+  const hint = getCachedProBadgeHint();
+  const hintMatchesUser = hint && (
+    !document.body.classList.contains('auth-state-ready')
+    || currentUser?.uid === hint.uid
+  );
+  const hasPro = hasVerifiedPro || Boolean(
+    hintMatchesUser && (hint.lifetime === true || hint.validUntil > Date.now())
+  );
   if (proBadge) proBadge.hidden = !hasPro;
   document.title = hasPro ? `${originalTitle} | Pro` : originalTitle;
 }
@@ -157,21 +188,44 @@ async function refreshProBadge(user) {
   const requestId = ++entitlementRequest;
   currentUser = user;
   if (!user) {
+    clearCachedProBadgeHint();
     updateProBadge(null);
     return;
   }
 
+  const savedBadgeHint = getCachedProBadgeHint();
+  if (savedBadgeHint && savedBadgeHint.uid !== user.uid) clearCachedProBadgeHint(savedBadgeHint.uid);
+  updateProBadge(null);
   try {
     const config = await loadBillingConfig();
-    const entitlement = config.entitlementEnabled ? await loadBillingEntitlement(user) : null;
-    if (requestId === entitlementRequest) updateProBadge(entitlement);
+    const entitlement = config.entitlementEnabled
+      ? await loadBillingEntitlement(user, { forceRefresh: true })
+      : null;
+    if (requestId === entitlementRequest) {
+      if (config.entitlementEnabled) cacheProBadgeHint(user.uid, entitlement);
+      else clearCachedProBadgeHint(user.uid);
+      updateProBadge(entitlement);
+    }
   } catch (error) {
-    if (requestId === entitlementRequest) updateProBadge(null);
+    if (requestId === entitlementRequest) {
+      clearBillingEntitlementCache(user);
+      updateProBadge(null);
+    }
     console.error('Could not load the account Pro status.', error);
   }
 }
 
 function updateAuthControls(user, error) {
+  document.body.classList.add('auth-state-ready');
+  document.body.classList.toggle('auth-user-signed-in', Boolean(user) && !error);
+  document.body.classList.toggle('auth-user-signed-out', !user || Boolean(error));
+  document.body.classList.remove('account-avatar-cached');
+  accountMenu?.menu.removeAttribute('data-auth-shell-visible');
+  const previousUser = currentUser;
+  if (previousUser && previousUser.uid !== user?.uid) {
+    clearUserSessionCache(previousUser.uid);
+    clearBillingEntitlementCache(previousUser);
+  }
   if (error) {
     void refreshProBadge(null);
     console.error('Could not initialize account controls.', error);
@@ -179,15 +233,19 @@ function updateAuthControls(user, error) {
       signInButton.hidden = false;
       signInButton.disabled = true;
       signInButton.querySelector('[data-auth-sign-in-label]').textContent = 'Cloud setup needed';
-      signInButton.title = error.message;
+      signInButton.title = googleSignInErrorMessage(error);
     }
     if (signOutButton) signOutButton.hidden = true;
     if (status) {
-      status.textContent = error.message;
+      status.textContent = googleSignInErrorMessage(error);
       status.classList.add('auth-error');
     }
     if (accountMenu) {
       accountMenu.menu.hidden = false;
+      accountMenu.profile.hidden = true;
+      accountMenu.menuSignInButton.hidden = false;
+      accountMenu.menuSignInButton.disabled = true;
+      accountMenu.menuSignInButton.textContent = 'Cloud setup needed';
       accountMenu.name.textContent = 'Guest';
       accountMenu.email.textContent = '';
       accountMenu.avatar.textContent = 'G';
@@ -218,13 +276,14 @@ function updateAuthControls(user, error) {
   if (accountMenu) {
     accountMenu.menu.hidden = false;
     accountMenu.myPostsLink.hidden = !user;
+    accountMenu.profile.hidden = !user;
+    accountMenu.menuSignInButton.hidden = Boolean(user);
+    accountMenu.menuSignInButton.disabled = false;
+    accountMenu.menuSignInButton.textContent = 'Sign in with Google';
     if (user) {
+      accountMenu.menu.open = false;
       const accountName = user.displayName?.trim() || user.email?.split('@')[0] || 'Google user';
       const initial = Array.from(accountName)[0]?.toLocaleUpperCase() || 'U';
-      accountMenu.avatar.textContent = initial;
-      accountMenu.largeAvatar.textContent = initial;
-      setAccountAvatar(accountMenu.avatar, initial, getAccountPhotoUrls(user));
-      setAccountAvatar(accountMenu.largeAvatar, initial, getAccountPhotoUrls(user));
       accountMenu.name.textContent = accountName;
       accountMenu.email.textContent = user.email || '';
       accountMenu.summary.setAttribute('aria-label', `Account menu for ${accountName}`);
@@ -238,14 +297,22 @@ function updateAuthControls(user, error) {
       if (location.pathname === '/my-account.html') accountMenu.accountLink.setAttribute('aria-current', 'page');
       else accountMenu.accountLink.removeAttribute('aria-current');
       const accountUid = user.uid;
-      void getAccountProfile(user).then(profile => {
-        if (currentUser?.uid !== accountUid || !accountMenu) return;
-        const photos = getAccountPhotoUrls(user, profile.photoDataUrl);
-        setAccountAvatar(accountMenu.avatar, initial, photos);
-        setAccountAvatar(accountMenu.largeAvatar, initial, photos);
-      }).catch(profileError => {
-        if (currentUser?.uid === accountUid) console.error('Could not load the account profile image.', profileError);
-      });
+      const cachedPhoto = getCachedAccountPhoto(accountUid);
+      const photos = getAccountPhotoUrls(user, cachedPhoto ?? '');
+      setAccountAvatar(accountMenu.avatar, initial, photos);
+      setAccountAvatar(accountMenu.largeAvatar, initial, photos);
+      void cacheAccountPhotoFromUrls(accountUid, getAccountPhotoUrls(user));
+      if (cachedPhoto === null && location.pathname !== '/my-account.html') {
+        void getAccountProfile(user).then(profile => {
+          if (currentUser?.uid !== accountUid || !accountMenu) return;
+          cacheAccountPhoto(accountUid, profile.photoDataUrl);
+          const photos = getAccountPhotoUrls(user, profile.photoDataUrl);
+          setAccountAvatar(accountMenu.avatar, initial, photos);
+          setAccountAvatar(accountMenu.largeAvatar, initial, photos);
+        }).catch(profileError => {
+          if (currentUser?.uid === accountUid) console.error('Could not load the account profile image.', profileError);
+        });
+      }
     } else {
       accountMenu.name.textContent = 'Guest';
       accountMenu.email.textContent = '';
@@ -260,17 +327,29 @@ function updateAuthControls(user, error) {
   }
 }
 
-signInButton?.addEventListener('click', async () => {
+async function handleGoogleSignIn() {
   try {
     await signInWithGoogle();
   } catch (error) {
+    if (isGoogleSignInCancellation(error)) return;
     console.error('Google sign-in failed.', error);
     if (status) {
       status.textContent = googleSignInErrorMessage(error);
       status.classList.add('auth-error');
     }
   }
+}
+
+window.addEventListener('firebase-account-sign-in-disabled', () => {
+  void alertModern({
+    title: 'Your account is banned!',
+    message: googleSignInErrorMessage({ code: 'auth/user-disabled' }),
+    variant: 'default'
+  });
 });
+
+signInButton?.addEventListener('click', handleGoogleSignIn);
+accountMenu?.menuSignInButton.addEventListener('click', handleGoogleSignIn);
 
 signOutButton?.addEventListener('click', async () => {
   if (signOutPending) return;
@@ -290,12 +369,14 @@ signOutButton?.addEventListener('click', async () => {
       status.textContent = 'Signing out…';
       status.classList.remove('auth-error');
     }
+    document.body.classList.add('auth-signout-pending');
     await signOutUser();
     window.location.assign('/home.html');
   } catch (error) {
+    document.body.classList.remove('auth-signout-pending');
     console.error('Could not sign out.', error);
     if (status) {
-      status.textContent = error.message || 'Could not sign out.';
+      status.textContent = 'Could not sign out. Please try again.';
       status.classList.add('auth-error');
     }
   } finally {

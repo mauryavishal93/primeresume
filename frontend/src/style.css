@@ -246,6 +246,7 @@
 .toolbar-control{display:flex;align-items:center;gap:6px;padding:0 2px;min-width:0;flex:0 0 auto}
 .toolbar label{font-size:11px;color:var(--muted);font-weight:700;white-space:nowrap}
 .toolbar select{border:1px solid var(--line);background:#fff;border-radius:7px;padding:7px 18px 7px 8px;font-size:12px;min-width:0;width:96px;max-width:96px;appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);background-position:calc(100% - 11px) calc(50% - 2px),calc(100% - 7px) calc(50% - 2px);background-size:4px 4px,4px 4px;background-repeat:no-repeat;flex-shrink:0}
+#pageLayout{width:126px;max-width:126px}
 .toolbar .spacer{display:none}
 .toolbar-btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;white-space:nowrap;flex-shrink:0;padding:6px 10px;font-size:11px;line-height:1.2;min-height:32px}
 .toolbar-btn svg{width:16px;height:16px;flex:0 0 16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
@@ -378,6 +379,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 .cloud-actions{display:flex;align-items:center;gap:6px}
 .cloud-actions [hidden]{display:none!important}
 .google-signin{height:40px;padding:0 14px;background:#fff;border:1px solid #dadce0;border-radius:6px;color:#3c4043;font-size:14px;font-weight:500;letter-spacing:.15px;gap:10px;box-shadow:0 1px 2px #0000001a}
+.google-signin-compact{display:none}
 .google-signin:hover:not(:disabled){background:#f8faff;border-color:#d2e3fc;box-shadow:0 1px 3px #00000024}
 .google-signin:active:not(:disabled){background:#eef3fc;box-shadow:inset 0 1px 2px #0000001a}
 .google-signin-logo{width:18px;height:18px;flex:0 0 18px}
@@ -440,14 +442,60 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 :root[data-theme=dark] .hint,
 :root[data-theme=dark] .toolbar label{color:#a9b8cc}
 .cloud-resume-list{display:grid;min-height:0;flex:1 1 auto;gap:8px;overflow-x:hidden;overflow-y:auto}
-.cloud-resume-item{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:8px;min-width:0;padding:10px;border:1px solid var(--line);border-radius:9px}
+.cloud-resume-item{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;align-items:center;gap:8px;min-width:0;padding:10px;border:1px solid var(--line);border-radius:9px}
 .cloud-resume-meta{min-width:0}
 .cloud-resume-meta strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cloud-resume-meta small{display:block;overflow:hidden;color:var(--muted);text-overflow:ellipsis;white-space:nowrap}
 .cloud-resume-item .btn{padding:6px 9px;font-size:11px}
+.cloud-resume-item .cloud-icon-btn{width:30px;height:30px;padding:6px}
+.cloud-resume-item .cloud-icon-btn svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .cloud-empty{padding:18px;border:1px dashed var(--line);border-radius:9px;color:var(--muted);font-size:12px;text-align:center}
 .cloud-modal>.modal-actions{flex:none;flex-wrap:wrap}
 @media(max-width:480px){.cloud-modal{padding:14px}.cloud-modal-head{gap:8px}.cloud-modal-head h2{font-size:16px}.cloud-modal>.modal-actions{flex-direction:column;gap:6px}.cloud-modal>.modal-actions .btn{width:100%}.cloud-resume-item{gap:5px;padding:8px}.cloud-resume-item .btn{padding:6px;font-size:10px}}
+.share-resume-modal{display:flex;width:min(620px,calc(100vw - 32px));max-height:calc(100vh - 32px);max-height:calc(100dvh - 32px);flex-direction:column;gap:14px;overflow:auto;color:var(--ink)}
+.share-resume-modal .cloud-modal-head{align-items:flex-start}
+.share-resume-modal .cloud-modal-head h2{margin:0}
+.share-resume-warning{display:grid;gap:4px;padding:12px;border:1px solid #f1d29a;border-radius:10px;background:#fff8e9;color:#6b4c15;font-size:12px}
+.share-resume-warning span{line-height:1.5}
+.share-resume-create-actions{justify-content:flex-start;margin:0}
+.share-resume-link-result{display:grid;gap:6px}
+.share-resume-link-result label,.share-resume-list-head h3{margin:0;font-size:13px;font-weight:800}
+.share-resume-link-result>div{display:flex;gap:8px;min-width:0}
+.share-resume-link-result input{flex:1;min-width:0}
+.share-resume-list-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding-top:8px;border-top:1px solid var(--line)}
+.resume-share-list{display:grid;gap:8px;min-height:40px;max-height:240px;overflow:auto;color:var(--muted);font-size:12px}
+.resume-share-item{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px;border:1px solid var(--line);border-radius:9px;background:var(--panel);color:var(--ink)}
+.resume-share-item>div:first-child{display:grid;min-width:0;gap:3px}
+.resume-share-item strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.resume-share-item a{color:var(--purple);font-size:11px;overflow-wrap:anywhere}
+.resume-share-edit-copy{display:inline-flex;align-items:center;gap:5px;color:var(--purple);font-size:11px}
+.resume-share-edit-copy-button{display:inline-grid;width:24px;height:24px;flex:0 0 24px;place-items:center;padding:4px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink);cursor:pointer}
+.resume-share-edit-copy-button:hover{border-color:var(--purple);color:var(--purple)}
+.resume-share-edit-copy-button:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.resume-share-edit-copy-button svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.resume-share-item-actions{display:flex;flex:0 0 auto;gap:6px}
+.shared-copy-notice{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 12px;padding:12px 14px;border:1px solid #a9c8ff;border-radius:12px;background:#eef5ff;color:#203a64}
+.shared-copy-notice[hidden]{display:none}
+.shared-copy-notice>div{display:grid;gap:3px;min-width:0}
+.shared-copy-notice>div>span{font-size:12px;line-height:1.45}
+.shared-copy-notice .btn{flex:0 0 auto}
+.incoming-share-modal{display:grid;justify-items:center;gap:10px;width:min(420px,calc(100vw - 32px));text-align:center;color:var(--ink)}
+.incoming-share-modal p{margin:0;color:var(--muted)}
+.incoming-share-modal #incomingShareLoading{padding:10px}
+.incoming-share-modal #incomingShareError{display:grid;justify-items:center;gap:12px}
+:root[data-theme=dark] .share-resume-warning{border-color:#66512a;background:#322b1c;color:#f0d99c}
+:root[data-theme=dark] .shared-copy-notice{border-color:#35527c;background:#1a2a40;color:#dce9ff}
+@media(max-width:480px){.share-resume-modal{padding:14px;gap:10px}.share-resume-create-actions{flex-direction:column}.share-resume-create-actions .btn{width:100%}.resume-share-item{align-items:flex-start;flex-direction:column}.resume-share-item-actions{width:100%}.resume-share-item-actions .btn{flex:1}.share-resume-link-result>div{flex-direction:column}.shared-copy-notice{align-items:stretch;flex-direction:column}.shared-copy-notice .btn{width:100%}}
+body.public-resume-pdf-ready .topbar,body.public-resume-pdf-ready .layout,body.public-resume-pdf-ready #sharedCopyNotice{display:none!important}
+body.public-resume-pdf-ready #pdfPreviewModalBg.show{z-index:100;padding:0;background:#e9edf4}
+body.public-resume-pdf-ready .pdf-preview-modal{width:100%;height:100%;max-height:none;border-radius:0;padding:16px}
+body.public-resume-pdf-ready .pdf-preview-modal #cancelPdfPreview{display:none}
+body.public-resume-pdf-ready #pdfPreviewModalBg .pdf-preview-modal .modal-actions{display:flex!important;justify-content:center!important}
+body.public-resume-pdf-ready #pdfPreviewModalBg .pdf-preview-modal #downloadPdfPreview{flex:0 0 auto!important;width:auto!important;min-width:180px;margin-left:auto!important;margin-right:auto!important}
+body.public-resume-pdf #incomingShareModalBg.show{z-index:101}
+@media(max-width:600px){
+ body.public-resume-pdf-ready .pdf-preview-modal{padding:max(8px,env(safe-area-inset-top)) 8px max(8px,env(safe-area-inset-bottom))}
+}
 @media(max-width:800px){.topbar{grid-template-areas:"brand docname docname docname docname" "cloud cloud cloud cloud cloud" "cover cover about pdf pdf"}.cloud-actions{grid-area:cloud;justify-content:center}.cloud-actions .btn{width:auto;padding:7px 9px}}
 .theme-switch{display:inline-flex;align-items:center;justify-content:center;gap:7px;flex:none;padding:5px 8px;border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--ink);font-size:12px;font-weight:700;line-height:1;cursor:pointer;transition:border-color .16s ease,background-color .16s ease}
 .theme-switch:hover{border-color:var(--purple)}
@@ -617,10 +665,10 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 @media(max-width:560px){.ats-processing-steps{grid-template-columns:repeat(2,minmax(0,1fr));row-gap:12px}}
 @media(prefers-reduced-motion:reduce){.ats-processing-spinner{animation:none}.ats-processing .ats-processing-track span{transition:none}}
 @media(min-width:801px) and (max-width:1100px){.topbar{gap:6px;padding:0 10px}.brand-name{display:inline}.docname{width:128px}.save-state{display:none}.topbar .btn{padding:7px 8px;font-size:12px}}
-@media(max-width:800px){.topbar{grid-template-areas:"brand brand docname docname docname" "cloud cloud cloud account account" "import import cover community plans" "pdf pdf pdf pdf pdf"}.topbar .cloud-actions{grid-area:cloud;justify-content:flex-start;min-width:0}.topbar .cloud-actions .btn{width:auto}.topbar #accountMenu{grid-area:account;justify-self:end}.topbar #importResumeBtn{grid-area:import}.topbar #coverLetterBtn{grid-area:cover}.topbar #editorCommunityLink{grid-area:community}.topbar #plansLink{grid-area:plans}.topbar #pdfBtn{grid-area:pdf}}
-@media(max-width:520px){.topbar{grid-template-columns:repeat(5,minmax(0,1fr));grid-template-areas:"brand brand docname docname docname" "cloud cloud cloud account account" "import import cover community plans" "pdf pdf pdf pdf pdf"}.topbar .cloud-actions .btn{padding:7px 6px}}
+@media(max-width:800px){.topbar{grid-template-columns:repeat(6,minmax(0,1fr));grid-template-areas:"brand brand brand docname docname account" "cloud cloud import import pdf pdf" "cover cover community community plans plans"}.topbar .cloud-actions{grid-area:cloud;justify-content:center;min-width:0}.topbar .cloud-actions .btn{width:auto}.topbar .cloud-actions .google-signin{box-sizing:border-box;width:100%;min-width:0;height:44px;min-height:44px;flex:1 1 auto;gap:4px;padding:6px 3px}.topbar .cloud-actions .google-signin .google-signin-compact{display:inline}.topbar #accountMenu{grid-area:account;justify-self:end}.topbar #importResumeBtn{grid-area:import}.topbar #coverLetterBtn{grid-area:cover}.topbar #editorCommunityLink{grid-area:community}.topbar #plansLink{grid-area:plans}.topbar #pdfBtn{grid-area:pdf}}
+@media(max-width:520px){.topbar{grid-template-columns:repeat(6,minmax(0,1fr));grid-template-areas:"brand brand brand docname docname account" "cloud cloud import import pdf pdf" "cover cover community community plans plans"}.topbar .cloud-actions .btn{padding:7px 6px}}
 .section-delete{display:grid;place-items:center;width:25px;height:25px;flex:0 0 25px;padding:0;border:1px solid transparent;border-radius:6px;background:transparent;color:#9b6b70;font-size:17px;line-height:1;opacity:.72}.section-delete:hover,.section-delete:focus-visible{border-color:#e4a5ad;background:#fff0f2;color:#b4233a;opacity:1}.section-row:hover .section-delete,.section-row:focus-within .section-delete{opacity:1}:root[data-theme=dark] .section-delete{color:#d39a9f}:root[data-theme=dark] .section-delete:hover,:root[data-theme=dark] .section-delete:focus-visible{border-color:#85434c;background:#3a2024;color:#ffb4bc}@media(max-width:800px){.section-delete{opacity:1}}
-.account-menu[hidden]{display:none!important}.account-menu-item[hidden]{display:none!important}.account-menu{position:relative;flex:0 0 auto;z-index:20}.account-menu>summary{list-style:none}.account-menu>summary::-webkit-details-marker{display:none}.account-menu-trigger{display:flex;align-items:center;gap:8px;min-height:40px;padding:4px 10px 4px 5px;border:1px solid var(--line);border-radius:9px;background:var(--panel);color:var(--ink);cursor:pointer}.account-menu-trigger:hover,.account-menu[open]>.account-menu-trigger{border-color:var(--accent)}.account-menu-trigger:focus-visible,.account-menu-item:focus-visible{outline:3px solid var(--focus);outline-offset:2px}.account-avatar{display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:var(--accent);color:#fff;font-size:12px;font-weight:800}.account-avatar img{width:100%;height:100%;border-radius:inherit;object-fit:cover}.account-trigger-name{max-width:130px;overflow:hidden;font-size:12px;font-weight:700;text-overflow:ellipsis;white-space:nowrap}.account-menu-chevron{color:var(--muted);font-size:14px}.account-menu-panel{position:absolute;top:calc(100% + 8px);right:0;display:none;width:min(300px,calc(100vw - 32px));padding:9px;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--ink);box-shadow:0 16px 42px rgba(0,0,0,.2)}.account-menu[open]>.account-menu-panel{display:grid;gap:4px}.account-menu-profile{display:flex;align-items:center;gap:10px;padding:8px 8px 12px;border-bottom:1px solid var(--line);margin-bottom:4px}.account-avatar-large{width:38px;height:38px;flex:0 0 auto}.account-menu-identity{display:grid;min-width:0;gap:2px}.account-menu-identity strong,.account-menu-identity span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.account-menu-identity strong{font-size:13px}.account-menu-identity span{color:var(--muted);font-size:11px}.account-menu-item{display:flex;align-items:center;width:100%;min-height:40px;padding:8px 10px;border:0;border-radius:7px;background:transparent;color:var(--ink);font:inherit;font-size:12px;text-align:left;text-decoration:none;cursor:pointer}.account-menu-item:hover{background:rgba(81,70,229,.1)}.account-menu-theme{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 10px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);font-size:12px;font-weight:650}.account-menu-theme+.account-menu-theme{border-top:0}.account-menu-theme .theme-switch{flex:none}.account-menu-signout{color:#b4233a}.account-menu-signout:hover{background:rgba(180,35,58,.09)}
+.account-menu[hidden]{display:none!important}.account-menu-item[hidden]{display:none!important}.account-menu-profile[hidden]{display:none!important}.account-menu{position:relative;flex:0 0 auto;z-index:20}.account-menu>summary{list-style:none}.account-menu>summary::-webkit-details-marker{display:none}.account-menu-trigger{display:flex;align-items:center;gap:8px;min-height:40px;padding:4px 10px 4px 5px;border:1px solid var(--line);border-radius:9px;background:var(--panel);color:var(--ink);cursor:pointer}.account-menu-trigger:hover,.account-menu[open]>.account-menu-trigger{border-color:var(--accent)}.account-menu-trigger:focus-visible,.account-menu-item:focus-visible{outline:3px solid var(--focus);outline-offset:2px}.account-avatar{display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:var(--accent);color:#fff;font-size:12px;font-weight:800}.account-avatar img{width:100%;height:100%;border-radius:inherit;object-fit:cover}.account-trigger-name{max-width:130px;overflow:hidden;font-size:12px;font-weight:700;text-overflow:ellipsis;white-space:nowrap}.account-menu-chevron{color:var(--muted);font-size:14px}.account-menu-panel{position:absolute;top:calc(100% + 8px);right:0;display:none;width:min(300px,calc(100vw - 32px));padding:9px;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--ink);box-shadow:0 16px 42px rgba(0,0,0,.2)}.account-menu[open]>.account-menu-panel{display:grid;gap:4px}.account-menu-profile{display:flex;align-items:center;gap:10px;padding:8px 8px 12px;border-bottom:1px solid var(--line);margin-bottom:4px}.account-avatar-large{width:38px;height:38px;flex:0 0 auto}.account-menu-identity{display:grid;min-width:0;gap:2px}.account-menu-identity strong,.account-menu-identity span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.account-menu-identity strong{font-size:13px}.account-menu-identity span{color:var(--muted);font-size:11px}.account-menu-item{display:flex;align-items:center;width:100%;min-height:40px;padding:8px 10px;border:0;border-radius:7px;background:transparent;color:var(--ink);font:inherit;font-size:12px;text-align:left;text-decoration:none;cursor:pointer}.account-menu-item:hover{background:rgba(81,70,229,.1)}.account-menu-theme{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 10px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);font-size:12px;font-weight:650}.account-menu-theme+.account-menu-theme{border-top:0}.account-menu-theme .theme-switch{flex:none}.account-menu-signout{color:#b4233a}.account-menu-signout:hover{background:rgba(180,35,58,.09)}
 .section-typography-switch{display:inline-flex;align-items:center;justify-content:center;gap:7px;flex:none;padding:5px 8px;border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--ink);font-size:12px;font-weight:700;line-height:1;cursor:pointer;transition:border-color .16s ease,background-color .16s ease}
 .section-typography-switch:hover{border-color:var(--purple)}
 .section-typography-switch:focus-visible{outline:3px solid #a5b4fc;outline-offset:2px}
@@ -696,12 +744,15 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
  #sectionTypographyCallout{display:none!important}
 }
 @media(max-width:520px){
- .topbar{grid-template-columns:repeat(6,minmax(0,1fr));grid-template-areas:"brand brand brand docname docname account" "cloud cloud cloud cloud cloud cloud" "import import import pdf pdf pdf" "cover cover community community plans plans";gap:7px;padding:8px}
+ .topbar{grid-template-columns:repeat(10,minmax(0,1fr)) 42px;grid-template-areas:"brand brand brand brand brand brand docname docname docname docname account" "cloud cloud community community community cover cover cover plans plans plans" "import import import import import import pdf pdf pdf pdf pdf";gap:5px;padding:8px}
+ .topbar:has(#googleSignInBtn[hidden]){grid-template-areas:"brand brand brand brand brand brand docname docname docname docname account" "community community community community cover cover cover plans plans plans plans" "import import import import import import pdf pdf pdf pdf pdf"}
+ .topbar:has(#googleSignInBtn[hidden]) .cloud-actions{display:none}
  .topbar .brand{grid-area:brand;justify-content:flex-start;margin:0 0 0 4px}
  .topbar .docname{grid-area:docname;width:100%;min-width:0;padding:6px 4px;font-size:11px}
  .topbar .spacer,.topbar .save-state{display:none}
- .topbar .cloud-actions{grid-area:cloud;justify-content:flex-start;min-width:0}
- .topbar .cloud-actions .btn{width:auto;max-width:100%;min-height:40px;padding:7px 10px;font-size:12px}
+ .topbar .cloud-actions{grid-area:cloud;justify-content:center;min-width:0}
+ .topbar .cloud-actions .btn{box-sizing:border-box;width:40px;min-width:40px;max-width:40px;height:40px;min-height:40px;flex:0 0 40px;justify-content:center;gap:0;padding:0}
+ .topbar .cloud-actions .google-signin .google-signin-compact{display:none}
  .topbar #accountMenu{grid-area:account;justify-self:end}
  .topbar #importResumeBtn{grid-area:import}
  .topbar #coverLetterBtn{grid-area:cover}
@@ -710,12 +761,14 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
  .topbar #pdfBtn{grid-area:pdf}
  .topbar>.btn,.topbar>#plansLink{width:100%;min-width:0;min-height:40px;padding:7px 5px;font-size:12px}
  .topbar>#importResumeBtn{grid-area:import;justify-content:center}
+ .topbar>#importResumeBtn,.topbar>#pdfBtn{box-sizing:border-box;min-height:44px;gap:4px;padding-right:3px;padding-left:3px;font-size:clamp(10px,3vw,12px)}
  .templates{grid-template-columns:repeat(2,minmax(0,1fr))}
  .left,.right{height:min(40vh,320px);min-height:180px;padding:10px 8px}
  .center{padding:10px 6px 20px}
 }
 @media(max-width:360px){.topbar #coverLetterBtn,.topbar #editorCommunityLink,.topbar #plansLink{padding-right:3px;padding-left:3px;font-size:11px}}
 #importResumeBtn svg{width:16px;height:16px;flex:0 0 16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+#pdfBtn svg{width:16px;height:16px;flex:0 0 16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 body.homepage-demo{height:100vh;min-height:0;overflow:hidden;background:#e8edf3}
 .homepage-demo .topbar,
 .homepage-demo .mobile-editor-nav,
@@ -779,3 +832,4 @@ body.homepage-demo{height:100vh;min-height:0;overflow:hidden;background:#e8edf3}
  body.homepage-demo .left-scroll,
  body.homepage-demo #inspector{height:100%;min-height:0}
 }
+body.auth-state-pending:not(.account-avatar-cached) #googleSignInBtn,body.auth-state-pending #accountMenu:not([data-auth-shell-visible]),body.auth-signout-pending #googleSignInBtn,body.auth-signout-pending #accountMenu{visibility:hidden}

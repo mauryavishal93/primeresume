@@ -1,4 +1,4 @@
-import { cloudConfigured, getFirebaseIdToken, observeAuth } from './firebase-cloud.js';
+import { cloudConfigured, getFirebaseIdToken, googleSignInErrorMessage, observeAuth } from './firebase-cloud.js';
 
 const status = document.querySelector('[data-history-status]');
 const list = document.querySelector('[data-history-list]');
@@ -52,7 +52,8 @@ function actionLabel(event) {
   return ({
     post_created: 'Published post',
     post_edited: 'Edited post',
-    comment_created: 'Published comment'
+    comment_created: 'Published comment',
+    comment_edited: 'Edited comment'
   })[event.eventType] || 'Community activity';
 }
 
@@ -85,7 +86,7 @@ function renderEvent(event) {
   if (event.postId) addPostLink(article, event.postTitle || 'Community comment', event.postId);
   else addText(article, 'h2', '', event.postTitle || 'Community comment');
 
-  if (event.eventType === 'post_edited') {
+  if (event.eventType === 'post_edited' || event.eventType === 'comment_edited') {
     const versions = document.createElement('div');
     versions.className = 'history-versions';
     renderSnapshot(versions, 'Previous version', event.before);
@@ -204,8 +205,9 @@ function updateAuth(user, error) {
   loading = false;
   list.replaceChildren();
   loadMoreButton.hidden = true;
+  const authErrorMessage = error ? googleSignInErrorMessage(error) : '';
   contentAuthStatus.textContent = error
-    ? error.message || 'Sign-in is unavailable.'
+    ? authErrorMessage
     : user ? '' : 'Sign in with Google to view your posts, comments, and history.';
   for (const state of Object.values(contentStates)) {
     state.cursor = null;
@@ -217,7 +219,7 @@ function updateAuth(user, error) {
     state.button.textContent = `Load older ${state === contentStates.posts ? 'posts' : 'comments'}`;
   }
   if (error) {
-    setStatus(error.message || 'Sign-in is unavailable.', true);
+    setStatus(authErrorMessage, true);
     contentAuthStatus.classList.add('is-error');
   } else if (!user) {
     contentAuthStatus.classList.remove('is-error');

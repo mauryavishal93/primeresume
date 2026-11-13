@@ -7,12 +7,12 @@
 <link rel="icon" type="image/svg+xml" href="/images/resumeout-mark.svg">
 <script>
 if (location.hostname.toLowerCase() === 'buildmyportfolio.onrender.com') {
- location.replace(`https://https://primeresume-ten.vercel.app${location.pathname}${location.search}${location.hash}`);
+ location.replace(`https://resumeout.vercel.app${location.pathname}${location.search}${location.hash}`);
 }
 </script>
 <link rel="stylesheet" href="/src/style.css">
 </head>
-<body>
+<body class="auth-state-pending">
 <header class="topbar">
  <a class="brand" href="/home.html" aria-label="ResumeOut.com home"><img class="logo" src="/images/resumeout-mark.svg" alt="" aria-hidden="true"><span class="brand-name"><span class="brand-resume">Resume</span><span class="brand-out">Out</span><span class="brand-domain">.com</span></span><span class="pro-brand-badge" id="proBrandBadge" aria-label="Pro plan" hidden>Pro</span></a>
  <input id="docName" class="docname" aria-label="Project name" value="Untitled resume">
@@ -33,31 +33,34 @@ if (location.hostname.toLowerCase() === 'buildmyportfolio.onrender.com') {
     <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1a11 11 0 0 0-9.85 6.06L5.84 9.9c.87-2.6 3.3-4.53 6.16-4.53z"/>
    </svg>
    <span id="googleSignInLabel">Sign in with Google</span>
+   <span class="google-signin-compact" aria-hidden="true">Google</span>
   </button>
  </div>
  <button class="btn outline import-resume-btn" id="importResumeBtn" type="button" aria-label="Import an existing resume">
   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M4 15v3a2 2 0 0 0 2 2h14"/></svg>
-  <span>Import resume</span>
+   <span>Import</span>
  </button>
  <button class="btn outline" id="coverLetterBtn">Cover letter</button>
  <a class="btn outline" id="editorCommunityLink" href="/community.html">Community</a>
  <a class="btn outline" id="plansLink" href="/pricing.html">Plans</a>
- <button class="btn primary" id="pdfBtn">Export PDF</button>
+ <button class="btn primary" id="pdfBtn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v10"/><path d="m7 10 5 5 5-5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg><span>Export PDF</span></button>
  <details class="account-menu" id="accountMenu">
   <summary class="account-menu-trigger" aria-label="Open account menu">
    <span class="account-avatar" id="accountAvatar" aria-hidden="true">U</span>
   </summary>
   <div class="account-menu-panel">
-   <div class="account-menu-profile">
+   <div class="account-menu-profile" id="accountMenuProfile" hidden>
     <span class="account-avatar account-avatar-large" id="accountAvatarLarge" aria-hidden="true">U</span>
     <span class="account-menu-identity"><strong id="accountUserName">User</strong><span id="accountUserEmail"></span></span>
    </div>
+   <button class="account-menu-item" id="accountMenuSignInBtn" type="button" hidden>Sign in with Google</button>
    <a class="account-menu-item" id="myAccountLink" href="/my-account.html" hidden>My account</a>
    <button class="account-menu-item" id="cloudResumesBtn" type="button" hidden>My cloud resumes</button>
    <a class="account-menu-item" id="myPostsLink" href="/my-posts.html" hidden>My posts</a>
    <a class="account-menu-item" href="/billing.html">Billing</a>
    <a class="account-menu-item" href="/community.html">Community</a>
    <a class="account-menu-item" id="aboutLink" href="/about.html">About</a>
+   <a class="account-menu-item" href="/support.html">Support</a>
    <div class="account-menu-theme"><span>Appearance</span><button class="theme-switch" type="button" role="switch" data-theme-toggle aria-checked="true" aria-label="Dark theme"><span class="theme-switch-track" aria-hidden="true"><span class="theme-switch-thumb"></span></span><span class="theme-switch-label">Dark</span></button></div>
    <div class="account-menu-theme"><span>Section text sizes</span><button class="section-typography-switch" id="sectionTypographyToggle" type="button" role="switch" aria-checked="false" aria-label="Show section text sizes"><span class="section-typography-track" aria-hidden="true"><span class="section-typography-thumb"></span></span><span class="section-typography-label">Off</span></button></div>
   <button class="account-menu-item account-menu-signout" id="googleSignOutBtn" type="button" hidden>Sign out</button>
@@ -89,6 +92,27 @@ if (location.hostname.toLowerCase() === 'buildmyportfolio.onrender.com') {
       <button class="btn primary" id="closeCloudModalAction" type="button">Done</button>
     </div>
   </section>
+</div>
+<div class="modal-bg share-resume-modal-bg" id="shareResumeModalBg" aria-hidden="true">
+ <section class="modal share-resume-modal" role="dialog" aria-modal="true" aria-labelledby="shareResumeTitle">
+  <div class="cloud-modal-head">
+   <div><p class="eyebrow">PUBLIC PDF LINK</p><h2 id="shareResumeTitle">Share your resume</h2><p class="ats-subtitle">Create a public link that opens a PDF view of this resume. Anyone with the link can see and download it.</p></div>
+   <button class="size-btn" id="closeShareResume" type="button" aria-label="Close resume sharing">✕</button>
+  </div>
+  <div class="share-resume-warning"><strong>Anyone with this public link can view every page and section in the resume PDF.</strong><span>The link contains a complete snapshot of the current resume, including contact details and profile image. It will not update when you edit the resume, and you can revoke it here at any time.</span></div>
+  <div class="modal-actions share-resume-create-actions"><button class="btn primary" id="createResumeShare" type="button">Create public PDF link</button><button class="btn soft" id="closeShareResumeAction" type="button">Done</button></div>
+  <div class="share-resume-link-result" id="resumeShareLinkResult" hidden><label for="resumeShareLink">Public PDF link</label><div><input id="resumeShareLink" type="url" readonly><button class="btn outline" id="copyResumeShare" type="button">Copy link</button></div></div>
+  <div class="share-resume-list-head"><h3>Your active share links</h3><button class="btn outline small" id="refreshSharedResumes" type="button">Refresh</button></div>
+  <div class="resume-share-list" id="sharedResumeList" aria-live="polite">Sign in with Google to manage your share links.</div>
+ </section>
+</div>
+<div class="modal-bg incoming-share-modal-bg" id="incomingShareModalBg" aria-hidden="true">
+ <section class="modal incoming-share-modal" role="dialog" aria-modal="true" aria-labelledby="incomingShareTitle">
+  <h2 id="incomingShareTitle">Opening shared resume</h2>
+  <p id="incomingShareStatus" role="status" aria-live="polite">Loading the shared resume…</p>
+  <div id="incomingShareLoading"><span class="feature-progress-spinner" aria-hidden="true"></span></div>
+  <div id="incomingShareError" hidden><p>The link may have been revoked or is no longer available.</p><a class="btn primary" href="/home.html">Go to ResumeOut.com</a></div>
+ </section>
 </div>
 <div class="layout" id="layout" data-mobile-panel="resume">
  <aside class="left" id="leftPanel">
@@ -136,50 +160,55 @@ if (location.hostname.toLowerCase() === 'buildmyportfolio.onrender.com') {
    </div>
    <button class="btn outline small" id="dismissOnboarding" type="button">Start editing</button>
   </section>
+  <section class="shared-copy-notice" id="sharedCopyNotice" hidden aria-live="polite">
+   <div><strong>Editing a shared copy: <span id="sharedCopyTitle"></span></strong><span>Your edits won’t change the owner’s resume. Save a separate copy to your Google account to keep your changes.</span></div>
+   <button class="btn primary small" id="saveSharedCopyBtn" type="button" disabled>Save copy to my cloud</button>
+  </section>
   <div class="toolbar" aria-label="Resume editing tools" data-collapsed="true">
    <button class="toolbar-toggle" id="toggleResumeTools" type="button" aria-expanded="false" aria-controls="resumeToolbarControls">
     <span>Resume editing tools</span>
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
    </button>
    <div class="toolbar-content" id="resumeToolbarControls">
-   <button class="btn soft small toolbar-btn icon-btn" id="undoBtn" type="button" aria-label="Undo last change">
+   <button class="btn soft small toolbar-btn icon-btn" id="undoBtn" type="button" aria-label="Undo last change" title="Undo">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14L4 9l5-5"/><path d="M20 20v-2a7 7 0 0 0-7-7H4"/></svg>
     <span>Undo</span>
    </button>
-   <button class="btn soft small toolbar-btn icon-btn" id="redoBtn" type="button" aria-label="Redo last change">
+   <button class="btn soft small toolbar-btn icon-btn" id="redoBtn" type="button" aria-label="Redo last change" title="Redo">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 14l5-5-5-5"/><path d="M4 20v-2a7 7 0 0 1 7-7h9"/></svg>
     <span>Redo</span>
    </button>
    <div class="toolbar-control">
-    <select id="pageLayout" aria-label="Layout">
+    <select id="pageLayout" aria-label="Layout" title="Choose a resume column layout">
      <option value="" disabled selected>Layout</option>
-     <option value="single">Single column</option>
-     <option value="two">Two columns</option>
+     <option value="single" title="Single column">Single column</option>
+     <option value="two" title="Two columns">Two columns</option>
     </select>
    </div>
    <div class="toolbar-control">
-    <select id="editMode" aria-label="Editor mode">
+    <select id="editMode" aria-label="Editor mode" title="Choose how to edit resume content">
      <option value="" disabled selected>Editor</option>
-     <option value="flow">Structured</option>
-     <option value="free">Free position</option>
+     <option value="flow" title="Structured">Structured</option>
+     <option value="free" title="Free position">Free position</option>
     </select>
    </div>
-   <button class="btn outline small toolbar-btn icon-btn" id="loadBtn" type="button" aria-label="Load JSON project">
-    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v10"/><path d="M8 19l4 4 4-4"/><path d="M4 15v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
-    <span>Load JSON</span>
+   <button class="btn outline small toolbar-btn icon-btn" id="loadBtn" type="button" aria-label="Load JSON project" title="Load JSON">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"/><path d="m8 7 4-4 4 4"/><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/></svg>
    </button>
-   <button class="btn outline small toolbar-btn icon-btn" id="saveBtn" type="button" aria-label="Download JSON project">
+   <button class="btn outline small toolbar-btn icon-btn" id="saveBtn" type="button" aria-label="Download JSON project" title="Download JSON">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v10"/><path d="M8 18l4 4 4-4"/><path d="M4 14v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
-    <span>Download JSON</span>
    </button>
-   <button class="btn outline small toolbar-btn icon-btn" id="atsBtn" type="button" aria-label="Run ATS check">
+   <button class="btn outline small toolbar-btn icon-btn" id="shareResumeBtn" type="button" aria-label="Share resume" title="Share resume">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.7 10.6 6.6-4.2M8.7 13.4l6.6 4.2"/></svg>
+   </button>
+   <button class="btn outline small toolbar-btn icon-btn" id="atsBtn" type="button" aria-label="Run ATS check" title="ATS Check">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v6"/><path d="M12 18v2"/><path d="M4.93 4.93l4.24 4.24"/><path d="M14.83 14.83l4.24 4.24"/><path d="M20 12h-2"/><path d="M4 12h2"/><path d="M14.83 9.17l4.24-4.24"/><path d="M4.93 19.07l4.24-4.24"/></svg>
     <span>ATS Check</span>
    </button>
    <div class="toolbar-zoom" aria-label="Zoom controls">
-    <button class="btn soft small" id="zoomOut" type="button" aria-label="Zoom out">−</button>
-    <span id="zoomLabel" aria-live="polite">100%</span>
-    <button class="btn soft small" id="zoomIn" type="button" aria-label="Zoom in">＋</button>
+    <button class="btn soft small" id="zoomOut" type="button" aria-label="Zoom out" title="Zoom out">−</button>
+    <span id="zoomLabel" aria-live="polite" title="Current zoom level">100%</span>
+    <button class="btn soft small" id="zoomIn" type="button" aria-label="Zoom in" title="Zoom in">＋</button>
    </div>
    </div>
   </div>

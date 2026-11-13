@@ -12,7 +12,7 @@
   <script type="module" src="/src/auth-nav.js"></script>
   <script type="module" src="/src/my-account.js"></script>
 </head>
-<body class="about-page my-account-page">
+<body class="about-page my-account-page site-mobile-header">
   <header class="about-header">
     <a class="about-brand" href="/home.html" aria-label="ResumeOut.com home">
       <img class="about-logo" src="/images/resumeout-mark.svg" alt="" aria-hidden="true">
@@ -31,6 +31,34 @@
       <a class="btn outline" href="/community.html">Community</a>
       <a class="btn outline" href="/pricing.html">Plans</a>
       <a class="btn soft about-editor" href="/editor.html">Open editor</a>
+      <details class="account-menu site-account-menu" data-account-menu-shell>
+        <summary class="account-menu-trigger" aria-label="Open account menu">
+          <span class="account-avatar" aria-hidden="true">U</span>
+        </summary>
+      </details>
+      <script>
+        try {
+          const cachedAvatar = JSON.parse(localStorage.getItem('resumeout:session-cache:v1:account-avatar-hint') || 'null');
+          const photo = cachedAvatar?.photoDataUrl;
+          if (typeof cachedAvatar?.uid === 'string' && cachedAvatar.uid
+            && Number.isFinite(cachedAvatar.savedAt) && Date.now() >= cachedAvatar.savedAt
+            && Date.now() - cachedAvatar.savedAt <= 30 * 24 * 60 * 60 * 1000
+            && typeof photo === 'string' && photo.length <= 350000
+            && /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$/.test(photo)) {
+            const menu = document.currentScript.previousElementSibling;
+            const avatar = menu.querySelector('.account-avatar');
+            const image = document.createElement('img');
+            image.alt = '';
+            image.draggable = false;
+            image.loading = 'eager';
+            image.src = photo;
+            avatar.replaceChildren(image);
+            menu.dataset.authShellVisible = 'true';
+          }
+        } catch (error) {
+          console.warn('Could not render the cached account icon.', error);
+        }
+      </script>
     </nav>
   </header>
 
@@ -55,16 +83,31 @@
             <span>Name</span>
             <input id="accountName" name="name" type="text" maxlength="80" autocomplete="name" required>
           </label>
+          <label class="my-account-field" for="accountHighestEducation">
+            <span>Highest education</span>
+            <input id="accountHighestEducation" name="highestEducation" type="text" maxlength="100" autocomplete="off">
+          </label>
+          <label class="my-account-field" for="accountCompany">
+            <span>Company</span>
+            <input id="accountCompany" name="company" type="text" maxlength="100" autocomplete="organization">
+          </label>
+          <label class="my-account-field" for="accountDesignation">
+            <span>Designation</span>
+            <input id="accountDesignation" name="designation" type="text" maxlength="100" autocomplete="organization-title">
+          </label>
           <label class="my-account-field" for="accountEmail">
             <span>Email address</span>
             <input id="accountEmail" name="email" type="email" autocomplete="email" readonly aria-describedby="emailHelp">
             <small id="emailHelp">Your sign-in email cannot be changed here.</small>
           </label>
-          <label class="my-account-field" for="accountMobile">
+          <div class="my-account-field">
             <span>Mobile number <span class="my-account-optional">(optional)</span></span>
-            <input id="accountMobile" name="mobile" type="tel" maxlength="24" autocomplete="tel" inputmode="tel" placeholder="+1 555 123 4567">
-            <small>Include your country code if you want to.</small>
-          </label>
+            <div class="my-account-phone">
+              <select id="accountCountry" name="country" autocomplete="country" aria-label="Country and calling code"></select>
+              <input id="accountMobile" name="mobile" type="tel" maxlength="24" autocomplete="tel-national" inputmode="tel" aria-label="Mobile number" aria-describedby="mobileHelp" placeholder="555 123 4567">
+            </div>
+            <small id="mobileHelp">Choose your country, then enter your number. It will be saved with the international calling code.</small>
+          </div>
         </fieldset>
         <div class="my-account-actions">
           <button class="btn primary" id="saveAccount" type="submit" disabled>Save changes</button>

@@ -31,6 +31,7 @@ const distDir = path.resolve(backendDir, '../dist');
 const app = express();
 const port = Number(process.env.PORT) || 3000;
 const subscriptionCollection = 'billingSubscriptions';
+const VOUCHER_MAX_REDEMPTIONS = 1;
 let firebaseAdmin;
 
 app.disable('x-powered-by');
@@ -39,7 +40,7 @@ app.use((request, response, next) => {
   const hostname = String(request.hostname || '').toLowerCase();
   const isApiRequest = request.path === '/api' || request.path.startsWith('/api/');
   if (hostname === 'buildmyportfolio.onrender.com' && !isApiRequest) {
-    return response.redirect(301, `https://primeresume-ten.vercel.app${request.originalUrl || '/'}`);
+    return response.redirect(301, `https://resumeout.vercel.app${request.originalUrl || '/'}`);
   }
   next();
 });
@@ -158,6 +159,16 @@ function forumAuthorName(user) {
     || 'Google user';
 }
 
+function forumAuthorCompany(value) {
+  return validForumText(value, 1, 100) || '';
+}
+
+function accountProfileText(value) {
+  if (typeof value !== 'string') return '';
+  const text = value.trim();
+  return text.toLowerCase() === 'undefined' ? '' : text;
+}
+
 function forumSnapshotExists(snapshot) {
   return Boolean(snapshot?.exists);
 }
@@ -171,6 +182,7 @@ function publicForumPost(document, viewerUid = null, includeDeleted = false) {
     id: document.id,
     ...post,
     authorName: forumAuthorName({ name: data.authorName }),
+    authorCompany: forumAuthorCompany(data.authorCompany),
     isOwner: Boolean(viewerUid && viewerUid === data.authorUid),
     createdAt: Number.isFinite(data.createdAt) ? data.createdAt : 0,
     updatedAt: Number.isFinite(data.updatedAt) ? data.updatedAt : 0,
@@ -190,7 +202,8 @@ function publicForumComment(document, viewerUid = null) {
     content,
     authorName: forumAuthorName({ name: data.authorName }),
     isOwner: Boolean(viewerUid && viewerUid === data.authorUid),
-    createdAt: Number.isFinite(data.createdAt) ? data.createdAt : 0
+    createdAt: Number.isFinite(data.createdAt) ? data.createdAt : 0,
+    updatedAt: Number.isFinite(data.updatedAt) ? data.updatedAt : null
   };
 }
 
@@ -389,7 +402,7 @@ function forumContentCursorPath(cursor, kind) {
   return validPath ? path : false;
 }
 
-async function loadForumContent(db, kind, cursor, userUid = null) {
+async function loadForumContent(db, kind, cursor, userUid = null, postFilters = {}) {
   const cursorPath = forumContentCursorPath(cursor, kind);
   if (cursorPath === false) return null;
   let query = kind === 'posts'
@@ -400,32 +413,43 @@ async function loadForumContent(db, kind, cursor, userUid = null) {
     const cursorSnapshot = await db.doc(cursorPath).get();
     if (!forumSnapshotExists(cursorSnapshot)
       || (userUid && cursorSnapshot.data().authorUid !== userUid)) return null;
-    query = query.startAfter(cursorSnapshot);
+    if (kind !== 'posts') query = query.startAfter(cursorSnapshot);
   }
-  let snapshot;
   const documents = [];
   let hasMore = false;
-  do {
+  let snapshot;
+  if (kind === 'posts') {
+    let scanAfter = cursorPath ? await db.doc(cursorPath).get() : null;
+    while (documents.length < 26) {
+      const scanQuery = scanAfter ? query.startAfter(scanAfter) : query;
+      snapshot = await scanQuery.limit(25).get();
+      const candidates = snapshot.docs.filter(document => {
+        const data = document.data();
+        if (userUid && data.isDeleted) return false;
+        if (!forumPostInput(data)) return false;
+        if (postFilters.status === 'active' && data.isDeleted) return false;
+        if (postFilters.status === 'deleted' && !data.isDeleted) return false;
+        if (postFilters.type !== 'all' && postFilters.type && data.type !== postFilters.type) return false;
+        if (postFilters.search) {
+          const searchable = `${data.title || ''} ${data.content || ''} ${data.authorName || ''} ${data.authorUid || ''}`.toLocaleLowerCase();
+          if (!searchable.includes(postFilters.search)) return false;
+        }
+        return true;
+      });
+      documents.push(...candidates.slice(0, 26 - documents.length));
+      if (documents.length >= 26) {
+        hasMore = true;
+        break;
+      }
+      if (snapshot.docs.length < 25) break;
+      scanAfter = snapshot.docs.at(-1);
+    }
+    if (documents.length === 26) documents.pop();
+  } else {
     snapshot = await query.limit(25).get();
-    const candidates = kind === 'posts' && userUid
-      ? snapshot.docs.filter(document => !document.data().isDeleted && forumPostInput(document.data()))
-      : snapshot.docs;
-    const remaining = 25 - documents.length;
-    documents.push(...candidates.slice(0, remaining));
-    if (kind !== 'posts' || !userUid) {
-      hasMore = snapshot.docs.length === 25;
-      break;
-    }
-    if (candidates.length > remaining) {
-      hasMore = true;
-      break;
-    }
-    if (documents.length === 25 || snapshot.docs.length < 25) {
-      hasMore = snapshot.docs.length === 25;
-      break;
-    }
-    query = query.startAfter(snapshot.docs.at(-1));
-  } while (true);
+    documents.push(...snapshot.docs);
+    hasMore = snapshot.docs.length === 25;
+  }
   const items = await Promise.all(documents.map(async document => {
     const data = document.data();
     const path = document.ref.path.split('/');
@@ -437,6 +461,7 @@ async function loadForumContent(db, kind, cursor, userUid = null) {
         id: document.id,
         ...post,
         authorName: forumAuthorName({ name: data.authorName }),
+        authorCompany: forumAuthorCompany(data.authorCompany),
         ...(!userUid ? { authorUid: data.authorUid || '' } : {}),
         createdAt: Number.isFinite(data.createdAt) ? data.createdAt : 0,
         updatedAt: Number.isFinite(data.updatedAt) ? data.updatedAt : 0,
@@ -463,7 +488,7 @@ async function loadForumContent(db, kind, cursor, userUid = null) {
     };
   }));
   const validItems = items.filter(Boolean);
-  const nextCursorDocument = kind === 'posts' && userUid ? documents.at(-1) : snapshot.docs.at(-1);
+  const nextCursorDocument = kind === 'posts' ? documents.at(-1) : snapshot.docs.at(-1);
   return {
     items: validItems,
     nextCursor: hasMore
@@ -639,7 +664,20 @@ function userCheckoutDocument(db, uid) {
   return db.doc(`users/${uid}/billing/checkout`);
 }
 
+async function linkedSubscriptionId(db, uid, entitlement) {
+  let subscriptionId = entitlement?.subscriptionId;
+  if (typeof subscriptionId !== 'string' || !/^sub_[A-Za-z0-9]+$/.test(subscriptionId)) {
+    const checkoutSnapshot = await userCheckoutDocument(db, uid).get();
+    subscriptionId = checkoutSnapshot.data()?.subscriptionId;
+  }
+  return typeof subscriptionId === 'string' && /^sub_[A-Za-z0-9]+$/.test(subscriptionId)
+    ? subscriptionId
+    : null;
+}
+
 function activatePendingVouchers(entitlement, now = Date.now()) {
+  if (entitlement?.adminRevoked === true) return null;
+  if (entitlement?.lifetime === true) return null;
   const pendingVouchers = Array.isArray(entitlement?.pendingVouchers)
     ? entitlement.pendingVouchers
     : [];
@@ -658,6 +696,7 @@ function activatePendingVouchers(entitlement, now = Date.now()) {
     billingPlan: 'voucher',
     status: 'active',
     source: 'server-verified',
+    lifetime: false,
     validUntil: now + durationMs,
     subscriptionId: null,
     cancelAtCycleEnd: false,
@@ -676,17 +715,102 @@ function schedulePendingVouchers(pendingVouchers, startsAt) {
   });
 }
 
+function entitlementValidUntil(data) {
+  const value = data?.validUntil;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return 0;
+    const numeric = Number(trimmed);
+    if (Number.isFinite(numeric)) return numeric;
+    const parsed = Date.parse(trimmed);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  if (value instanceof Date) return value.getTime();
+  if (value && typeof value.toMillis === 'function') {
+    const timestamp = Number(value.toMillis());
+    return Number.isFinite(timestamp) ? timestamp : 0;
+  }
+  if (value && Number.isFinite(Number(value.seconds))) {
+    return Number(value.seconds) * 1000 + (Number(value.nanoseconds) || 0) / 1e6;
+  }
+  return 0;
+}
+
+function hasActiveProEntitlement(data, now = Date.now()) {
+  return data?.adminRevoked !== true
+    && data?.planId === 'pro'
+    && (data?.lifetime === true || entitlementValidUntil(data) > now);
+}
+
+function adminRevocationApplies(uid, entitlement, subscription) {
+  if (entitlement?.adminRevoked === true) return true;
+  if (subscription?.uid !== uid || subscription.adminRevoked !== true) return false;
+  const hasRestoredNonSubscriptionGrant = entitlement?.planId === 'pro'
+    && entitlement.adminRevoked !== true
+    && (entitlement.source === 'admin' || entitlement.billingPlan === 'voucher');
+  return !hasRestoredNonSubscriptionGrant;
+}
+
+async function adminEntitlementWithVoucherMetadata(db, uid, entitlement) {
+  if (entitlement?.billingPlan !== 'voucher') return entitlement;
+  let voucher = null;
+  if (entitlement.voucherId) {
+    const voucherSnapshot = await db.doc(`adminVouchers/${entitlement.voucherId}`).get();
+    voucher = voucherSnapshot.exists ? { id: entitlement.voucherId, ...(voucherSnapshot.data() || {}) } : null;
+  }
+  if ((!voucher || voucher.redeemedByUid && voucher.redeemedByUid !== uid)
+    && typeof db.collection === 'function') {
+    const vouchers = await db.collection('adminVouchers').get();
+    const records = (vouchers.docs || []).map(document => ({
+      id: document.id,
+      ...(document.data() || {})
+    }));
+    voucher = records.find(item => item.redeemedByUid === uid
+      && (!entitlement.voucherId || item.id === entitlement.voucherId
+        || item.code && voucherDocumentId(item.code) === entitlement.voucherId))
+      || (entitlement.voucherId
+        ? records.find(item => item.code && voucherDocumentId(item.code) === entitlement.voucherId)
+        : null)
+      || null;
+  }
+  if (!voucher) return entitlement;
+  if (voucher.redeemedByUid && voucher.redeemedByUid !== uid) return entitlement;
+
+  const lifetime = entitlement.lifetime === true || voucher.lifetime === true;
+  const redeemedAt = Number(voucher.redeemedAt) || 0;
+  const revokedAt = Number(entitlement.adminRevokedAt) || 0;
+  const redemptionRestoresAccess = entitlement.adminRevoked === true
+    && redeemedAt > 0
+    && redeemedAt > revokedAt;
+  const durationDays = Number(voucher.durationDays);
+  const recoveredValidUntil = !lifetime && redeemedAt > 0 && Number.isFinite(durationDays) && durationDays > 0
+    ? redeemedAt + durationDays * 24 * 60 * 60 * 1000
+    : 0;
+  return {
+    ...entitlement,
+    planId: 'pro',
+    ...(redemptionRestoresAccess ? { adminRevoked: false, adminRevokedAt: null } : {}),
+    lifetime,
+    validUntil: lifetime ? null : entitlementValidUntil(entitlement) || recoveredValidUntil || null
+  };
+}
+
 function publicEntitlement(data) {
-  const validUntil = Number(data?.validUntil) || 0;
+  const validUntil = entitlementValidUntil(data);
+  const lifetime = data?.lifetime === true;
   const pendingVouchers = Array.isArray(data?.pendingVouchers) ? data.pendingVouchers : [];
-  const status = data?.planId === 'pro' && validUntil > Date.now() ? 'active' : 'inactive';
+  const status = hasActiveProEntitlement(data)
+    ? 'active'
+    : 'inactive';
   return {
     planId: data?.planId || 'free',
     billingPlan: data?.billingPlan || null,
     currency: data?.currency || 'INR',
     status,
     source: 'server-verified',
-    validUntil,
+    validUntil: lifetime ? null : validUntil,
+    lifetime,
     subscriptionId: data?.subscriptionId || null,
     cancelAtCycleEnd: data?.cancelAtCycleEnd === true,
     scheduledPlan: Object.hasOwn(BILLING_PLANS, data?.scheduledPlan) ? data.scheduledPlan : null,
@@ -724,6 +848,70 @@ async function recordBillingActivity(db, uid, activity) {
     console.error('Could not write billing activity.', { uid, type: activity.type, error });
   }
   return occurredAt;
+}
+
+async function reconcileSubscriptionInvoices(db, uid, subscriptionId, mapping) {
+  const paymentSnapshot = await db.collection('billingPayments').where('uid', '==', uid).get();
+  const hasRecordedPayment = (paymentSnapshot.docs || []).some(document => {
+    const payment = document.data() || {};
+    return payment.subscriptionId === subscriptionId
+      && ['captured', 'success'].includes(payment.status)
+      && Number.isSafeInteger(payment.amount)
+      && payment.amount > 0;
+  });
+  if (hasRecordedPayment) return;
+
+  const pageSize = 100;
+  for (let skip = 0; skip < 1200; skip += pageSize) {
+    const invoiceCollection = await razorpayRequest(
+      `/invoices?subscription_id=${encodeURIComponent(subscriptionId)}&count=${pageSize}&skip=${skip}`
+    );
+    if (!Array.isArray(invoiceCollection?.items)) {
+      throw new Error('Razorpay returned an invalid subscription invoice list.');
+    }
+
+    const paidInvoices = invoiceCollection.items.filter(invoice => (
+      invoice?.subscription_id === subscriptionId
+      && invoice.status === 'paid'
+      && typeof invoice.payment_id === 'string'
+      && /^pay_[A-Za-z0-9]+$/.test(invoice.payment_id)
+      && Number.isSafeInteger(invoice.amount_paid)
+      && invoice.amount_paid > 0
+    ));
+    await Promise.all(paidInvoices.map(async invoice => {
+      const createdAt = Number(invoice.paid_at || invoice.created_at) > 0
+        ? Number(invoice.paid_at || invoice.created_at) * 1000
+        : Date.now();
+      const validUntil = Number(invoice.billing_end) > 0
+        ? Number(invoice.billing_end) * 1000
+        : Number(mapping.currentEnd) || null;
+      const currency = typeof invoice.currency === 'string' ? invoice.currency : mapping.currency || 'INR';
+      const payment = {
+        uid,
+        providerPaymentId: invoice.payment_id,
+        subscriptionId,
+        planKey: mapping.planKey,
+        status: 'captured',
+        amount: invoice.amount_paid,
+        currency,
+        paymentMode: 'unknown',
+        source: 'razorpay',
+        createdAt
+      };
+      await Promise.all([
+        db.doc(`billingPayments/${invoice.payment_id}`).set(payment, { merge: true }),
+        db.doc(`billingAccessHistory/${invoice.payment_id}`).set({
+          ...payment,
+          validFrom: createdAt,
+          validUntil,
+          paymentId: invoice.payment_id,
+          status: validUntil > Date.now() ? 'active' : 'paid'
+        }, { merge: true })
+      ]);
+    }));
+
+    if (invoiceCollection.items.length < pageSize) return;
+  }
 }
 
 function normalizePlanPrice(rawValue, fallback) {
@@ -880,6 +1068,7 @@ app.get('/api/health', (_request, response) => {
 
 app.use('/api/billing/webhook', express.raw({ type: 'application/json', limit: '256kb' }));
 app.use('/api/account/profile', express.json({ limit: '160kb' }));
+app.use('/api/shared-resumes', express.json({ limit: '900kb' }));
 app.use(express.json({ limit: '32kb' }));
 
 app.use('/api/forum', (_request, response, next) => {
@@ -898,17 +1087,30 @@ app.get('/api/account/profile', requireFirebaseUser, async (request, response) =
     const { db } = await getFirebaseAdmin();
     const snapshot = await db.doc(`users/${request.user.uid}/profile/account`).get();
     if (!snapshot.exists) {
-      response.json({ mobileNumber: '', photoDataUrl: '' });
+      response.json({
+        mobileNumber: '',
+        photoDataUrl: '',
+        highestEducation: '',
+        company: '',
+        designation: ''
+      });
       return;
     }
-    const { mobileNumber, photoDataUrl = '' } = snapshot.data();
+    const savedProfile = snapshot.data();
+    const { mobileNumber, photoDataUrl = '' } = savedProfile;
+    const highestEducation = accountProfileText(savedProfile.highestEducation);
+    const company = accountProfileText(savedProfile.company);
+    const designation = accountProfileText(savedProfile.designation);
     if (typeof mobileNumber !== 'string' || typeof photoDataUrl !== 'string'
+      || typeof highestEducation !== 'string' || highestEducation.length > 100
+      || typeof company !== 'string' || company.length > 100
+      || typeof designation !== 'string' || designation.length > 100
       || photoDataUrl.length > 140000
       || (photoDataUrl && !/^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(photoDataUrl))) {
       response.status(500).json({ error: 'Your saved account details are invalid. Contact support for help.' });
       return;
     }
-    response.json({ mobileNumber, photoDataUrl });
+    response.json({ mobileNumber, photoDataUrl, highestEducation, company, designation });
   } catch (error) {
     console.error('Could not load the account profile.', error);
     response.status(500).json({ error: 'Could not load your account details. Please try again.' });
@@ -920,6 +1122,15 @@ app.put('/api/account/profile', requireFirebaseUser, async (request, response) =
   const displayName = typeof request.body?.displayName === 'string' ? request.body.displayName.trim() : '';
   const mobileNumber = typeof request.body?.mobileNumber === 'string' ? request.body.mobileNumber.trim() : null;
   const photoDataUrl = typeof request.body?.photoDataUrl === 'string' ? request.body.photoDataUrl : null;
+  const highestEducation = request.body?.highestEducation === undefined
+    ? undefined
+    : typeof request.body.highestEducation === 'string' ? accountProfileText(request.body.highestEducation) : null;
+  const company = request.body?.company === undefined
+    ? undefined
+    : typeof request.body.company === 'string' ? accountProfileText(request.body.company) : null;
+  const designation = request.body?.designation === undefined
+    ? undefined
+    : typeof request.body.designation === 'string' ? accountProfileText(request.body.designation) : null;
   if (!displayName || displayName.length > 80) {
     response.status(400).json({ error: 'Enter a name between 1 and 80 characters.' });
     return;
@@ -935,20 +1146,162 @@ app.put('/api/account/profile', requireFirebaseUser, async (request, response) =
     response.status(400).json({ error: 'Choose a valid profile image smaller than 100 KB.' });
     return;
   }
+  if ([highestEducation, company, designation].some(value => value !== undefined && (value === null || value.length > 100))) {
+    response.status(400).json({ error: 'Education, company, and designation must each be 100 characters or fewer.' });
+    return;
+  }
   try {
     const { auth, db } = await getFirebaseAdmin();
+    const profileReference = db.doc(`users/${request.user.uid}/profile/account`);
+    const existingProfile = await profileReference.get();
+    const existingFields = existingProfile.exists ? existingProfile.data() : {};
+    const savedHighestEducation = highestEducation ?? accountProfileText(existingFields.highestEducation);
+    const savedCompany = company ?? accountProfileText(existingFields.company);
+    const savedDesignation = designation ?? accountProfileText(existingFields.designation);
     await Promise.all([
       auth.updateUser(request.user.uid, { displayName }),
-      db.doc(`users/${request.user.uid}/profile/account`).set({
+      profileReference.set({
         mobileNumber,
         photoDataUrl,
+        highestEducation: savedHighestEducation,
+        company: savedCompany,
+        designation: savedDesignation,
         updatedAt: new Date()
-      })
+      }, { merge: true })
     ]);
-    response.json({ displayName, mobileNumber, photoDataUrl });
+    response.json({
+      displayName,
+      mobileNumber,
+      photoDataUrl,
+      highestEducation: savedHighestEducation,
+      company: savedCompany,
+      designation: savedDesignation
+    });
   } catch (error) {
     console.error('Could not save the account profile.', error);
     response.status(500).json({ error: 'Could not save your account details. Please try again.' });
+  }
+});
+
+app.use('/api/shared-resumes', (_request, response, next) => {
+  response.set('Cache-Control', 'no-store');
+  next();
+});
+
+app.post('/api/shared-resumes', requireFirebaseUser, async (request, response) => {
+  const name = typeof request.body?.name === 'string' ? request.body.name.trim() : '';
+  const sourceResumeId = typeof request.body?.sourceResumeId === 'string' ? request.body.sourceResumeId : '';
+  const state = request.body?.state;
+  if (!name || name.length > 120 || sourceResumeId.length > 1500
+    || !state || typeof state !== 'object' || Array.isArray(state)) {
+    response.status(400).json({ error: 'The resume name or data is invalid and cannot be shared.' });
+    return;
+  }
+  if (Buffer.byteLength(JSON.stringify(state), 'utf8') > 800 * 1024) {
+    response.status(413).json({ error: 'This resume is too large to share. Remove large images or content, then try again.' });
+    return;
+  }
+  try {
+    const { db } = await getFirebaseAdmin();
+    const collection = db.collection('sharedResumes');
+    const existing = await collection.where('ownerUid', '==', request.user.uid).limit(50).get();
+    if (existing.size >= 50) {
+      response.status(409).json({ error: 'You have reached the limit of 50 active share links. Revoke a link before creating another.' });
+      return;
+    }
+    const reference = collection.doc();
+    await reference.set({
+      ownerUid: request.user.uid,
+      sourceResumeId,
+      name,
+      state,
+      active: true,
+      createdAt: new Date()
+    });
+    response.status(201).json({ id: reference.id });
+  } catch (error) {
+    console.error('Could not create a shared resume.', error);
+    response.status(500).json({ error: 'Could not create a share link. Please try again.' });
+  }
+});
+
+app.get('/api/shared-resumes', requireFirebaseUser, async (request, response) => {
+  try {
+    const { db } = await getFirebaseAdmin();
+    const result = await db.collection('sharedResumes')
+      .where('ownerUid', '==', request.user.uid)
+      .limit(50)
+      .get();
+    const shares = result.docs.map(document => {
+      const data = document.data();
+      if (data.ownerUid !== request.user.uid || typeof data.name !== 'string'
+        || typeof data.active !== 'boolean') {
+        throw new Error('A stored resume share has invalid data.');
+      }
+      const createdAt = data.createdAt instanceof Date
+        ? data.createdAt.getTime()
+        : data.createdAt?.toMillis?.() ?? 0;
+      return {
+        id: document.id,
+        name: data.name,
+        sourceResumeId: typeof data.sourceResumeId === 'string' ? data.sourceResumeId : '',
+        active: data.active,
+        createdAt
+      };
+    }).sort((left, right) => right.createdAt - left.createdAt);
+    response.json({ shares });
+  } catch (error) {
+    console.error('Could not list shared resumes.', error);
+    response.status(500).json({ error: 'Could not load your share links. Please try again.' });
+  }
+});
+
+app.get('/api/shared-resumes/:shareId', async (request, response) => {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(request.params.shareId)) {
+    response.status(400).json({ error: 'This resume share link is invalid.' });
+    return;
+  }
+  try {
+    const { db } = await getFirebaseAdmin();
+    const snapshot = await db.collection('sharedResumes').doc(request.params.shareId).get();
+    if (!snapshot.exists || snapshot.data().active !== true) {
+      response.status(404).json({ error: 'This resume share link is unavailable. Ask the owner for a new link.' });
+      return;
+    }
+    const { name, state } = snapshot.data();
+    if (typeof name !== 'string' || !state || typeof state !== 'object' || Array.isArray(state)) {
+      response.status(500).json({ error: 'This shared resume is invalid and cannot be opened.' });
+      return;
+    }
+    response.json({ name, state });
+  } catch (error) {
+    console.error('Could not open a shared resume.', error);
+    response.status(500).json({ error: 'Could not open this shared resume. Please try again.' });
+  }
+});
+
+app.delete('/api/shared-resumes/:shareId', requireFirebaseUser, async (request, response) => {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(request.params.shareId)) {
+    response.status(400).json({ error: 'This resume share link is invalid.' });
+    return;
+  }
+  try {
+    const { db } = await getFirebaseAdmin();
+    const reference = db.collection('sharedResumes').doc(request.params.shareId);
+    const snapshot = await reference.get();
+    if (!snapshot.exists) {
+      response.status(404).json({ error: 'This resume share link is already unavailable.' });
+      return;
+    }
+    if (snapshot.data().ownerUid !== request.user.uid) {
+      response.status(403).json({ error: 'You can only revoke share links that you created.' });
+      return;
+    }
+    await reference.delete();
+    response.status(204).end();
+  } catch (error) {
+    console.error('Could not revoke a shared resume.', error);
+    response.status(500).json({ error: 'Could not revoke this share link. Please try again.' });
   }
 });
 
@@ -1019,9 +1372,16 @@ app.get('/api/admin/forum/content', requireFirebaseUser, requireAdmin, async (re
     response.status(400).json({ error: 'Choose posts or comments to view current community content.' });
     return;
   }
+  const search = typeof request.query.search === 'string' ? request.query.search.trim().toLocaleLowerCase() : '';
+  const type = typeof request.query.type === 'string' ? request.query.type : 'all';
+  const status = typeof request.query.status === 'string' ? request.query.status : 'all';
+  if (search.length > 120 || !['all', 'review', 'discussion'].includes(type) || !['all', 'active', 'deleted'].includes(status)) {
+    response.status(400).json({ error: 'The community post filters are invalid.' });
+    return;
+  }
   try {
     const { db } = await getFirebaseAdmin();
-    const page = await loadForumContent(db, kind, cursor);
+    const page = await loadForumContent(db, kind, cursor, null, { search, type, status });
     if (!page) {
       response.status(400).json({ error: 'This content page cursor is invalid or no longer available. Reload community content.' });
       return;
@@ -1132,7 +1492,10 @@ app.get('/api/forum/posts', optionalFirebaseUser, async (request, response) => {
     }
     const hasMore = posts.length > 50;
     const visiblePosts = posts.slice(0, 50);
-    const feedPosts = visiblePosts.map(item => item.post);
+    const feedPosts = await Promise.all(visiblePosts.map(async item => {
+      const count = await collection.doc(item.document.id).collection('comments').count().get();
+      return { ...item.post, commentCount: count.data().count };
+    }));
     const ratings = feedPosts.filter(post => post.type === 'review' && Number.isInteger(post.rating));
     response.json({
       posts: feedPosts,
@@ -1168,6 +1531,8 @@ app.get('/api/forum/posts', optionalFirebaseUser, async (request, response) => {
           response.status(404).json({ error: 'This post no longer exists.' });
           return;
         }
+        const commentCount = await db.collection('forumPosts').doc(postId).collection('comments').count().get();
+        post.commentCount = commentCount.data().count;
         response.json({ post });
       } catch (error) {
         console.error('Could not load community post.', error);
@@ -1193,6 +1558,7 @@ app.post('/api/forum/posts', requireFirebaseUser, async (request, response) => {
       ...post,
       authorUid: request.user.uid,
       authorName: forumAuthorName(request.user),
+      authorCompany: forumAuthorCompany((await db.doc(`users/${request.user.uid}/profile/account`).get()).data()?.company),
       createdAt: Date.now(),
       updatedAt: Date.now()
     };
@@ -1218,6 +1584,7 @@ app.post('/api/forum/posts', requireFirebaseUser, async (request, response) => {
         id: reference.id,
         ...post,
         authorName: record.authorName,
+        authorCompany: record.authorCompany,
         isOwner: true,
         createdAt: record.createdAt,
         updatedAt: record.updatedAt
@@ -1284,6 +1651,7 @@ app.patch('/api/forum/posts/:postId', requireFirebaseUser, async (request, respo
         id: postId,
         ...post,
         authorName: forumAuthorName(request.user),
+        authorCompany: forumAuthorCompany(current.authorCompany),
         isOwner: true,
         createdAt: current.createdAt,
         updatedAt: updated.updatedAt
@@ -1369,6 +1737,11 @@ app.get('/api/forum/posts/:postId/comments', optionalFirebaseUser, async (reques
       return;
     }
     const collection = postReference.collection('comments');
+    if (request.query.countOnly === '1') {
+      const count = await collection.count().get();
+      response.json({ totalCount: count.data().count });
+      return;
+    }
     let query = collection.orderBy('createdAt', 'desc');
     if (cursor) {
       const cursorSnapshot = await collection.doc(cursor).get();
@@ -1379,9 +1752,11 @@ app.get('/api/forum/posts/:postId/comments', optionalFirebaseUser, async (reques
       query = query.startAfter(cursorSnapshot);
     }
     const snapshot = await query.limit(100).get();
+    const countSnapshot = await collection.count().get();
     response.json({
       comments: snapshot.docs.map(document => publicForumComment(document, request.user?.uid)).filter(Boolean),
-      nextCursor: snapshot.docs.length === 100 ? snapshot.docs.at(-1).id : null
+      nextCursor: snapshot.docs.length === 100 ? snapshot.docs.at(-1).id : null,
+      totalCount: countSnapshot.data().count
     });
   } catch (error) {
     console.error('Could not load community comments.', error);
@@ -1440,6 +1815,67 @@ app.post('/api/forum/posts/:postId/comments', requireFirebaseUser, async (reques
   } catch (error) {
     console.error('Could not create community comment.', error);
     response.status(500).json({ error: 'Your comment could not be published. Please try again.' });
+  }
+});
+
+app.patch('/api/forum/posts/:postId/comments/:commentId', requireFirebaseUser, async (request, response) => {
+  const { postId, commentId } = request.params;
+  const content = forumCommentInput(request.body);
+  if (!postId || postId.length > 150 || !commentId || commentId.length > 150 || !content) {
+    response.status(400).json({ error: 'Enter a comment of up to 2,000 characters.' });
+    return;
+  }
+  try {
+    const { db } = await getFirebaseAdmin();
+    const postReference = db.collection('forumPosts').doc(postId);
+    const postSnapshot = await postReference.get();
+    if (!forumSnapshotExists(postSnapshot) || postSnapshot.data().isDeleted) {
+      response.status(404).json({ error: 'This post no longer exists.' });
+      return;
+    }
+    const reference = postReference.collection('comments').doc(commentId);
+    const snapshot = await reference.get();
+    if (!forumSnapshotExists(snapshot)) {
+      response.status(404).json({ error: 'This comment no longer exists.' });
+      return;
+    }
+    const previous = snapshot.data();
+    if (previous.authorUid !== request.user.uid) {
+      response.status(403).json({ error: 'You can only edit your own comments.' });
+      return;
+    }
+    const updatedAt = Date.now();
+    const comment = { ...previous, content, updatedAt };
+    const batch = db.batch();
+    batch.set(reference, comment);
+    appendForumActivityWrites(batch, db, {
+      eventType: 'comment_edited',
+      userUid: request.user.uid,
+      userName: forumAuthorName(request.user),
+      actorUid: request.user.uid,
+      actorName: forumAuthorName(request.user),
+      postId,
+      postTitle: postSnapshot.data().title,
+      commentId,
+      reason: null,
+      before: { content: forumCommentInput(previous) },
+      after: { content },
+      occurredAt: updatedAt
+    });
+    await batch.commit();
+    response.json({
+      comment: {
+        id: commentId,
+        content,
+        authorName: forumAuthorName({ name: previous.authorName }),
+        isOwner: true,
+        createdAt: Number.isFinite(previous.createdAt) ? previous.createdAt : 0,
+        updatedAt
+      }
+    });
+  } catch (error) {
+    console.error('Could not edit community comment.', error);
+    response.status(500).json({ error: 'Your comment could not be updated. Please try again.' });
   }
 });
 
@@ -1709,6 +2145,7 @@ app.post('/api/billing/webhook', async (request, response) => {
       const eventRef = db.collection('billingWebhookEvents').doc(eventId);
       const entitlementRef = userEntitlementDocument(db, mapping.uid);
       const checkoutRef = userCheckoutDocument(db, mapping.uid);
+      const subscriptionRef = subscriptionDocument(db, subscriptionId);
       const eventPaymentId = typeof payment?.id === 'string' && /^pay_[A-Za-z0-9]+$/.test(payment.id)
         ? payment.id
         : null;
@@ -1716,35 +2153,53 @@ app.post('/api/billing/webhook', async (request, response) => {
         const duplicate = await transaction.get(eventRef);
         if (duplicate.exists) return;
 
-        const currentEntitlement = await transaction.get(entitlementRef);
-        const currentCheckout = await transaction.get(checkoutRef);
+        const [currentEntitlement, currentCheckout, currentSubscription] = await Promise.all([
+          transaction.get(entitlementRef),
+          transaction.get(checkoutRef),
+          transaction.get(subscriptionRef)
+        ]);
+        const currentMapping = currentSubscription.data() || mapping;
+        const entitlementData = currentEntitlement.data() || {};
+        const revokedBeforeThisSubscription = entitlementData.adminRevoked === true
+          && (!Number(entitlementData.adminRevokedAt)
+            || Number(currentMapping.createdAt) <= Number(entitlementData.adminRevokedAt));
+        const subscriptionRevoked = currentMapping.adminRevoked === true || revokedBeforeThisSubscription;
         const validUntil = Number(subscription?.current_end) * 1000
-          || Number(currentEntitlement.data()?.validUntil)
+          || Number(entitlementData.validUntil)
           || 0;
         const isPaidThrough = validUntil > Date.now();
         const activated = ['subscription.activated', 'subscription.charged'].includes(event.event);
-        const pendingPlanMatches = subscription?.plan_id === mapping.pendingPlanId;
-        const currentPlanMatches = subscription?.plan_id === mapping.planId;
+        const pendingPlanMatches = subscription?.plan_id === currentMapping.pendingPlanId;
+        const currentPlanMatches = subscription?.plan_id === currentMapping.planId;
         const providerPlanKey = pendingPlanMatches
-          ? mapping.pendingPlanKey
+          ? currentMapping.pendingPlanKey
           : currentPlanMatches
-            ? mapping.planKey
+            ? currentMapping.planKey
             : planKeyForRazorpayPlanId(subscription?.plan_id);
         const providerCurrency = pendingPlanMatches
-          ? mapping.pendingCurrency
+          ? currentMapping.pendingCurrency
           : currentPlanMatches
-            ? mapping.currency || 'INR'
+            ? currentMapping.currency || 'INR'
             : currencyForRazorpayPlanId(subscription?.plan_id);
         const planChangeApplied = event.event === 'subscription.charged'
           && providerPlanKey
-          && (pendingPlanMatches || providerPlanKey !== mapping.planKey || providerCurrency !== (mapping.currency || 'INR'));
+          && (pendingPlanMatches || providerPlanKey !== currentMapping.planKey || providerCurrency !== (currentMapping.currency || 'INR'));
         const planChangeCancelled = ['subscription.cancelled', 'subscription.completed', 'subscription.expired'].includes(event.event)
           && !isPaidThrough;
-        const billingPlanKey = planChangeApplied ? providerPlanKey : mapping.planKey;
-        const billingCurrency = planChangeApplied ? providerCurrency : mapping.currency || providerCurrency || 'INR';
-        const scheduledPlan = planChangeApplied || planChangeCancelled ? null : mapping.pendingPlanKey || null;
-        const scheduledAt = scheduledPlan ? Number(mapping.scheduledAt) || null : null;
-        const entitlement = activated
+        const billingPlanKey = planChangeApplied ? providerPlanKey : currentMapping.planKey;
+        const billingCurrency = planChangeApplied ? providerCurrency : currentMapping.currency || providerCurrency || 'INR';
+        const scheduledPlan = planChangeApplied || planChangeCancelled ? null : currentMapping.pendingPlanKey || null;
+        const scheduledAt = scheduledPlan ? Number(currentMapping.scheduledAt) || null : null;
+        const entitlement = subscriptionRevoked
+          ? {
+              planId: 'free',
+              billingPlan: 'free',
+              status: 'inactive',
+              source: 'server-verified',
+              lifetime: false,
+              validUntil: 0
+            }
+          : activated
           ? entitlementFromSubscription(subscription, billingPlanKey)
           : isPaidThrough
             ? {
@@ -1752,24 +2207,40 @@ app.post('/api/billing/webhook', async (request, response) => {
                 billingPlan: billingPlanKey,
                 status: 'active',
                 source: 'server-verified',
+                lifetime: false,
                 validUntil
               }
             : {
                 planId: 'free',
-                billingPlan: mapping.planKey,
+                billingPlan: currentMapping.planKey,
                 status: 'inactive',
                 source: 'server-verified',
+                lifetime: false,
                 validUntil: 0
               };
-        if (entitlement) {
+        if (entitlement && !subscriptionRevoked) {
           entitlement.billingPlan = billingPlanKey;
           entitlement.currency = billingCurrency;
           entitlement.scheduledPlan = scheduledPlan;
           entitlement.scheduledAt = scheduledAt;
           entitlement.subscriptionId = subscriptionId;
           entitlement.cancelAtCycleEnd = event.event === 'subscription.cancelled'
-            || currentEntitlement.data()?.cancelAtCycleEnd === true
-            || mapping.cancelAtCycleEnd === true;
+            ||             entitlementData.cancelAtCycleEnd === true
+            || currentMapping.cancelAtCycleEnd === true;
+        } else if (entitlement) {
+          entitlement.planId = 'free';
+          entitlement.billingPlan = 'free';
+          entitlement.status = 'inactive';
+          entitlement.source = 'server-verified';
+          entitlement.lifetime = false;
+          entitlement.validUntil = 0;
+          entitlement.adminRevoked = true;
+          entitlement.adminRevokedAt = entitlementData.adminRevokedAt || Date.now();
+          entitlement.subscriptionId = null;
+          entitlement.cancelAtCycleEnd = false;
+          entitlement.scheduledPlan = null;
+          entitlement.scheduledAt = null;
+          entitlement.pendingVouchers = [];
         }
 
         transaction.create(eventRef, { event: event.event, subscriptionId, receivedAt: Date.now() });
@@ -1781,7 +2252,7 @@ app.post('/api/billing/webhook', async (request, response) => {
             ? Number(payment.created_at) * 1000
             : Date.now();
           transaction.set(db.doc(`billingPayments/${payment.id}`), {
-            uid: mapping.uid,
+            uid: currentMapping.uid,
             providerPaymentId: payment.id,
             subscriptionId,
             planKey: billingPlanKey,
@@ -1793,7 +2264,7 @@ app.post('/api/billing/webhook', async (request, response) => {
             createdAt: paymentCreatedAt
           }, { merge: true });
           transaction.set(db.doc(`billingAccessHistory/${payment.id}`), {
-            uid: mapping.uid,
+            uid: currentMapping.uid,
             subscriptionId,
             planKey: billingPlanKey,
             validFrom: paymentCreatedAt,
@@ -1808,14 +2279,15 @@ app.post('/api/billing/webhook', async (request, response) => {
           }, { merge: true });
         }
         transaction.set(subscriptionDocument(db, subscriptionId), {
-          status: subscription?.status || event.event.replace('subscription.', ''),
-          currentEnd: validUntil,
+          status: subscriptionRevoked ? 'cancelled' : subscription?.status || event.event.replace('subscription.', ''),
+          currentEnd: subscriptionRevoked ? 0 : validUntil,
+          ...(subscriptionRevoked ? { adminRevoked: true } : {}),
           ...(planChangeApplied ? {
             planKey: billingPlanKey,
             currency: billingCurrency,
             planId: subscription.plan_id,
-            amount: Number.isSafeInteger(mapping.pendingPlanAmount)
-              ? mapping.pendingPlanAmount
+            amount: Number.isSafeInteger(currentMapping.pendingPlanAmount)
+              ? currentMapping.pendingPlanAmount
               : billingPlan(billingPlanKey, billingCurrency)?.amount
           } : {}),
           ...(planChangeApplied || planChangeCancelled ? {
@@ -1831,31 +2303,48 @@ app.post('/api/billing/webhook', async (request, response) => {
         const nextEntitlement = {
           ...(entitlement || {
             planId: 'free',
-            billingPlan: mapping.planKey,
+            billingPlan: currentMapping.planKey,
             status: 'inactive',
             source: 'server-verified',
             validUntil: 0
           }),
-          pendingVouchers: schedulePendingVouchers(
-            Array.isArray(currentEntitlement.data()?.pendingVouchers)
-              ? currentEntitlement.data().pendingVouchers
-              : [],
-            Number(entitlement?.validUntil) || 0
-          )
+          pendingVouchers: subscriptionRevoked
+            ? []
+            : schedulePendingVouchers(
+                Array.isArray(currentEntitlement.data()?.pendingVouchers)
+                  ? currentEntitlement.data().pendingVouchers
+                  : [],
+                Number(entitlement?.validUntil) || 0
+              )
         };
+        if (subscriptionRevoked) {
+          nextEntitlement.adminRevoked = true;
+          nextEntitlement.adminRevokedAt = entitlementData.adminRevokedAt || Date.now();
+          nextEntitlement.planId = 'free';
+          nextEntitlement.billingPlan = 'free';
+          nextEntitlement.status = 'inactive';
+          nextEntitlement.validUntil = 0;
+          nextEntitlement.subscriptionId = null;
+          nextEntitlement.cancelAtCycleEnd = false;
+          nextEntitlement.scheduledPlan = null;
+          nextEntitlement.scheduledAt = null;
+        } else {
+          nextEntitlement.adminRevoked = false;
+        }
         transaction.set(entitlementRef, activatePendingVouchers(nextEntitlement) || nextEntitlement);
         if (currentCheckout.data()?.subscriptionId === subscriptionId) {
           if (['subscription.completed', 'subscription.expired'].includes(event.event) && !isPaidThrough) {
             transaction.delete(checkoutRef);
           } else {
             transaction.set(checkoutRef, {
-              status: event.event.replace('subscription.', ''),
-              currentEnd: validUntil,
+              status: subscriptionRevoked ? 'cancelled' : event.event.replace('subscription.', ''),
+              currentEnd: subscriptionRevoked ? 0 : validUntil,
+              cancelAtCycleEnd: subscriptionRevoked ? false : currentCheckout.data()?.cancelAtCycleEnd || false,
               planKey: billingPlanKey,
               currency: billingCurrency,
-              scheduledPlan,
-              scheduledAt,
-              planChangeStatus: scheduledPlan ? mapping.pendingPlanStatus || 'scheduled' : null,
+              scheduledPlan: subscriptionRevoked ? null : scheduledPlan,
+              scheduledAt: subscriptionRevoked ? null : scheduledAt,
+              planChangeStatus: scheduledPlan ? currentMapping.pendingPlanStatus || 'scheduled' : null,
               updatedAt: Date.now()
             }, { merge: true });
           }
@@ -2016,7 +2505,7 @@ app.get('/api/billing/entitlement', requireEntitlementConfig, requireFirebaseUse
     const entitlementRef = userEntitlementDocument(db, request.user.uid);
     const snapshot = await entitlementRef.get();
     let data = snapshot.data() || {};
-    if (Array.isArray(data.pendingVouchers) && Number(data.validUntil) <= Date.now()) {
+    if (data.lifetime !== true && Array.isArray(data.pendingVouchers) && Number(data.validUntil) <= Date.now()) {
       await db.runTransaction(async transaction => {
         const currentSnapshot = await transaction.get(entitlementRef);
         const current = currentSnapshot.data() || {};
@@ -2024,7 +2513,8 @@ app.get('/api/billing/entitlement', requireEntitlementConfig, requireFirebaseUse
         if (data !== current) transaction.set(entitlementRef, data);
       });
     }
-    if (data.billingPlan !== 'voucher' && publicEntitlement(data).status !== 'active') {
+    if (data.billingPlan !== 'voucher'
+      && !(data.source === 'admin' && publicEntitlement(data).status === 'active')) {
       const checkoutSnapshot = await userCheckoutDocument(db, request.user.uid).get();
       const checkoutSubscriptionId = typeof checkoutSnapshot.data()?.subscriptionId === 'string'
         ? checkoutSnapshot.data().subscriptionId.trim()
@@ -2054,8 +2544,65 @@ app.get('/api/billing/entitlement', requireEntitlementConfig, requireFirebaseUse
       }
 
       const mapping = mappingSnapshot?.data() || {};
+      const mappingRevoked = mapping.adminRevoked === true
+        || data.adminRevoked === true
+          && (!Number(mapping.createdAt) || Number(mapping.createdAt) <= Number(data.adminRevokedAt));
       if (mappingSnapshot?.exists
         && mapping.uid === request.user.uid
+        && mappingRevoked) {
+        data = {
+          ...data,
+          planId: 'free',
+          billingPlan: 'free',
+          status: 'inactive',
+          source: 'server-verified',
+          lifetime: false,
+          validUntil: null,
+          subscriptionId: null,
+          adminRevoked: true,
+          adminRevokedAt: Number(mapping.adminRevokedAt) || Number(data.adminRevokedAt) || Date.now(),
+          cancelAtCycleEnd: false,
+          scheduledPlan: null,
+          scheduledAt: null,
+          pendingVouchers: []
+        };
+        await entitlementRef.set(data, { merge: true });
+        await userCheckoutDocument(db, request.user.uid).set({
+          subscriptionId,
+          status: 'cancelled',
+          currentEnd: 0,
+          cancelAtCycleEnd: false,
+          updatedAt: Date.now()
+        }, { merge: true });
+        if (mapping.adminRevoked !== true) {
+          await subscriptionDocument(db, subscriptionId).set({
+            adminRevoked: true,
+            adminRevokedAt: data.adminRevokedAt || Date.now(),
+            status: 'cancelled',
+            currentEnd: 0,
+            updatedAt: Date.now()
+          }, { merge: true });
+        }
+      } else if (data.adminRevoked === true
+        && (!mappingSnapshot?.exists || mapping.uid !== request.user.uid)) {
+        data = {
+          ...data,
+          planId: 'free',
+          billingPlan: 'free',
+          status: 'inactive',
+          source: 'server-verified',
+          validUntil: null,
+          subscriptionId: null,
+          cancelAtCycleEnd: false,
+          scheduledPlan: null,
+          scheduledAt: null,
+          pendingVouchers: []
+        };
+        await entitlementRef.set(data, { merge: true });
+      }
+      if (mappingSnapshot?.exists
+        && mapping.uid === request.user.uid
+        && !mappingRevoked
         && /^sub_[A-Za-z0-9]+$/.test(subscriptionId)
         && Object.hasOwn(BILLING_PLANS, mapping.planKey)
         && isRazorpayPlanId(mapping.planId)) {
@@ -2081,14 +2628,58 @@ app.get('/api/billing/entitlement', requireEntitlementConfig, requireFirebaseUse
             currency: mapping.currency || 'INR',
             status: 'active',
             source: 'server-verified',
+            lifetime: false,
             validUntil,
             subscriptionId,
+            adminRevoked: false,
             cancelAtCycleEnd: providerStatus !== 'active'
               || data.cancelAtCycleEnd === true
               || mapping.cancelAtCycleEnd === true,
             updatedAt: Date.now()
           };
           await db.runTransaction(async transaction => {
+            const [currentEntitlement, currentSubscription] = await Promise.all([
+              transaction.get(entitlementRef),
+              transaction.get(subscriptionDocument(db, subscriptionId))
+            ]);
+            const currentMapping = currentSubscription.data() || {};
+            const currentData = currentEntitlement.data() || {};
+            const currentRevocationApplies = currentData.adminRevoked === true
+              && (!Number(currentMapping.createdAt)
+                || Number(currentMapping.createdAt) <= Number(currentData.adminRevokedAt));
+            if (currentMapping.uid !== request.user.uid
+              || currentMapping.adminRevoked === true
+              || currentRevocationApplies) {
+              const revokedEntitlement = {
+                ...(currentEntitlement.data() || {}),
+                planId: 'free',
+                billingPlan: 'free',
+                status: 'inactive',
+                source: 'server-verified',
+                lifetime: false,
+                validUntil: null,
+                subscriptionId: null,
+                adminRevoked: true,
+                adminRevokedAt: Number(currentMapping.adminRevokedAt)
+                  || Number(currentData.adminRevokedAt)
+                  || Date.now(),
+                cancelAtCycleEnd: false,
+                scheduledPlan: null,
+                scheduledAt: null,
+                pendingVouchers: [],
+                updatedAt: Date.now()
+              };
+              transaction.set(entitlementRef, revokedEntitlement);
+              transaction.set(userCheckoutDocument(db, request.user.uid), {
+                subscriptionId,
+                status: 'cancelled',
+                currentEnd: 0,
+                cancelAtCycleEnd: false,
+                updatedAt: Date.now()
+              }, { merge: true });
+              data = revokedEntitlement;
+              return;
+            }
             transaction.set(entitlementRef, nextEntitlement);
             transaction.set(subscriptionDocument(db, subscriptionId), {
               status: providerStatus,
@@ -2103,9 +2694,41 @@ app.get('/api/billing/entitlement', requireEntitlementConfig, requireFirebaseUse
               currentEnd: validUntil,
               updatedAt: Date.now()
             }, { merge: true });
+            data = nextEntitlement;
           });
-          data = nextEntitlement;
+        } else if (data.adminRevoked === true) {
+          data = {
+            ...data,
+            planId: 'free',
+            billingPlan: 'free',
+            status: 'inactive',
+            source: 'server-verified',
+            lifetime: false,
+            validUntil: null,
+            subscriptionId: null,
+            cancelAtCycleEnd: false,
+            scheduledPlan: null,
+            scheduledAt: null,
+            pendingVouchers: []
+          };
+          await entitlementRef.set(data, { merge: true });
         }
+      } else if (data.adminRevoked === true) {
+        data = {
+          ...data,
+          planId: 'free',
+          billingPlan: 'free',
+          status: 'inactive',
+          source: 'server-verified',
+          lifetime: false,
+          validUntil: null,
+          subscriptionId: null,
+          cancelAtCycleEnd: false,
+          scheduledPlan: null,
+          scheduledAt: null,
+          pendingVouchers: []
+        };
+        await entitlementRef.set(data, { merge: true });
       }
     }
     const entitlement = publicEntitlement(data);
@@ -2145,12 +2768,14 @@ app.post('/api/billing/vouchers/redeem', requireEntitlementConfig, requireFireba
           code,
           durationDays: Number(generated.durationDays),
           maxRedemptions: Number(generated.maxRedemptions),
+          lifetime: generated.lifetime === true,
           assignedUid: generated.assignedUid || '',
           expiresAt: generated.createdAt ? Number(generated.createdAt) + 24 * 60 * 60 * 1000 : (generated.expiresAt || null)
         };
       }
     }
-    if (!voucher || !Number.isInteger(voucher.durationDays) || voucher.durationDays < 1 || voucher.durationDays > 3650
+    const lifetime = voucher?.lifetime === true;
+    if (!voucher || (!lifetime && (!Number.isInteger(voucher.durationDays) || voucher.durationDays < 1 || voucher.durationDays > 3650))
       || !Number.isInteger(voucher.maxRedemptions) || voucher.maxRedemptions < 1
       || (voucher.expiresAt && Number(voucher.expiresAt) <= Date.now())) {
       response.status(404).json({ error: 'That voucher code is invalid or unavailable.' });
@@ -2180,32 +2805,31 @@ app.post('/api/billing/vouchers/redeem', requireEntitlementConfig, requireFireba
         throw error;
       }
       const currentEntitlement = entitlementSnapshot.data() || {};
-      const currentValidUntil = Number(currentEntitlement.validUntil) || 0;
-      const hasActiveAccess = currentValidUntil > now;
-      queued = hasActiveAccess;
-      const durationMs = voucher.durationDays * 24 * 60 * 60 * 1000;
-      const redeemedCount = Number(voucherSnapshot.data()?.redeemedCount) || 0;
-      if (redeemedCount >= voucher.maxRedemptions) {
-        const error = new Error('That voucher has reached its redemption limit.');
+      if (hasActiveProEntitlement(currentEntitlement, now)) {
+        const error = new Error('You cannot redeem a voucher while your account has active Pro access.');
         error.status = 409;
         throw error;
       }
       const pendingVouchers = Array.isArray(currentEntitlement.pendingVouchers)
         ? currentEntitlement.pendingVouchers
         : [];
-      const newVoucher = { voucherId, durationDays: voucher.durationDays };
-      const nextPendingVouchers = hasActiveAccess
-        ? schedulePendingVouchers([...pendingVouchers, newVoucher], currentValidUntil)
-        : [];
-      const activationQueue = hasActiveAccess ? nextPendingVouchers : [...pendingVouchers, newVoucher];
-      const priorVoucherDuration = pendingVouchers.reduce(
-        (total, item) => total + item.durationDays * 24 * 60 * 60 * 1000,
-        0
+      if (pendingVouchers.length) {
+        const error = new Error('Redeem this voucher after your scheduled voucher access has ended.');
+        error.status = 409;
+        throw error;
+      }
+      queued = false;
+      const redeemedCount = Math.max(
+        Number(voucherSnapshot.data()?.redeemedCount) || 0,
+        Number(adminVoucherSnapshot.data()?.redeemedCount) || 0
       );
-      const validFrom = hasActiveAccess
-        ? currentValidUntil + priorVoucherDuration
-        : now + priorVoucherDuration;
-      const validUntil = validFrom + durationMs;
+      if (redeemedCount >= VOUCHER_MAX_REDEMPTIONS) {
+        const error = new Error('That voucher has reached its redemption limit.');
+        error.status = 409;
+        throw error;
+      }
+      const validFrom = now;
+      const validUntil = lifetime ? null : validFrom + voucher.durationDays * 24 * 60 * 60 * 1000;
       transaction.set(voucherRef, {
         redeemedCount: redeemedCount + 1,
         updatedAt: now
@@ -2229,30 +2853,27 @@ app.post('/api/billing/vouchers/redeem', requireEntitlementConfig, requireFireba
         paymentMode: 'voucher',
         amount: 0,
         currency: null,
-        status: queued ? 'scheduled' : 'active',
+        status: 'active',
         source: 'voucher',
         voucherId,
+        lifetime,
         createdAt: now
       });
-      if (hasActiveAccess) {
-        transaction.set(entitlementRef, {
-          pendingVouchers: nextPendingVouchers,
-          updatedAt: now
-        }, { merge: true });
-      } else {
-        transaction.set(entitlementRef, {
-          planId: 'pro',
-          billingPlan: 'voucher',
-          status: 'active',
-          source: 'server-verified',
-          validUntil,
-          subscriptionId: null,
-          cancelAtCycleEnd: false,
-          voucherId,
-          pendingVouchers: [],
-          updatedAt: now
-        });
-      }
+      transaction.set(entitlementRef, {
+        planId: 'pro',
+        billingPlan: 'voucher',
+        status: 'active',
+        source: 'server-verified',
+        adminRevoked: false,
+        adminRevokedAt: null,
+        lifetime,
+        validUntil,
+        subscriptionId: null,
+        cancelAtCycleEnd: false,
+        voucherId,
+        pendingVouchers: [],
+        updatedAt: now
+      });
     });
     const updatedEntitlement = (await entitlementRef.get()).data();
     response.json({
@@ -2261,7 +2882,8 @@ app.post('/api/billing/vouchers/redeem', requireEntitlementConfig, requireFireba
     });
     await recordBillingActivity(db, request.user.uid, {
       type: 'voucher', status: 'success', title: 'Pro voucher redeemed',
-      detail: `Voucher redeemed for ${voucher.durationDays} days.`, planKey: 'voucher'
+      detail: lifetime ? 'Voucher redeemed for lifetime Pro access.' : `Voucher redeemed for ${voucher.durationDays} days.`,
+      planKey: 'voucher'
     });
   } catch (error) {
     if (error.status === 409) {
@@ -2291,7 +2913,7 @@ app.get('/api/admin/dashboard', requireFirebaseUser, requireAdmin, async (reques
       do {
         const page = await auth.listUsers(1000, pageToken);
         for (const record of page.users || []) {
-          users.push({ uid: record.uid, email: record.email || '', name: record.displayName || '', photoURL: record.photoURL || '', createdAt: record.metadata?.creationTime || null });
+          users.push({ uid: record.uid, email: record.email || '', name: record.displayName || '', photoURL: record.photoURL || '', createdAt: record.metadata?.creationTime || null, disabled: record.disabled === true });
           seen.add(record.uid);
         }
         pageToken = page.pageToken;
@@ -2314,8 +2936,16 @@ app.get('/api/admin/dashboard', requireFirebaseUser, requireAdmin, async (reques
     }
     const enriched = await Promise.all(users.map(async user => {
       const snapshot = await db.doc(`users/${user.uid}/billing/entitlement`).get();
-      const entitlement = snapshot.exists ? snapshot.data() : null;
-      const active = entitlement?.planId === 'pro' && Number(entitlement?.validUntil) > now && entitlement?.status === 'active';
+      const entitlement = snapshot.exists
+        ? await adminEntitlementWithVoucherMetadata(db, user.uid, snapshot.data())
+        : null;
+      const subscriptionId = await linkedSubscriptionId(db, user.uid, entitlement);
+      const mappingSnapshot = subscriptionId
+        ? await subscriptionDocument(db, subscriptionId).get()
+        : null;
+      const adminRevoked = adminRevocationApplies(user.uid, entitlement, mappingSnapshot?.data());
+      const active = !adminRevoked
+        && hasActiveProEntitlement(entitlement, now);
       const payments = paymentDocuments.filter(payment => payment.uid === user.uid && ['captured', 'success'].includes(String(payment.status)));
       const paidAmountByCurrency = payments.reduce((amounts, payment) => {
         const currency = payment.currency || 'INR';
@@ -2325,9 +2955,24 @@ app.get('/api/admin/dashboard', requireFirebaseUser, requireAdmin, async (reques
       return {
         ...user,
         isPro: active,
-        plan: active ? entitlement.billingPlan || 'pro' : 'free',
-        activationSource: entitlement?.source || null,
-        validUntil: entitlement?.validUntil || null,
+        disabled: user.disabled === true,
+        plan: active ? entitlement.planId || 'pro' : 'free',
+        billingPlan: active ? entitlement.billingPlan || null : null,
+        activationSource: entitlement?.billingPlan === 'voucher'
+          ? 'voucher'
+          : entitlement?.source === 'admin'
+            ? 'admin'
+            : active
+              ? 'payment'
+              : null,
+        validUntil: entitlement?.lifetime === true
+          ? null
+          : entitlementValidUntil(entitlement) || null,
+        lifetime: entitlement?.lifetime === true,
+        subscriptionId: active && ['monthly', 'yearly'].includes(entitlement?.billingPlan)
+          ? subscriptionId
+          : null,
+        cancelAtCycleEnd: entitlement?.cancelAtCycleEnd === true,
         paidAmount: paidAmountByCurrency.INR || 0,
         paidAmountByCurrency,
         paymentCount: payments.length
@@ -2377,6 +3022,20 @@ app.get('/api/admin/dashboard', requireFirebaseUser, requireAdmin, async (reques
       else if (!voucher.expiresAt) voucher.expiresAt = null;
       return voucher;
     });
+    const pendingCancellationSnapshot = await db.collection(subscriptionCollection)
+      .where('providerCancellationPending', '==', true)
+      .get();
+    const pendingSubscriptionCancellations = (pendingCancellationSnapshot.docs || []).map(document => {
+      const mapping = document.data() || {};
+      const user = userByUid.get(mapping.uid);
+      return {
+        subscriptionId: document.id,
+        uid: mapping.uid || '',
+        email: user?.email || '',
+        name: user?.name || '',
+        status: mapping.status || 'unknown'
+      };
+    });
     const totals = {
       users: enriched.length,
       pro: proCount,
@@ -2386,8 +3045,8 @@ app.get('/api/admin/dashboard', requireFirebaseUser, requireAdmin, async (reques
         return createdAt > 0 && createdAt >= now - 30 * 24 * 60 * 60 * 1000;
       }).length,
       conversionRate: enriched.length ? Math.round((proCount / enriched.length) * 1000) / 10 : 0,
-      monthlyPro: activePro.filter(user => user.plan === 'monthly').length,
-      yearlyPro: activePro.filter(user => user.plan === 'yearly').length,
+      monthlyPro: activePro.filter(user => user.billingPlan === 'monthly').length,
+      yearlyPro: activePro.filter(user => user.billingPlan === 'yearly').length,
       earnings: earningsByCurrency.INR || 0,
       earningsThisMonth: earningsThisMonthByCurrency.INR || 0,
       earningsByCurrency,
@@ -2400,6 +3059,7 @@ app.get('/api/admin/dashboard', requireFirebaseUser, requireAdmin, async (reques
       totals,
       recentPayments,
       vouchers,
+      pendingSubscriptionCancellations,
       adminEmail: request.user.email || ''
     });
   } catch (error) {
@@ -2420,13 +3080,63 @@ app.get('/api/admin/users/:uid', requireFirebaseUser, requireAdmin, async (reque
       typeof db.collection === 'function' ? db.collection(`users/${uid}/billingActivity`).get().catch(() => ({ docs: [] })) : Promise.resolve({ docs: [] }),
       typeof db.collection === 'function' ? db.collection('billingAccessHistory').get().catch(() => ({ docs: [] })) : Promise.resolve({ docs: [] })
     ]);
-    const entitlement = entitlementSnapshot.exists ? entitlementSnapshot.data() : null;
-    const payments = (paymentsSnapshot.docs || []).map(document => ({ id: document.id, ...(document.data() || {}) })).filter(payment => payment.uid === uid);
+    const storedEntitlement = entitlementSnapshot.exists
+      ? await adminEntitlementWithVoucherMetadata(db, uid, entitlementSnapshot.data())
+      : null;
+    const subscriptionId = await linkedSubscriptionId(db, uid, storedEntitlement);
+    const subscriptionSnapshot = subscriptionId
+      ? await subscriptionDocument(db, subscriptionId).get()
+      : null;
+    const isAdminRevoked = adminRevocationApplies(uid, storedEntitlement, subscriptionSnapshot?.data());
+    const activePro = !isAdminRevoked && hasActiveProEntitlement(storedEntitlement);
+    const entitlement = isAdminRevoked
+      ? {
+          ...storedEntitlement,
+          planId: 'free',
+          billingPlan: 'free',
+          status: 'inactive',
+          lifetime: false,
+          validUntil: null,
+          subscriptionId: null,
+          cancelAtCycleEnd: false,
+          scheduledPlan: null,
+          scheduledAt: null
+        }
+      : storedEntitlement
+        ? {
+            ...storedEntitlement,
+            status: activePro ? 'active' : 'inactive',
+            validUntil: storedEntitlement.lifetime === true
+              ? null
+              : entitlementValidUntil(storedEntitlement) || null
+          }
+        : {};
+    let payments = (paymentsSnapshot.docs || []).map(document => ({ id: document.id, ...(document.data() || {}) })).filter(payment => payment.uid === uid);
     const activity = (activitySnapshot.docs || []).map(document => ({ id: document.id, ...(document.data() || {}) })).sort((a, b) => Number(b.occurredAt || b.createdAt || 0) - Number(a.occurredAt || a.createdAt || 0));
-    const accessHistory = (accessHistorySnapshot.docs || [])
+    let accessHistory = (accessHistorySnapshot.docs || [])
       .map(document => ({ id: document.id, ...(document.data() || {}) }))
       .filter(record => record.uid === uid)
       .sort((left, right) => Number(right.createdAt) - Number(left.createdAt));
+    if (entitlement?.subscriptionId
+      && /^sub_[A-Za-z0-9]+$/.test(entitlement.subscriptionId)
+      && !payments.some(payment => payment.subscriptionId === entitlement.subscriptionId
+        && ['captured', 'success'].includes(String(payment.status)))) {
+      const mappingSnapshot = await subscriptionDocument(db, entitlement.subscriptionId).get();
+      if (mappingSnapshot.exists && mappingSnapshot.data()?.uid === uid) {
+        await reconcileSubscriptionInvoices(db, uid, entitlement.subscriptionId, mappingSnapshot.data());
+        const [updatedPayments, updatedAccessHistory] = await Promise.all([
+          db.collection('billingPayments').get(),
+          db.collection('billingAccessHistory').get()
+        ]);
+        payments = (updatedPayments.docs || [])
+          .map(document => ({ id: document.id, ...(document.data() || {}) }))
+          .filter(payment => payment.uid === uid);
+        accessHistory = (updatedAccessHistory.docs || [])
+          .map(document => ({ id: document.id, ...(document.data() || {}) }))
+          .filter(record => record.uid === uid)
+          .sort((left, right) => Number(right.createdAt) - Number(left.createdAt));
+      }
+    }
     let voucher = null;
     if (entitlement?.voucherId) {
       const voucherSnapshot = await db.doc(`adminVouchers/${entitlement.voucherId}`).get();
@@ -2446,6 +3156,12 @@ app.get('/api/admin/users/:uid', requireFirebaseUser, requireAdmin, async (reque
     const paidAmount = paidAmountByCurrency.INR || 0;
     response.json({
       uid, email: authRecord?.email || '', name: authRecord?.displayName || '', photoURL: authRecord?.photoURL || '', createdAt: authRecord?.metadata?.creationTime || null,
+      disabled: authRecord?.disabled === true,
+      isPro: activePro,
+      subscriptionId: activePro
+        && ['monthly', 'yearly'].includes(entitlement.billingPlan)
+        ? subscriptionId
+        : null,
       entitlement, voucher, payments, accessHistory, activity, paidAmount, paidAmountByCurrency
     });
   } catch (error) {
@@ -2470,8 +3186,8 @@ app.post('/api/admin/users/:uid/pro', requireFirebaseUser, requireAdmin, async (
     const grantedAt = Date.now();
     const validUntil = grantedAt + durationDays * 86400000;
     await db.doc(`users/${uid}/billing/entitlement`).set({
-      planId: 'pro', billingPlan: plan, status: 'active', source: 'admin', validUntil,
-      subscriptionId: null, cancelAtCycleEnd: false, updatedAt: grantedAt
+      planId: 'pro', billingPlan: plan, status: 'active', source: 'admin', lifetime: false, validUntil,
+      subscriptionId: null, adminRevoked: false, cancelAtCycleEnd: false, updatedAt: grantedAt
     }, { merge: true });
     const paid = amount > 0;
     const paymentId = paid ? transactionId : `FREE-${randomUUID().slice(0, 8).toUpperCase()}`;
@@ -2509,6 +3225,7 @@ app.post('/api/admin/users/:uid/pro', requireFirebaseUser, requireAdmin, async (
 
 app.post('/api/admin/users/:uid/cancel-pro', requireFirebaseUser, requireAdmin, async (request, response) => {
   const reason = typeof request.body?.reason === 'string' ? request.body.reason.trim() : '';
+  const timing = request.body?.timing === 'period-end' ? 'period-end' : 'immediate';
   if (!reason) {
     response.status(400).json({ error: 'Enter a reason for cancelling Pro access.' });
     return;
@@ -2519,37 +3236,617 @@ app.post('/api/admin/users/:uid/cancel-pro', requireFirebaseUser, requireAdmin, 
     const entitlementRef = db.doc(`users/${uid}/billing/entitlement`);
     const entitlementSnapshot = await entitlementRef.get();
     const entitlement = entitlementSnapshot.data() || {};
-    await entitlementRef.set({
-      planId: 'free', billingPlan: 'free', status: 'inactive', source: 'admin', validUntil: null,
-      subscriptionId: null, cancelAtCycleEnd: false, updatedAt: Date.now()
-    }, { merge: true });
+    const subscriptionId = await linkedSubscriptionId(db, uid, entitlement);
+    if (timing === 'period-end'
+      && (!subscriptionId
+        || entitlementValidUntil(entitlement) <= Date.now()
+        || entitlement.planId !== 'pro'
+        || entitlement.status !== 'active'
+        || !['monthly', 'yearly'].includes(entitlement.billingPlan))) {
+      response.status(400).json({ error: 'This account has no active paid subscription to cancel at period end.' });
+      return;
+    }
+    let providerResult = null;
+    let subscriptionRef = null;
+    let subscriptionsToRevoke = [];
+    if (subscriptionId) {
+      subscriptionRef = subscriptionDocument(db, subscriptionId);
+      const mapping = await subscriptionRef.get();
+      if (mapping.exists && mapping.data()?.uid !== uid) {
+        response.status(409).json({ error: 'The subscription is not linked to this account.' });
+        return;
+      }
+      if (timing === 'period-end' && mapping.exists && mapping.data()?.pendingPlanStatus === 'scheduling') {
+        response.status(409).json({ error: 'A plan change is being scheduled. Try again after it completes.' });
+        return;
+      }
+      if (timing === 'period-end') {
+        providerResult = await razorpayRequest(`/subscriptions/${encodeURIComponent(subscriptionId)}/cancel`, {
+          method: 'POST',
+          body: { cancel_at_cycle_end: true }
+        });
+      }
+    }
+    if (timing === 'immediate') {
+      const userSubscriptionSnapshot = await db.collection(subscriptionCollection)
+        .where('uid', '==', uid)
+        .get();
+      subscriptionsToRevoke = (userSubscriptionSnapshot.docs || [])
+        .filter(document => document.data()?.uid === uid)
+        .map(document => ({
+          id: document.id,
+          ref: subscriptionDocument(db, document.id),
+          mapping: document.data() || {}
+        }));
+      if (subscriptionId && !subscriptionsToRevoke.some(item => item.id === subscriptionId)) {
+        subscriptionsToRevoke.push({
+          id: subscriptionId,
+          ref: subscriptionRef,
+          mapping: {}
+        });
+      }
+    }
     const cancelledAt = Date.now();
+    const validUntil = entitlementValidUntil(entitlement);
+    const periodEndCancellation = timing === 'period-end';
+    const entitlementUpdate = periodEndCancellation
+      ? {
+          planId: 'pro', status: 'active', source: 'server-verified', lifetime: false,
+          validUntil, cancelAtCycleEnd: true, updatedAt: cancelledAt
+        }
+      : {
+          planId: 'free', billingPlan: 'free', status: 'inactive', source: 'admin', lifetime: false, validUntil: null,
+          subscriptionId: null, adminRevoked: true, adminRevokedAt: cancelledAt,
+          cancelAtCycleEnd: false, scheduledPlan: null, scheduledAt: null,
+          planChangeStatus: null, pendingVouchers: [], updatedAt: cancelledAt
+        };
+    await db.runTransaction(async transaction => {
+      transaction.set(entitlementRef, entitlementUpdate, { merge: true });
+      if (periodEndCancellation && subscriptionRef) {
+        transaction.set(subscriptionRef, {
+          uid,
+          status: providerResult?.status || 'active',
+          cancelAtCycleEnd: true,
+          currentEnd: validUntil,
+          updatedAt: cancelledAt
+        }, { merge: true });
+      }
+      if (!periodEndCancellation) {
+        for (const subscription of subscriptionsToRevoke) {
+          transaction.set(subscription.ref, {
+            uid,
+            status: 'cancelled',
+            cancelAtCycleEnd: false,
+            adminRevoked: true,
+            adminRevokedAt: cancelledAt,
+            currentEnd: 0,
+            pendingPlanKey: null,
+            pendingPlanId: null,
+            pendingPlanAmount: null,
+            pendingPlanStatus: null,
+            planChangeRequestId: null,
+            scheduledAt: null,
+            updatedAt: cancelledAt
+          }, { merge: true });
+        }
+        transaction.set(userCheckoutDocument(db, uid), {
+          subscriptionId: subscriptionId || null,
+          status: 'cancelled',
+          currentEnd: 0,
+          cancelAtCycleEnd: false,
+          scheduledPlan: null,
+          scheduledAt: null,
+          updatedAt: cancelledAt
+        }, { merge: true });
+      }
+    });
+    const providerCancellationErrors = [];
+    if (!periodEndCancellation) {
+      for (const subscription of subscriptionsToRevoke) {
+        if (['cancelled', 'completed', 'expired'].includes(String(subscription.mapping.status))) continue;
+        try {
+          providerResult = await razorpayRequest(`/subscriptions/${encodeURIComponent(subscription.id)}/cancel`, {
+            method: 'POST',
+            body: { cancel_at_cycle_end: false }
+          });
+          await subscription.ref.set({
+            status: providerResult?.status || 'cancelled',
+            providerCancellationPending: false,
+            updatedAt: Date.now()
+          }, { merge: true });
+        } catch (error) {
+          providerCancellationErrors.push(subscription.id);
+          await subscription.ref.set({
+            providerCancellationPending: true,
+            providerCancellationError: String(error.message || 'Razorpay cancellation failed').slice(0, 500),
+            updatedAt: Date.now()
+          }, { merge: true });
+        }
+      }
+    }
     await db.doc(`users/${uid}/billingActivity/${randomUUID()}`).set({
-      type: 'pro_cancelled', status: 'cancelled', title: 'Pro access cancelled by admin',
+      type: periodEndCancellation ? 'subscription_cancel_scheduled' : 'pro_cancelled',
+      status: periodEndCancellation ? 'scheduled' : 'cancelled',
+      title: periodEndCancellation ? 'Subscription cancellation scheduled by admin' : 'Pro access cancelled by admin',
       detail: reason, reason, planKey: entitlement.billingPlan || 'pro',
       previousPlan: entitlement.billingPlan || 'pro', previousSource: entitlement.source || null,
       previousValidUntil: entitlement.validUntil || null, actorType: 'admin', actorUid: request.user.uid,
       cancelledBy: request.user.uid, cancelledByEmail: request.user.email || null,
+      cancellationTiming: timing,
+      accessThrough: periodEndCancellation ? validUntil : cancelledAt,
       createdAt: cancelledAt, occurredAt: cancelledAt
     });
-    response.json({ uid, isPro: false, reason, cancelledAt });
+    response.json({
+      uid,
+      isPro: periodEndCancellation && validUntil > Date.now(),
+      timing,
+      validUntil: periodEndCancellation ? validUntil : null,
+      reason,
+      cancelledAt,
+      providerCancellationPending: providerCancellationErrors.length > 0
+    });
+    if (providerCancellationErrors.length) {
+      response.status(502).json({
+        error: 'Pro access was revoked immediately, but Razorpay could not cancel every linked subscription. Retry cancellation or contact support.',
+        revoked: true,
+        providerCancellationPending: providerCancellationErrors.length
+      });
+      return;
+    }
   } catch (error) {
-    response.status(500).json({ error: 'Unable to cancel Pro access.' });
+    console.error('Admin subscription cancellation failed.', error);
+    response.status(error.status === 503 ? 503 : 502).json({ error: 'Unable to cancel the subscription. No Pro changes were applied; retry or contact support.' });
+  }
+});
+
+async function adminTarget(uid, request, response) {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(uid) || uid === request.user.uid) {
+    response.status(400).json({ error: 'This account cannot be changed by this action.' });
+    return null;
+  }
+  const { auth } = await getFirebaseAdmin();
+  const target = await auth.getUser(uid);
+  if (isAdminUser({ email: target.email })) {
+    response.status(403).json({ error: 'Administrator accounts cannot be banned or deleted here.' });
+    return null;
+  }
+  return { auth, target };
+}
+
+async function deleteAccountQueryDocuments(db, query, recursive = false) {
+  const snapshot = await query.get();
+  const documents = snapshot.docs || [];
+  for (let index = 0; index < documents.length; index += 25) {
+    await Promise.all(documents.slice(index, index + 25).map(document => (
+      recursive
+        ? db.recursiveDelete(document.ref)
+        : document.ref.delete()
+    )));
+  }
+}
+
+async function deleteAccountFirestoreData(db, uid, subscriptionIds) {
+  if (typeof db.recursiveDelete !== 'function') {
+    throw new Error('Safe account data deletion is unavailable on this server.');
+  }
+
+  const ownedCollections = [
+    ['billingPayments', 'uid'],
+    ['billingAccessHistory', 'uid'],
+    ['billingSubscriptions', 'uid'],
+    ['sharedResumes', 'ownerUid'],
+    ['forumActivity', 'userUid'],
+    ['forumActivity', 'actorUid'],
+    ['forumPosts', 'authorUid']
+  ];
+  for (const [collectionName, field] of ownedCollections) {
+    const query = db.collection(collectionName).where(field, '==', uid);
+    await deleteAccountQueryDocuments(db, query, collectionName === 'forumPosts');
+  }
+
+  if (typeof db.collectionGroup === 'function') {
+    await deleteAccountQueryDocuments(db,
+      db.collectionGroup('comments').where('authorUid', '==', uid)
+    );
+  }
+
+  for (const subscriptionId of subscriptionIds) {
+    await deleteAccountQueryDocuments(db,
+      db.collection('billingWebhookEvents').where('subscriptionId', '==', subscriptionId)
+    );
+  }
+
+  const assignedVouchers = await db.collection('adminVouchers').where('assignedUid', '==', uid).get();
+  const redeemedVouchers = await db.collection('adminVouchers').where('redeemedByUid', '==', uid).get();
+  const voucherDocuments = new Map(
+    [...(assignedVouchers.docs || []), ...(redeemedVouchers.docs || [])]
+      .map(document => [document.ref.path, document])
+  );
+  for (const voucherDocument of voucherDocuments.values()) {
+    const voucher = voucherDocument.data() || {};
+    const updatedVoucher = { ...voucher };
+    if (updatedVoucher.assignedUid === uid) {
+      updatedVoucher.assignedUid = '';
+      updatedVoucher.assignedEmail = '';
+    }
+    if (updatedVoucher.redeemedByUid === uid) {
+      delete updatedVoucher.redeemedByUid;
+      delete updatedVoucher.redeemedByEmail;
+    }
+    await voucherDocument.ref.set(updatedVoucher);
+  }
+  await db.recursiveDelete(db.doc(`users/${uid}`));
+}
+
+app.post('/api/admin/subscriptions/:subscriptionId/retry-cancellation', requireFirebaseUser, requireAdmin, async (request, response) => {
+  const subscriptionId = request.params.subscriptionId;
+  if (!/^sub_[A-Za-z0-9]+$/.test(subscriptionId)) {
+    response.status(400).json({ error: 'The subscription ID is invalid.' });
+    return;
+  }
+  try {
+    const { auth, db } = await getFirebaseAdmin();
+    const selectedRef = subscriptionDocument(db, subscriptionId);
+    const selectedSnapshot = await selectedRef.get();
+    const selectedMapping = selectedSnapshot.data() || {};
+    if (!selectedSnapshot.exists || selectedMapping.providerCancellationPending !== true
+      || typeof selectedMapping.uid !== 'string' || !selectedMapping.uid) {
+      response.status(404).json({ error: 'No pending account subscription cancellation was found.' });
+      return;
+    }
+
+    const uid = selectedMapping.uid;
+    const subscriptionSnapshot = await db.collection(subscriptionCollection).where('uid', '==', uid).get();
+    const subscriptions = new Map((subscriptionSnapshot.docs || []).map(document => [
+      document.id,
+      { ref: document.ref, ...(document.data() || {}) }
+    ]));
+    subscriptions.set(subscriptionId, { ref: selectedRef, ...selectedMapping });
+    const cancellationErrors = [];
+    for (const [linkedId, mapping] of subscriptions) {
+      if (['cancelled', 'completed', 'expired'].includes(String(mapping.status))) continue;
+      try {
+        await razorpayRequest(`/subscriptions/${encodeURIComponent(linkedId)}/cancel`, {
+          method: 'POST',
+          body: { cancel_at_cycle_end: false }
+        });
+      } catch (error) {
+        let providerAlreadyCancelled = false;
+        try {
+          const providerSubscription = await razorpayRequest(`/subscriptions/${encodeURIComponent(linkedId)}`);
+          providerAlreadyCancelled = ['cancelled', 'completed', 'expired'].includes(String(providerSubscription?.status));
+        } catch (statusError) {
+          console.error('Could not verify Razorpay subscription status during cancellation retry.', {
+            uid,
+            subscriptionId: linkedId,
+            error: statusError.message
+          });
+        }
+        if (!providerAlreadyCancelled) cancellationErrors.push({ subscriptionId: linkedId, error });
+      }
+    }
+
+    if (cancellationErrors.length) {
+      for (const item of cancellationErrors) {
+        const mapping = subscriptions.get(item.subscriptionId);
+        await mapping.ref.set({
+          providerCancellationPending: true,
+          providerCancellationError: String(item.error.message || 'Razorpay cancellation failed').slice(0, 500),
+          updatedAt: Date.now()
+        }, { merge: true });
+      }
+      response.status(502).json({
+        error: 'Razorpay could not cancel every linked subscription. Account data has not been deleted; retry later.',
+        subscriptionCancellationPending: cancellationErrors.map(item => item.subscriptionId)
+      });
+      return;
+    }
+
+    let accountExists = true;
+    try {
+      await auth.getUser(uid);
+    } catch (error) {
+      if (error.code !== 'auth/user-not-found') throw error;
+      accountExists = false;
+    }
+    if (!accountExists) {
+      await deleteAccountFirestoreData(db, uid, new Set(subscriptions.keys()));
+    } else {
+      for (const [linkedId, mapping] of subscriptions) {
+        await mapping.ref.set({
+          status: 'cancelled',
+          cancelAtCycleEnd: false,
+          adminRevoked: true,
+          providerCancellationPending: false,
+          providerCancellationError: null,
+          updatedAt: Date.now()
+        }, { merge: true });
+      }
+    }
+    response.json({
+      uid,
+      cancelled: true,
+      accountDataDeleted: !accountExists
+    });
+  } catch (error) {
+    console.error('Pending Razorpay cancellation retry failed.', error);
+    response.status(500).json({ error: 'Could not complete the pending subscription cancellation. Retry or contact support.' });
+  }
+});
+
+app.post('/api/admin/users/:uid/ban', requireFirebaseUser, requireAdmin, async (request, response) => {
+  try {
+    const target = await adminTarget(request.params.uid, request, response);
+    if (!target) return;
+    const { auth, target: user } = target;
+    if (user.disabled) {
+      response.json({ uid: user.uid, disabled: true });
+      return;
+    }
+    const { db } = await getFirebaseAdmin();
+    const entitlementRef = userEntitlementDocument(db, user.uid);
+    const entitlementSnapshot = await entitlementRef.get();
+    const entitlement = entitlementSnapshot.data() || {};
+    const subscriptionId = await linkedSubscriptionId(db, user.uid, entitlement);
+    let providerResult = null;
+    let providerCancellationError = null;
+    let mappingRef = null;
+    if (subscriptionId) {
+      mappingRef = subscriptionDocument(db, subscriptionId);
+      const mapping = await mappingRef.get();
+      if (mapping.exists && mapping.data()?.uid !== user.uid) {
+        response.status(409).json({ error: 'The subscription is not linked to this account.' });
+        return;
+      }
+      try {
+        providerResult = await razorpayRequest(`/subscriptions/${encodeURIComponent(subscriptionId)}/cancel`, {
+          method: 'POST',
+          body: { cancel_at_cycle_end: false }
+        });
+      } catch (error) {
+        providerCancellationError = error;
+        console.error('Razorpay cancellation failed while banning account.', {
+          uid: user.uid,
+          subscriptionId,
+          error: error.message
+        });
+      }
+      await mappingRef.set({
+        uid: user.uid,
+        status: providerResult?.status || (providerCancellationError ? 'cancellation_pending' : 'cancelled'),
+        cancelAtCycleEnd: false,
+        adminRevoked: true,
+        providerCancellationPending: Boolean(providerCancellationError),
+        ...(providerCancellationError
+          ? { providerCancellationError: String(providerCancellationError.message || 'Razorpay cancellation failed').slice(0, 500) }
+          : {}),
+        updatedAt: Date.now()
+      }, { merge: true });
+    }
+    const bannedAt = Date.now();
+    await entitlementRef.set({
+      planId: 'free', billingPlan: 'free', status: 'inactive', source: 'admin', lifetime: false,
+      validUntil: null, subscriptionId: null, adminRevoked: true, adminRevokedAt: bannedAt,
+      cancelAtCycleEnd: false, updatedAt: bannedAt
+    }, { merge: true });
+    await userCheckoutDocument(db, user.uid).set({
+      subscriptionId: subscriptionId || null,
+      status: providerResult?.status || (providerCancellationError ? 'cancellation_pending' : 'cancelled'),
+      currentEnd: 0,
+      cancelAtCycleEnd: false,
+      updatedAt: bannedAt
+    }, { merge: true });
+    await auth.updateUser(user.uid, { disabled: true });
+    await auth.revokeRefreshTokens(user.uid);
+    await db.doc(`users/${user.uid}/adminStatus/current`).set({
+      disabled: true, reason: String(request.body?.reason || '').trim().slice(0, 500),
+      actorUid: request.user.uid, updatedAt: bannedAt
+    }, { merge: true });
+    await db.doc(`users/${user.uid}/billingActivity/${randomUUID()}`).set({
+      type: 'account_banned', status: 'disabled', title: 'Account banned by admin',
+      detail: String(request.body?.reason || '').trim(), actorType: 'admin', actorUid: request.user.uid,
+      createdAt: bannedAt, occurredAt: bannedAt
+    });
+    response.json({
+      uid: user.uid,
+      disabled: true,
+      isPro: false,
+      subscriptionCancelled: Boolean(subscriptionId) && !providerCancellationError,
+      subscriptionCancellationPending: Boolean(providerCancellationError),
+      message: providerCancellationError
+        ? 'The account was banned and Pro access was removed, but Razorpay could not cancel the subscription. Contact support to complete cancellation.'
+        : undefined
+    });
+  } catch (error) {
+    console.error('Admin account ban failed.', error);
+    response.status(error.status === 503 ? 503 : 502).json({ error: 'Unable to ban this account. Retry or contact support.' });
+  }
+});
+
+app.post('/api/admin/users/:uid/unban', requireFirebaseUser, requireAdmin, async (request, response) => {
+  try {
+    const target = await adminTarget(request.params.uid, request, response);
+    if (!target) return;
+    const { auth, target: user } = target;
+    await auth.updateUser(user.uid, { disabled: false });
+    const { db } = await getFirebaseAdmin();
+    const updatedAt = Date.now();
+    await db.doc(`users/${user.uid}/adminStatus/current`).set({
+      disabled: false, actorUid: request.user.uid, updatedAt
+    }, { merge: true });
+    await db.doc(`users/${user.uid}/billingActivity/${randomUUID()}`).set({
+      type: 'account_unbanned', status: 'enabled', title: 'Account unbanned by admin',
+      actorType: 'admin', actorUid: request.user.uid, createdAt: updatedAt, occurredAt: updatedAt
+    });
+    response.json({ uid: user.uid, disabled: false });
+  } catch (error) {
+    console.error('Admin account unban failed.', error);
+    response.status(500).json({ error: 'Unable to unban this account.' });
+  }
+});
+
+app.delete('/api/admin/users/:uid', requireFirebaseUser, requireAdmin, async (request, response) => {
+  try {
+    const target = await adminTarget(request.params.uid, request, response);
+    if (!target) return;
+    const { auth, target: user } = target;
+    const { db } = await getFirebaseAdmin();
+    const entitlementRef = userEntitlementDocument(db, user.uid);
+    const entitlementSnapshot = await entitlementRef.get();
+    const subscriptionIds = new Set();
+    const entitlementSubscriptionId = await linkedSubscriptionId(db, user.uid, entitlementSnapshot.data());
+    if (entitlementSubscriptionId) subscriptionIds.add(entitlementSubscriptionId);
+    const subscriptionsSnapshot = await db.collection(subscriptionCollection)
+      .where('uid', '==', user.uid)
+      .get();
+    const subscriptions = new Map((subscriptionsSnapshot.docs || []).map(document => [
+      document.id,
+      { ref: document.ref, ...(document.data() || {}) }
+    ]));
+    for (const [subscriptionId, mapping] of subscriptions) {
+      if (mapping.uid !== user.uid) {
+        response.status(409).json({ error: 'The subscription is not linked to this account.' });
+        return;
+      }
+      subscriptionIds.add(subscriptionId);
+    }
+    for (const subscriptionId of subscriptionIds) {
+      if (subscriptions.has(subscriptionId)) continue;
+      const mappingRef = subscriptionDocument(db, subscriptionId);
+      const mappingSnapshot = await mappingRef.get();
+      const mapping = mappingSnapshot.data() || {};
+      if (mappingSnapshot.exists && mapping.uid !== user.uid) {
+        response.status(409).json({ error: 'The subscription is not linked to this account.' });
+        return;
+      }
+      subscriptions.set(subscriptionId, { ref: mappingRef, ...mapping });
+    }
+
+    const cancellationErrors = [];
+    for (const subscriptionId of subscriptionIds) {
+      const mapping = subscriptions.get(subscriptionId) || {};
+      if (['cancelled', 'completed', 'expired'].includes(String(mapping.status))) continue;
+      const mappingRef = mapping.ref || subscriptionDocument(db, subscriptionId);
+      try {
+        const providerResult = await razorpayRequest(`/subscriptions/${encodeURIComponent(subscriptionId)}/cancel`, {
+          method: 'POST',
+          body: { cancel_at_cycle_end: false }
+        });
+        await mappingRef.set({
+          uid: user.uid,
+          status: providerResult?.status || 'cancelled',
+          cancelAtCycleEnd: false,
+          adminRevoked: true,
+          providerCancellationPending: false,
+          updatedAt: Date.now()
+        }, { merge: true });
+      } catch (error) {
+        let providerAlreadyCancelled = false;
+        try {
+          const providerSubscription = await razorpayRequest(`/subscriptions/${encodeURIComponent(subscriptionId)}`);
+          providerAlreadyCancelled = ['cancelled', 'completed', 'expired'].includes(String(providerSubscription?.status));
+          if (providerAlreadyCancelled) {
+            await mappingRef.set({
+              uid: user.uid,
+              status: providerSubscription.status,
+              cancelAtCycleEnd: false,
+              adminRevoked: true,
+              providerCancellationPending: false,
+              updatedAt: Date.now()
+            }, { merge: true });
+          }
+        } catch (statusError) {
+          console.error('Could not verify Razorpay subscription status during account deletion.', {
+            uid: user.uid,
+            subscriptionId,
+            error: statusError.message
+          });
+        }
+        if (!providerAlreadyCancelled) {
+          cancellationErrors.push({ subscriptionId, error });
+          await mappingRef.set({
+            uid: user.uid,
+            status: mapping.status || 'cancellation_pending',
+            adminRevoked: true,
+            providerCancellationPending: true,
+            providerCancellationError: String(error.message || 'Razorpay cancellation failed').slice(0, 500),
+            updatedAt: Date.now()
+          }, { merge: true });
+        }
+      }
+    }
+
+    if (cancellationErrors.length) {
+      response.status(502).json({
+        error: 'The account was not deleted because Razorpay could not cancel every linked subscription. Retry deletion or contact support.',
+        subscriptionCancellationPending: cancellationErrors.map(item => item.subscriptionId)
+      });
+      return;
+    }
+
+    await deleteAccountFirestoreData(db, user.uid, subscriptionIds);
+    await auth.deleteUser(user.uid);
+    response.json({ uid: user.uid, deleted: true });
+  } catch (error) {
+    console.error('Admin account deletion failed.', error);
+    response.status(error.message === 'Safe account data deletion is unavailable on this server.' ? 503 : 500)
+      .json({ error: error.message || 'Unable to delete this account. Retry or contact support.' });
   }
 });
 
 app.post('/api/admin/vouchers', requireFirebaseUser, requireAdmin, async (request, response) => {
-  const plan = request.body?.plan === 'yearly' ? 'yearly' : 'monthly';
-  const assignedUid = typeof request.body?.uid === 'string' ? request.body.uid.trim() : '';
-  const durationDays = plan === 'yearly' ? 365 : 30;
-  const code = `${plan === 'yearly' ? 'YEAR' : 'MONTH'}-${randomUUID().replaceAll('-', '').slice(0, 10).toUpperCase()}`;
+  const durations = {
+    '1-month': { durationDays: 30, durationLabel: '1 month', prefix: 'MONTH' },
+    '3-months': { durationDays: 90, durationLabel: '3 months', prefix: '3MONTH' },
+    '6-months': { durationDays: 180, durationLabel: '6 months', prefix: '6MONTH' },
+    '1-year': { durationDays: 365, durationLabel: '1 year', prefix: 'YEAR' },
+    lifetime: { durationDays: null, durationLabel: 'Lifetime', prefix: 'LIFETIME', lifetime: true }
+  };
+  const selectedDuration = durations[request.body?.duration];
+  if (!selectedDuration) {
+    response.status(400).json({ error: 'Choose a valid voucher duration.' });
+    return;
+  }
+  const assignedUser = typeof request.body?.user === 'string'
+    ? request.body.user.trim()
+    : typeof request.body?.uid === 'string'
+      ? request.body.uid.trim()
+      : '';
+  const { durationDays, durationLabel, prefix, lifetime = false } = selectedDuration;
+  const code = `${prefix}-${randomUUID().replaceAll('-', '').slice(0, 10).toUpperCase()}`;
   try {
-    const { db } = await getFirebaseAdmin();
+    const { auth, db } = await getFirebaseAdmin();
+    let assignedUid = '';
+    let assignedEmail = '';
+    if (assignedUser) {
+      try {
+        const assignedAccount = assignedUser.includes('@')
+          ? await auth.getUserByEmail(assignedUser)
+          : await auth.getUser(assignedUser);
+        assignedUid = assignedAccount.uid;
+        assignedEmail = assignedAccount.email || '';
+      } catch (error) {
+        if (error.code === 'auth/invalid-email') {
+          response.status(400).json({ error: 'Enter a valid Firebase UID or account email.' });
+          return;
+        }
+        if (error.code === 'auth/user-not-found') {
+          response.status(404).json({ error: 'No account was found for that Firebase UID or email.' });
+          return;
+        }
+        throw error;
+      }
+    }
     const id = voucherDocumentId(code);
     const createdAt = Date.now();
-    await db.doc(`adminVouchers/${id}`).set({ code, plan, durationDays, maxRedemptions: 1, assignedUid, redeemedCount: 0, createdAt, expiresAt: createdAt + 24 * 60 * 60 * 1000, createdBy: request.user.uid });
-    response.status(201).json({ id, code, plan, durationDays, assignedUid });
+    await db.doc(`adminVouchers/${id}`).set({
+      code, duration: request.body.duration, durationLabel, durationDays, lifetime,
+      maxRedemptions: VOUCHER_MAX_REDEMPTIONS, assignedUid, assignedEmail, redeemedCount: 0, createdAt,
+      expiresAt: createdAt + 24 * 60 * 60 * 1000, createdBy: request.user.uid
+    });
+    response.status(201).json({ id, code, duration: request.body.duration, durationLabel, durationDays, lifetime, assignedUid, assignedEmail });
   } catch (error) {
+    console.error('Admin voucher generation failed.', error);
     response.status(500).json({ error: 'Unable to generate voucher.' });
   }
 });
@@ -2738,6 +4035,9 @@ app.post('/api/billing/subscriptions', requireBillingConfig, requireFirebaseUser
       }
     });
     await db.runTransaction(async transaction => {
+      const entitlementSnapshot = await transaction.get(userEntitlementDocument(db, request.user.uid));
+      const revocationAt = Number(entitlementSnapshot.data()?.adminRevokedAt) || 0;
+      const createdAt = Math.max(Date.now(), revocationAt + 1);
       transaction.create(subscriptionDocument(db, created.id), {
         uid: request.user.uid,
         planKey,
@@ -2746,15 +4046,15 @@ app.post('/api/billing/subscriptions', requireBillingConfig, requireFirebaseUser
         amount: plan.amount,
         status: created.status || 'created',
         currentEnd: 0,
-        createdAt: Date.now(),
-        updatedAt: Date.now()
+        createdAt,
+        updatedAt: createdAt
       });
       transaction.set(checkoutRef, {
         subscriptionId: created.id,
         planId: providerPlan.id,
         amount: plan.amount,
         status: created.status || 'created',
-        updatedAt: Date.now()
+        updatedAt: createdAt
       }, { merge: true });
     });
     await recordBillingActivity(db, request.user.uid, {
@@ -2805,12 +4105,6 @@ app.post('/api/billing/verify', requireBillingConfig, requireFirebaseUser, async
       return;
     }
 
-    const message = `${razorpaySubscriptionId}|${razorpayPaymentId}`;
-    if (!validRazorpaySignature(message, razorpaySignature, process.env.RAZORPAY_KEY_SECRET)) {
-      response.status(400).json({ error: 'Payment signature verification failed.' });
-      return;
-    }
-
     const mapping = mappingSnapshot.data();
     const currency = mapping.currency || 'INR';
     const basePlan = billingPlan(mapping.planKey, currency);
@@ -2828,6 +4122,12 @@ app.post('/api/billing/verify', requireBillingConfig, requireFirebaseUser, async
       razorpayRequest(`/payments/${encodeURIComponent(razorpayPaymentId)}`),
       razorpayRequest(`/plans/${encodeURIComponent(mapping.planId)}`)
     ]);
+    const message = `${razorpayPaymentId}|${subscription.id}`;
+    if (subscription.id !== razorpaySubscriptionId
+      || !validRazorpaySignature(message, razorpaySignature, process.env.RAZORPAY_KEY_SECRET)) {
+      response.status(400).json({ error: 'Payment signature verification failed.' });
+      return;
+    }
     if (subscription.plan_id !== mapping.planId
       || !planMatchesRazorpay(providerPlan, expectedPlan)
       || payment.subscription_id !== razorpaySubscriptionId
@@ -2841,7 +4141,21 @@ app.post('/api/billing/verify', requireBillingConfig, requireFirebaseUser, async
     const entitlement = entitlementFromSubscription(subscription, mapping.planKey);
     if (payment.status === 'captured' && entitlement?.status === 'active') {
       entitlement.currency = currency;
+      let accessRevoked = false;
       await db.runTransaction(async transaction => {
+        const currentMappingSnapshot = await transaction.get(mappingRef);
+        const currentMapping = currentMappingSnapshot.data() || {};
+        const currentEntitlementSnapshot = await transaction.get(userEntitlementDocument(db, request.user.uid));
+        const currentEntitlement = currentEntitlementSnapshot.data() || {};
+        const currentRevocationApplies = currentEntitlement.adminRevoked === true
+          && (!Number(currentMapping.createdAt)
+            || Number(currentMapping.createdAt) <= Number(currentEntitlement.adminRevokedAt));
+        if (currentMapping.uid !== request.user.uid
+          || currentMapping.adminRevoked === true
+          || currentRevocationApplies) {
+          accessRevoked = true;
+          return;
+        }
         transaction.set(mappingRef, {
           status: subscription.status,
           currentEnd: entitlement.validUntil,
@@ -2857,6 +4171,7 @@ app.post('/api/billing/verify', requireBillingConfig, requireFirebaseUser, async
           ...entitlement,
           currency,
           subscriptionId: razorpaySubscriptionId,
+          adminRevoked: false,
           cancelAtCycleEnd: false
         });
         transaction.set(db.doc(`billingAccessHistory/${razorpayPaymentId}`), {
@@ -2874,6 +4189,12 @@ app.post('/api/billing/verify', requireBillingConfig, requireFirebaseUser, async
           createdAt: Number(payment.created_at) > 0 ? Number(payment.created_at) * 1000 : Date.now()
         }, { merge: true });
       });
+      if (accessRevoked) {
+        response.status(409).json({
+          error: 'Pro access for this subscription was revoked by an administrator. Start a new subscription to restore access.'
+        });
+        return;
+      }
       await db.doc(`billingPayments/${razorpayPaymentId}`).set({
         uid: request.user.uid, providerPaymentId: razorpayPaymentId, subscriptionId: razorpaySubscriptionId,
         planKey: mapping.planKey, status: 'captured', amount: expectedAmount,
@@ -3176,6 +4497,16 @@ app.get('/', (_request, response) => {
 
 app.get('/home.html', (_request, response) => {
   response.sendFile(path.join(distDir, 'home.html'));
+});
+
+app.get('/file/d/:shareId/view', (request, response, next) => {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(request.params.shareId)) {
+    response.status(404).json({ error: 'This public resume link is invalid.' });
+    return;
+  }
+  response.sendFile(path.join(distDir, 'editor.html'), error => {
+    if (error) next(error);
+  });
 });
 
 app.use(express.static(distDir));

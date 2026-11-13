@@ -31,6 +31,7 @@ let currentUser = null;
 let entitlement = null;
 let billingConfig = null;
 let billingConfigError = null;
+let entitlementResolved = false;
 let refreshId = 0;
 let cancellationPending = false;
 
@@ -133,8 +134,9 @@ function renderPayments(payments) {
 function updateVoucherControls() {
   const signInRequired = !currentUser;
   const proActive = entitlement?.status === 'active';
+  const planCheckPending = Boolean(currentUser) && !entitlementResolved;
   const voucherUnavailable = billingConfig?.entitlementEnabled === false;
-  const disabled = signInRequired || voucherUnavailable;
+  const disabled = signInRequired || planCheckPending || proActive || voucherUnavailable;
   voucherInput.disabled = disabled;
   redeemButton.disabled = disabled;
   $('#voucherSection').classList.toggle('voucher-disabled', disabled);
@@ -145,6 +147,10 @@ function updateVoucherControls() {
     voucherInput.placeholder = 'Sign in to redeem a voucher';
     voucherStatus.dataset.state = 'error';
     voucherStatus.textContent = 'Sign in with Google before redeeming a voucher.';
+  } else if (planCheckPending) {
+    voucherInput.placeholder = 'Checking plan status…';
+    voucherStatus.dataset.state = '';
+    voucherStatus.textContent = 'Checking whether this account can redeem a voucher…';
   } else if (!billingConfig) {
     voucherInput.placeholder = 'Enter voucher code';
     voucherStatus.dataset.state = billingConfigError ? 'error' : '';
@@ -155,10 +161,10 @@ function updateVoucherControls() {
     voucherStatus.dataset.state = 'error';
     voucherStatus.textContent = 'Voucher redemption is unavailable because server-side account verification is not configured.';
   } else {
-    voucherInput.placeholder = 'Enter voucher code';
+    voucherInput.placeholder = proActive ? 'Voucher unavailable while Pro is active' : 'Enter voucher code';
     voucherStatus.dataset.state = proActive ? 'success' : '';
     voucherStatus.textContent = proActive
-      ? `Pro is already active. A valid voucher will start after your current access ends${entitlement.validUntil ? ` on ${new Date(entitlement.validUntil).toLocaleDateString('en-IN')}` : ''}.`
+      ? `Voucher redemption is disabled while Pro is active${entitlement.lifetime ? '.' : ` through ${entitlement.validUntil ? new Date(entitlement.validUntil).toLocaleDateString('en-IN') : 'the current plan period'}.`}`
       : 'Enter a voucher code to check it for this account.';
   }
 }
@@ -177,11 +183,15 @@ function updatePlanSummary(user) {
     planDetail.textContent = 'No active Pro plan is linked to this account.';
   } else {
     const plan = entitlement.billingPlan === 'voucher' ? 'Pro voucher' : `Pro ${entitlement.billingPlan || ''}`.trim();
-    const validUntil = entitlement.validUntil ? new Date(entitlement.validUntil).toLocaleDateString('en-IN') : 'the current billing period';
+    const validUntil = entitlement.lifetime
+      ? 'Lifetime'
+      : entitlement.validUntil ? new Date(entitlement.validUntil).toLocaleDateString('en-IN') : 'the current billing period';
     const renews = entitlement.cancelAtCycleEnd ? ' This plan will not renew.' : '';
     const scheduled = entitlement.scheduledPlan === 'yearly' ? ` Yearly billing is scheduled after ${validUntil}.` : '';
     planTitle.textContent = `${plan} active`;
-    planDetail.textContent = `Access continues through ${validUntil}.${renews}${scheduled}`;
+    planDetail.textContent = entitlement.lifetime
+      ? `Lifetime Pro access does not expire.${renews}`
+      : `Access continues through ${validUntil}.${renews}${scheduled}`;
   }
 }
 
@@ -189,6 +199,7 @@ async function refreshBillingPage(user, authError = null) {
   const requestId = ++refreshId;
   currentUser = user;
   entitlement = null;
+  entitlementResolved = !user;
   updatePlanSummary(user);
   updateVoucherControls();
 
@@ -215,14 +226,21 @@ async function refreshBillingPage(user, authError = null) {
 
   if (currentUser?.uid !== user.uid || requestId !== refreshId) return;
   const [entitlementResult, activityResult, paymentsResult] = await Promise.allSettled([
-    billingConfig?.entitlementEnabled ? loadBillingEntitlement(user) : Promise.resolve(null),
+    billingConfig?.entitlementEnabled
+      ? loadBillingEntitlement(user, { forceRefresh: true })
+      : Promise.resolve(null),
     loadBillingActivity(user),
     loadBillingPayments(user)
   ]);
   if (currentUser?.uid !== user.uid || requestId !== refreshId) return;
 
-  if (entitlementResult.status === 'fulfilled') entitlement = entitlementResult.value;
-  else billingStatus.textContent = entitlementResult.reason?.message || 'Could not load plan status.';
+  if (entitlementResult.status === 'fulfilled') {
+    entitlement = entitlementResult.value;
+    entitlementResolved = true;
+  } else {
+    entitlementResolved = false;
+    billingStatus.textContent = entitlementResult.reason?.message || 'Could not load plan status.';
+  }
   if (activityResult.status === 'fulfilled') renderHistory(activityResult.value || []);
   else {
     historyList.replaceChildren();
@@ -366,6 +384,16 @@ $('#voucherForm').addEventListener('submit', async event => {
     voucherStatus.textContent = 'Sign in with Google before redeeming a voucher.';
     return;
   }
+  if (entitlement?.status === 'active') {
+    voucherStatus.dataset.state = 'error';
+    voucherStatus.textContent = 'Voucher redemption is disabled while Pro is active.';
+    return;
+  }
+  if (!entitlementResolved) {
+    voucherStatus.dataset.state = '';
+    voucherStatus.textContent = 'Wait until your plan status has been checked before redeeming a voucher.';
+    return;
+  }
   if (billingConfig?.entitlementEnabled === false) {
     voucherStatus.dataset.state = 'error';
     voucherStatus.textContent = 'Voucher redemption is unavailable because server-side account verification is not configured.';
@@ -383,8 +411,8 @@ $('#voucherForm').addEventListener('submit', async event => {
     voucherStatus.dataset.state = 'success';
     await refreshBillingPage(currentUser);
     voucherStatus.dataset.state = 'success';
-    voucherStatus.textContent = result.queued
-      ? `Voucher accepted. It will add ${result.entitlement.pendingVoucherCount} voucher${result.entitlement.pendingVoucherCount === 1 ? '' : 's'} after your current Pro access ends${result.entitlement.pendingVoucherStartAt ? ` on ${new Date(result.entitlement.pendingVoucherStartAt).toLocaleDateString('en-IN')}` : ''}.`
+    voucherStatus.textContent = entitlement.lifetime
+      ? 'Voucher redeemed. Lifetime Pro access is active.'
       : `Voucher redeemed. Pro is active through ${new Date(entitlement.validUntil).toLocaleDateString('en-IN')}.`;
   } catch (error) {
     voucherStatus.dataset.state = 'error';

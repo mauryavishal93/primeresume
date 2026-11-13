@@ -2,7 +2,7 @@ import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { estimateExperienceYears, GENERIC_ATS_WEIGHTING, weightedScore } from './ats-scoring.js';
 import { buildCoverLetterDraft } from './cover-letter.js';
 import { buildCoverLetterPdf } from './cover-letter-pdf.js';
-import { loadBillingConfig, loadBillingEntitlement } from './billing-client.js';
+import { clearBillingEntitlementCache, loadBillingConfig, loadBillingEntitlement } from './billing-client.js';
 import { alertModern, confirmModern, promptModern } from './modern-modal.js';
 import { canUseFeature, FEATURE_IDS, isProTemplate, PLAN_CONFIG, shouldPromptForJobDescriptionAtsUpgrade, TEMPLATE_IDS } from './plan-access.js';
 import { formatCurrencyPrice, preferredPricingCurrency } from './pricing-currency.js';
@@ -21,20 +21,38 @@ import {
 } from './resume-persistence.js';
 import { buildResumePdf, drawPdfText } from './resume-pdf.js';
 import {
- cloudConfigured, consumeProTemplateDownload, deleteResume, getAccountProfile, getLastWorkedResumeId, getProTemplateDownloadStatus, googleSignInErrorMessage, listResumes, observeAuth, saveResume, setLastWorkedResumeId,
+ cloudConfigured, consumeProTemplateDownload, createSharedResume, deleteResume, getAccountProfile, getLastWorkedResumeId, getProTemplateDownloadStatus, getSharedResume, googleSignInErrorMessage, isGoogleSignInCancellation, listResumes, listSharedResumes, observeAuth, revokeSharedResume, saveResume, setLastWorkedResumeId,
  signInWithGoogle, signOutUser
 } from './firebase-cloud.js';
 import { getAccountPhotoUrls, setAccountAvatar } from './account-avatar.js';
+import { cacheAccountPhoto, cacheAccountPhotoFromUrls, cacheProBadgeHint, clearCachedProBadgeHint, clearUserSessionCache, getCachedAccountAvatarHint, getCachedAccountPhoto, getCachedProBadgeHint } from './session-cache.js';
 import { zoomFromPinch } from './zoom.js';
+
+window.addEventListener('firebase-account-sign-in-disabled', () => {
+ void alertModern({
+  title:'Your account is banned!',
+  message:googleSignInErrorMessage({code:'auth/user-disabled'}),
+  variant:'default'
+ });
+});
 
 (()=>{'use strict';
 const $=id=>document.getElementById(id),deep=x=>JSON.parse(JSON.stringify(x)),uid=()=>Math.random().toString(36).slice(2,10);
 const baseDocumentTitle=document.title;
 const clamp=(v,min,max,def)=>{v=Number(v);return Number.isFinite(v)?Math.max(min,Math.min(max,v)):def};
 const PAGE_W=794,PAGE_H=1122,DEFAULT_MARGIN=32,FONTS=['Arial','Georgia','Verdana','Trebuchet MS','Times New Roman','Courier New'];
-const homepageDemoMode=new URLSearchParams(location.search).get('homepageDemo')==='1';
+const pageParams=new URLSearchParams(location.search);
+const publicSharePath=location.pathname.match(/^\/file\/d\/([A-Za-z0-9_-]{1,128})\/view\/?$/);
+const homepageDemoMode=pageParams.get('homepageDemo')==='1';
+const incomingShareId=pageParams.get('share')||publicSharePath?.[1]||'';
+const publicPdfMode=pageParams.get('pdf')==='1'||Boolean(publicSharePath);
+const publicShareOrigin=['localhost','127.0.0.1'].includes(location.hostname)
+ ?'https://resumeout.vercel.app'
+ :location.origin;
 document.documentElement.classList.toggle('homepage-demo',homepageDemoMode);
 document.body.classList.toggle('homepage-demo',homepageDemoMode);
+document.documentElement.classList.toggle('public-resume-pdf',publicPdfMode);
+document.body.classList.toggle('public-resume-pdf',publicPdfMode);
 fitHomepageDemoViewport();
 const KNOWN_TYPES=['summary','experience','education','skills','projects','certifications','custom'];
 const SKILL_STYLES=[['tags','Tags'],['pills','Pills'],['outlined','Outlined'],['list','Simple list'],['inline','Inline'],['grid','Grid'],['soft','Soft color'],['gradient','Gradient'],['underline','Underline'],['numbered','Numbered'],['compact','Compact'],['dense','Dense (space-saving)']];
@@ -119,8 +137,18 @@ const browserStorage=homepageDemoMode
  :{getItem:(...args)=>window.localStorage.getItem(...args),setItem:(...args)=>window.localStorage.setItem(...args),removeItem:(...args)=>window.localStorage.removeItem(...args)};
 const guestResumeStorage=createGuestResumeStorage(browserStorage,normalizeState);
 let lastWorkedResumeWrite=Promise.resolve();
-let guestResumeLoaded=false,guestResumeDirty=false,wizardResumeDraftPending=false,authGeneration=0,authStateResolved=false,cloudSessionGeneration=0,cloudReady=false,cloudDraftDirty=false;
+let guestResumeLoaded=false,guestResumeDirty=false,wizardResumeDraftPending=false,authGeneration=0,authStateResolved=false,cloudSessionGeneration=0,cloudReady=false,cloudDraftDirty=false,sharedCopyMode=!!incomingShareId,sharedResumeName='';
 let verifiedEntitlement=null,pendingProTemplate=null,pendingUpgradeFeature='';
+let proBadgeHint=getCachedProBadgeHint();
+const initialAccountAvatarHint=getCachedAccountAvatarHint();
+if(initialAccountAvatarHint){
+ document.body.classList.add('account-avatar-cached');
+ $('accountMenu').dataset.authShellVisible='true';
+ $('accountMenuProfile').hidden=true;
+ const initialAvatar=$('accountAvatar'),initialLargeAvatar=$('accountAvatarLarge');
+ setAccountAvatar(initialAvatar,'U',initialAccountAvatarHint.photoDataUrl);
+ setAccountAvatar(initialLargeAvatar,'U',initialAccountAvatarHint.photoDataUrl);
+}
 let billingPricingConfig=null;
 let cloudUser=null,activeCloudResumeId=null,activeCloudRevision=null,cloudSaveTimer=null,cloudSaving=false,cloudSavePending=false,cloudSaveBlocked=false,cloudResumes=[],proTemplateDownloadsRemaining=null,openCloudOnAuth=new URLSearchParams(location.search).get('open')==='cloud';
 let signOutPending=false;
@@ -161,20 +189,33 @@ function insertPointerLine(sectionId,afterLine){
  requestAnimationFrame(()=>$('inspector').querySelector(`[data-section-pointer-line][data-section-id="${sectionId}"][data-line="${lineIndex}"]`)?.focus());
 }
 function toast(msg){$('toast').textContent=msg;$('toast').classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('toast').classList.remove('show'),2300)}
-function updateProLabel(){const isPro=canUseFeature(FEATURE_IDS.ALL_TEMPLATES,verifiedEntitlement);const badge=$('proBrandBadge');if(badge)badge.hidden=!isPro;document.title=isPro?`${baseDocumentTitle} | Pro`:baseDocumentTitle}
+function updateProLabel(){const cachedBadgeIsCurrent=(proBadgeHint?.lifetime===true||proBadgeHint?.validUntil>Date.now())&&(!authStateResolved||cloudUser?.uid===proBadgeHint.uid);const isPro=canUseFeature(FEATURE_IDS.ALL_TEMPLATES,verifiedEntitlement)||cachedBadgeIsCurrent;const badge=$('proBrandBadge');if(badge)badge.hidden=!isPro;document.title=isPro?`${baseDocumentTitle} | Pro`:baseDocumentTitle}
+updateProLabel();
 async function refreshEditorBillingStatus(user,generation){
  try{
+  verifiedEntitlement=null;
+  updateProLabel();
+  renderTemplates();
   const config=await loadBillingConfig();
   if(authGeneration!==generation||cloudUser?.uid!==user.uid)return;
   billingPricingConfig=config;
-  verifiedEntitlement=config.entitlementEnabled?await loadBillingEntitlement(user):null;
+  verifiedEntitlement=config.entitlementEnabled?await loadBillingEntitlement(user,{forceRefresh:true}):null;
   if(authGeneration!==generation||cloudUser?.uid!==user.uid)return;
+  if(config.entitlementEnabled){
+   cacheProBadgeHint(user.uid,verifiedEntitlement);
+   proBadgeHint=getCachedProBadgeHint();
+  }else{
+   clearCachedProBadgeHint(user.uid);
+   proBadgeHint=null;
+  }
   updateProLabel();
   renderTemplates();
  }catch(error){
   if(authGeneration!==generation||cloudUser?.uid!==user.uid)return;
   console.error('Could not load the signed-in account billing status.',error);
   verifiedEntitlement=null;
+  clearBillingEntitlementCache(user);
+  proBadgeHint=getCachedProBadgeHint();
   updateProLabel();
   renderTemplates();
  }
@@ -193,17 +234,18 @@ function setSaveState(message){
   }
 }
 function currentSaveStateLabel(){
+  if(sharedCopyMode)return 'Shared copy — not saved';
   if(cloudUser)return cloudSaveBlocked?'Unable to save changes':'All changes saved';
   return guestResumeStorage.enabled?'Saved locally':'Browser saving is off. Refreshing will discard your resume.';
 }
 function updateBrowserPersistenceUI(){
  const toggle=$('browserSaveControl'),input=$('browserSaveToggle');
- if(toggle)toggle.hidden=!shouldShowBrowserSaveToggle(cloudUser,authStateResolved);
+ if(toggle)toggle.hidden=sharedCopyMode||!shouldShowBrowserSaveToggle(cloudUser,authStateResolved);
  if(input)input.checked=guestResumeStorage.enabled;
  if(!cloudUser&&!saveTimer&&!localPersistenceBlocked)setSaveState(currentSaveStateLabel());
 }
 function scheduleCloudSave(){
- if(!cloudUser||!cloudReady||cloudSaveBlocked)return;
+ if(sharedCopyMode||!cloudUser||!cloudReady||cloudSaveBlocked)return;
  clearTimeout(cloudSaveTimer);
  cloudSaveTimer=setTimeout(persistCloudResume,700);
 }
@@ -223,7 +265,7 @@ async function rememberLastWorkedResume(uid,resumeId,generation=cloudSessionGene
  }
 }
 async function persistCloudResume(){
- if(!cloudUser||!cloudReady||cloudSaveBlocked)return;
+ if(sharedCopyMode||!cloudUser||!cloudReady||cloudSaveBlocked)return;
  if(cloudSaving){cloudSavePending=true;return}
  const uid=cloudUser.uid,id=activeCloudResumeId,generation=cloudSessionGeneration,snapshot=deep(state),expectedRevision=id?activeCloudRevision:null;
  cloudSaving=true;
@@ -250,6 +292,7 @@ async function persistCloudResume(){
 }
 function saveLocal(syncCloud=true){
  saveActiveFreeLayout();
+ if(sharedCopyMode){setSaveState('Shared copy — not saved');return}
  const persistenceMode=resumeStorageMode(cloudUser,guestResumeStorage.enabled);
  if(persistenceMode==='cloud'){
   cloudDraftDirty=true;
@@ -280,7 +323,7 @@ function renderCloudResumes(){
  if(!cloudResumes.length){list.innerHTML='<div class="cloud-empty">No cloud resumes yet. Save your current resume as a new cloud copy to get started.</div>';return}
  list.innerHTML=cloudResumes.map(item=>{
   const updated=item.updatedAt?new Date(item.updatedAt).toLocaleString():'Date unavailable';
-  return `<div class="cloud-resume-item"><div class="cloud-resume-meta"><strong>${$esc(item.name||'Untitled resume')}</strong><small>Updated ${$esc(updated)}</small></div><button class="btn soft" type="button" data-cloud-load="${$esc(item.id)}">Open</button><button class="btn danger" type="button" data-cloud-delete="${$esc(item.id)}">Delete</button></div>`;
+  return `<div class="cloud-resume-item"><div class="cloud-resume-meta"><strong>${$esc(item.name||'Untitled resume')}</strong><small>Updated ${$esc(updated)}</small></div><button class="btn soft" type="button" data-cloud-load="${$esc(item.id)}">Open</button><button class="btn outline cloud-icon-btn" type="button" data-cloud-share="${$esc(item.id)}" aria-label="Share ${$esc(item.name||'Untitled resume')}" title="Share resume"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.7 10.6 6.6-4.2M8.7 13.4l6.6 4.2"/></svg></button><button class="btn danger cloud-icon-btn" type="button" data-cloud-delete="${$esc(item.id)}" aria-label="Delete ${$esc(item.name||'Untitled resume')}" title="Delete resume"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="m6 7 1 14h10l1-14"/><path d="M9 7V4h6v3"/></svg></button></div>`;
  }).join('');
 }
 async function refreshCloudResumes(){
@@ -387,18 +430,289 @@ async function removeCloudResume(id){
   toast('Cloud resume deleted.');
  }catch(error){toast(error.message||'Could not delete this cloud resume.')}
 }
+function resumeShareUrl(id){
+ const url=new URL(`/file/d/${encodeURIComponent(id)}/view`,publicShareOrigin);
+ url.searchParams.set('resourcekey',id);
+ return url.toString();
+}
+function resumeEditUrl(id){
+ const url=new URL('/editor.html',publicShareOrigin);
+ url.searchParams.set('share',id);
+ return url.toString();
+}
+async function copyResumeShareLink(value,input=null){
+ try{
+  await navigator.clipboard.writeText(value);
+ }catch(error){
+  if(input){
+   input.focus();
+   input.select();
+   if(document.execCommand('copy')){toast('Share link copied.');return}
+  }
+  toast(input?'Could not copy the link. Select and copy it from the text field.':'Could not access the clipboard. Open the share link and copy it manually.');
+  return;
+ }
+ toast('Share link copied.');
+}
+async function refreshSharedResumeList(){
+ const list=$('sharedResumeList');
+ list.replaceChildren();
+ if(!cloudUser){list.textContent='Sign in to manage your active share links.';return}
+ list.textContent='Loading your share links…';
+ try{
+  const uid=cloudUser.uid,generation=cloudSessionGeneration;
+  const shares=await listSharedResumes(uid);
+  if(cloudUser?.uid!==uid||cloudSessionGeneration!==generation)return;
+  list.replaceChildren();
+  if(!shares.length){list.textContent='You have no active share links.';return}
+  for(const share of shares){
+   const row=document.createElement('div');
+   row.className='resume-share-item';
+   const details=document.createElement('div');
+   const title=document.createElement('strong');
+   title.textContent=share.name;
+   const link=document.createElement('a');
+   link.href=resumeShareUrl(share.id);
+   link.textContent='View public PDF';
+   link.target='_blank';
+   link.rel='noopener noreferrer';
+   details.append(title,link);
+   const editCopy=document.createElement('span');
+   editCopy.className='resume-share-edit-copy';
+   editCopy.append(document.createTextNode('Open editable copy'));
+   const copyEdit=document.createElement('button');
+   copyEdit.className='resume-share-edit-copy-button';
+   copyEdit.type='button';
+   copyEdit.dataset.copyEditShare=share.id;
+   copyEdit.setAttribute('aria-label','Copy editable link');
+   copyEdit.title='Copy editable link';
+   copyEdit.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg>';
+   editCopy.append(copyEdit);
+   details.append(editCopy);
+   const actions=document.createElement('div');
+   actions.className='resume-share-item-actions';
+   const copy=document.createElement('button');
+   copy.className='btn outline small';
+   copy.type='button';
+   copy.dataset.copyShare=share.id;
+   copy.textContent='Copy link';
+   const revoke=document.createElement('button');
+   revoke.className='btn danger small';
+   revoke.type='button';
+   revoke.dataset.revokeShare=share.id;
+   revoke.textContent='Revoke';
+   actions.append(copy,revoke);
+   row.append(details,actions);
+   list.append(row);
+  }
+ }catch(error){
+  console.error('Could not load your resume share links.',error);
+  list.textContent=error.message||'Could not load your share links. Try again.';
+ }
+}
+function openShareResumeModal(link=''){
+ if(!cloudUser){toast('Sign in with Google to create and manage resume share links.');return}
+ $('resumeShareLink').value=link;
+ $('resumeShareLinkResult').hidden=!link;
+ $('shareResumeModalBg').classList.add('show');
+ $('shareResumeModalBg').setAttribute('aria-hidden','false');
+ refreshSharedResumeList();
+}
+function closeShareResumeModal(){
+ $('shareResumeModalBg').classList.remove('show');
+ $('shareResumeModalBg').setAttribute('aria-hidden','true');
+}
+async function createResumeShareLink(resume=null,triggerButton=null){
+ if(!cloudUser){toast('Sign in with Google to create a share link.');return}
+ const button=triggerButton||$('createResumeShare');
+ if(button){
+  button.disabled=true;
+  button.setAttribute('aria-busy','true');
+ }
+ try{
+  const uid=cloudUser.uid,generation=cloudSessionGeneration;
+  if(resume?.id===activeCloudResumeId)saveActiveFreeLayout();
+  const snapshot=deep(resume?.id===activeCloudResumeId?state:resume?.state||state);
+  snapshot.docName=snapshot.docName||resume?.name||'Untitled resume';
+  const share=await createSharedResume(
+   uid,
+   snapshot.docName||resume?.name||'Untitled resume',
+   snapshot,
+   resume?.id||activeCloudResumeId||''
+  );
+  if(cloudUser?.uid!==uid||cloudSessionGeneration!==generation)return;
+  const link=resumeShareUrl(share.id);
+  openShareResumeModal(link);
+  await copyResumeShareLink(link,$('resumeShareLink'));
+  if(!resume)toast('Public PDF link created.');
+ }catch(error){
+  console.error('Could not create a resume share link.',error);
+  toast(error.message||'Could not create a resume share link.');
+ }finally{
+  if(button){
+   button.disabled=false;
+   button.removeAttribute('aria-busy');
+  }
+ }
+}
+async function revokeResumeShare(id){
+ if(!cloudUser)return;
+ const confirmed=await confirmModern({
+  title:'Revoke resume link?',
+  message:'Anyone using this link will no longer be able to open the shared resume.',
+  confirmText:'Revoke link',
+  cancelText:'Keep link',
+  variant:'danger'
+ });
+ if(!confirmed)return;
+ const uid=cloudUser.uid,generation=cloudSessionGeneration;
+ try{
+  await revokeSharedResume(uid,id);
+  if(cloudUser?.uid!==uid||cloudSessionGeneration!==generation)return;
+  if($('resumeShareLink').value===resumeShareUrl(id)){
+   $('resumeShareLinkResult').hidden=true;
+   $('resumeShareLink').value='';
+  }
+  await refreshSharedResumeList();
+  toast('Resume share link revoked.');
+ }catch(error){
+  console.error('Could not revoke the resume share link.',error);
+  toast(error.message||'Could not revoke this resume share link.');
+ }
+}
+async function loadIncomingSharedResume(){
+ const status=$('incomingShareStatus');
+ $('incomingShareModalBg').classList.add('show');
+ $('incomingShareModalBg').setAttribute('aria-hidden','false');
+ status.textContent='Loading the shared resume…';
+ try{
+  const shared=await getSharedResume(incomingShareId);
+  state=normalizeState(shared.state);
+  sharedResumeName=shared.name;
+  state.docName=shared.name;
+  selectedId=null;
+  history=[];redoHistory=[];
+  $('sharedCopyTitle').textContent=shared.name;
+  $('sharedCopyNotice').hidden=false;
+  $('incomingShareModalBg').classList.remove('show');
+  $('incomingShareModalBg').setAttribute('aria-hidden','true');
+  render();
+  setSaveState('Shared copy — not saved');
+  if(!publicPdfMode)window.history.replaceState(null,'',location.pathname+location.hash);
+  if(publicPdfMode){
+   $('sharedCopyNotice').hidden=true;
+   $('cancelPdfPreview').textContent='Close';
+   $('closePdfPreview').setAttribute('aria-label','Close public resume PDF');
+   setTimeout(()=>void exportPDF(),0);
+  }
+ }catch(error){
+  console.error('Could not open the shared resume.',error);
+  status.textContent=error.code==='permission-denied'
+   ?'This resume share link is unavailable. Ask the owner for a new link.'
+   :error.message||'This shared resume could not be opened.';
+  $('incomingShareLoading').hidden=true;
+  $('incomingShareError').hidden=false;
+ }
+}
+async function saveIncomingSharedCopy(){
+ if(!sharedCopyMode)return;
+ if(!cloudUser){toast('Sign in with Google to save your own editable copy.');return}
+ const button=$('saveSharedCopyBtn');
+ button.disabled=true;
+ button.setAttribute('aria-busy','true');
+ try{
+  const uid=cloudUser.uid,generation=cloudSessionGeneration;
+  saveActiveFreeLayout();
+  const copy=deep(state);
+  const name=copy.docName||`${sharedResumeName} (copy)`;
+  const result=await saveResume(uid,null,name,copy,null);
+  if(cloudUser?.uid!==uid||cloudSessionGeneration!==generation)return;
+  copy.docName=name;
+  state=copy;
+  sharedCopyMode=false;
+  cloudReady=true;
+  cloudSaveBlocked=false;
+  cloudDraftDirty=false;
+  activeCloudResumeId=result.id;
+  activeCloudRevision=result.revision;
+  $('sharedCopyNotice').hidden=true;
+  render();
+  void rememberLastWorkedResume(uid,result.id,cloudSessionGeneration);
+  setSaveState('All changes saved');
+  await refreshCloudResumes();
+  toast('Your editable cloud copy is saved. The shared original was not changed.');
+ }catch(error){
+  console.error('Could not save your copy of the shared resume.',error);
+  toast(error.message||'Could not save your copy of the shared resume.');
+ }finally{
+  button.disabled=false;
+  button.removeAttribute('aria-busy');
+ }
+}
+function updateSharedCopyAuth(user){
+ cloudUser=user;
+ cloudReady=false;
+ activeCloudResumeId=null;
+ activeCloudRevision=null;
+ cloudResumes=[];
+ $('googleSignInBtn').hidden=!!user;
+ $('cloudActions').hidden=!!user;
+ $('accountMenu').hidden=false;
+ $('accountMenuProfile').hidden=!user;
+ $('accountMenuSignInBtn').hidden=!!user;
+ $('accountMenuSignInBtn').disabled=false;
+ $('accountMenuSignInBtn').textContent='Sign in with Google';
+ $('cloudResumesBtn').hidden=!user;
+ $('myPostsLink').hidden=!user;
+ $('myAccountLink').hidden=!user;
+ $('googleSignOutBtn').hidden=!user;
+ $('googleSignOutBtn').disabled=false;
+ $('googleSignOutBtn').textContent='Sign out';
+ $('saveSharedCopyBtn').disabled=!user;
+ if(user){
+  const accountName=user.displayName?.trim()||user.email?.split('@')[0]||'Google user';
+  const initial=Array.from(accountName)[0]?.toLocaleUpperCase()||'U';
+  $('accountUserName').textContent=accountName;
+  $('accountUserEmail').textContent=user.email||'';
+  const cachedPhoto=getCachedAccountPhoto(user.uid);
+  const photos=getAccountPhotoUrls(user,cachedPhoto??'');
+  setAccountAvatar($('accountAvatar'),initial,photos);
+  setAccountAvatar($('accountAvatarLarge'),initial,photos);
+  void cacheAccountPhotoFromUrls(user.uid,getAccountPhotoUrls(user));
+  $('accountMenu').querySelector('summary').setAttribute('aria-label',`Account menu for ${accountName}`);
+ }else{
+  $('accountUserName').textContent='Guest';
+  $('accountUserEmail').textContent='';
+  $('accountAvatar').textContent='G';
+  $('accountAvatarLarge').textContent='G';
+  setAccountAvatar($('accountAvatar'),'G');
+  setAccountAvatar($('accountAvatarLarge'),'G');
+  $('accountMenu').querySelector('summary').setAttribute('aria-label','Account menu');
+ }
+ $('cloudAccount').textContent=user?`Signed in as ${user.email||user.displayName||'Google user'}.`:'Sign in to save your own copy.';
+ updateBrowserPersistenceUI();
+ setSaveState('Shared copy — not saved');
+}
 async function updateCloudAccount(user,error){
  authStateResolved=true;
+ document.body.classList.remove('auth-state-pending');
+ document.body.classList.remove('account-avatar-cached');
  if(error){
+  clearCachedProBadgeHint(proBadgeHint?.uid);
+  proBadgeHint=null;
   proTemplateDownloadsRemaining=null;
   verifiedEntitlement=null;
   updateProTemplatePreviewAllowance();
   updateProLabel();
   $('googleSignInBtn').disabled=true;
   $('googleSignInLabel').textContent='Cloud setup needed';
-  $('googleSignInBtn').title=error.message;
+  $('googleSignInBtn').title=authErrorMessage(error);
   $('cloudActions').hidden=false;
   $('accountMenu').hidden=false;
+  $('accountMenuProfile').hidden=true;
+  $('accountMenuSignInBtn').hidden=false;
+  $('accountMenuSignInBtn').disabled=true;
+  $('accountMenuSignInBtn').textContent='Cloud setup needed';
   $('cloudResumesBtn').hidden=true;
   $('myPostsLink').hidden=true;
   $('myAccountLink').hidden=true;
@@ -411,10 +725,14 @@ async function updateCloudAccount(user,error){
   setAccountAvatar($('accountAvatar'),'G');
   setAccountAvatar($('accountAvatarLarge'),'G');
   $('accountMenu').querySelector('summary').setAttribute('aria-label','Account menu');
-  $('cloudAccount').textContent=error.message;
+  $('cloudAccount').textContent=authErrorMessage(error);
   renderCloudResumes();
   renderTemplates();
   updateBrowserPersistenceUI();
+  return;
+ }
+ if(sharedCopyMode){
+  updateSharedCopyAuth(user);
   return;
  }
  const previousUser=cloudUser;
@@ -422,6 +740,14 @@ async function updateCloudAccount(user,error){
  const accountChanged=transition!=='unchanged';
  const guestLogin=transition==='guest-login';
  const loggingOut=transition==='logout';
+ if(previousUser && previousUser.uid!==user?.uid){
+  clearUserSessionCache(previousUser.uid);
+  clearBillingEntitlementCache(previousUser);
+ }
+ if(!user||proBadgeHint?.uid&&proBadgeHint.uid!==user.uid){
+  clearCachedProBadgeHint(proBadgeHint?.uid);
+  proBadgeHint=null;
+ }
  const accountSwitch=transition==='account-switch';
  const hasGuestDraft=guestLogin&&(guestResumeLoaded||guestResumeDirty||wizardResumeDraftPending);
  const generation=accountChanged?++authGeneration:authGeneration;
@@ -466,6 +792,10 @@ async function updateCloudAccount(user,error){
  $('googleSignInBtn').hidden=!!user;
  $('cloudActions').hidden=!!user;
  $('accountMenu').hidden=false;
+ $('accountMenuProfile').hidden=!user;
+ $('accountMenuSignInBtn').hidden=!!user;
+ $('accountMenuSignInBtn').disabled=false;
+ $('accountMenuSignInBtn').textContent='Sign in with Google';
  $('cloudResumesBtn').hidden=!user;
  $('myPostsLink').hidden=!user;
  $('myAccountLink').hidden=!user;
@@ -473,22 +803,27 @@ async function updateCloudAccount(user,error){
  $('googleSignOutBtn').disabled=false;
  $('googleSignOutBtn').textContent='Sign out';
  if(user){
+  $('accountMenu').open=false;
   const accountName=user.displayName?.trim()||user.email?.split('@')[0]||'Google user';
   const initial=Array.from(accountName)[0]?.toLocaleUpperCase()||'U';
   $('accountMenu').querySelector('summary').setAttribute('aria-label',`Account menu for ${accountName}`);
   $('accountUserName').textContent=accountName;
   $('accountUserEmail').textContent=user.email||'';
-  $('accountAvatar').textContent=initial;
-  $('accountAvatarLarge').textContent=initial;
-  setAccountAvatar($('accountAvatar'),initial,getAccountPhotoUrls(user));
-  setAccountAvatar($('accountAvatarLarge'),initial,getAccountPhotoUrls(user));
   const accountUid=user.uid;
-  void getAccountProfile(user).then(profile=>{
-   if(cloudUser?.uid!==accountUid)return;
-   const photos=getAccountPhotoUrls(user,profile.photoDataUrl);
-   setAccountAvatar($('accountAvatar'),initial,photos);
-   setAccountAvatar($('accountAvatarLarge'),initial,photos);
-  }).catch(profileError=>console.error('Could not load the account profile image.',profileError));
+  const cachedPhoto=getCachedAccountPhoto(accountUid);
+  const photos=getAccountPhotoUrls(user,cachedPhoto??'');
+  setAccountAvatar($('accountAvatar'),initial,photos);
+  setAccountAvatar($('accountAvatarLarge'),initial,photos);
+  void cacheAccountPhotoFromUrls(accountUid,getAccountPhotoUrls(user));
+  if(cachedPhoto===null){
+   void getAccountProfile(user).then(profile=>{
+    if(cloudUser?.uid!==accountUid)return;
+    cacheAccountPhoto(accountUid,profile.photoDataUrl);
+    const photos=getAccountPhotoUrls(user,profile.photoDataUrl);
+    setAccountAvatar($('accountAvatar'),initial,photos);
+    setAccountAvatar($('accountAvatarLarge'),initial,photos);
+   }).catch(profileError=>console.error('Could not load the account profile image.',profileError));
+  }
  }else{
   $('accountUserName').textContent='Guest';
   $('accountUserEmail').textContent='';
@@ -593,7 +928,7 @@ window.addEventListener('focus',async()=>{
  try{
   const config=await loadBillingConfig();
   billingPricingConfig=config;
-  const entitlement=config.entitlementEnabled?await loadBillingEntitlement(user):null;
+  const entitlement=config.entitlementEnabled?await loadBillingEntitlement(user,{forceRefresh:true}):null;
   if(cloudUser?.uid!==user.uid)return;
   verifiedEntitlement=entitlement;
   if(!canUseFeature(FEATURE_IDS.ALL_TEMPLATES,verifiedEntitlement)) {
@@ -1072,7 +1407,9 @@ function renderSheets(){
   sh.style.transform=zoom===1?'':`scale(${zoom})`;sh.style.marginBottom=zoom===1?'':((zoom-1)*PAGE_H)+'px';
  });
  $('hint').textContent=state.mode==='free'?'Free position: use the move handle to place sections and the right edge to resize. Pages are added automatically as content grows.':'Click any name, heading, bullet, skill, or paragraph on the page to edit · Use the right panel for design and photo details';
- $('zoomLabel').textContent=Math.round(zoom*100)+'%';
+ const zoomPercent=Math.round(zoom*100);
+ $('zoomLabel').textContent=zoomPercent+'%';
+ $('zoomLabel').title=`Current zoom level: ${zoomPercent}%`;
  updateSectionTypographyCallout();
 }
 function fitMobileZoom(){
@@ -1791,7 +2128,7 @@ async function exportPDF(templateId=null){
  const generation=++pdfPreviewGeneration;
  const btn=$('pdfBtn'),status=$('pdfPreviewStatus'),frame=$('pdfPreviewFrame'),downloadBtn=$('downloadPdfPreview');
  openPdfPreview();
- $('pdfPreviewTitle').textContent='Preview your resume PDF';
+ $('pdfPreviewTitle').textContent=publicPdfMode?'Public resume PDF':'Preview your resume PDF';
  status.textContent='Preparing your PDF preview…';
  frame.hidden=true;
  $('pdfPreviewPages').replaceChildren();
@@ -1823,7 +2160,8 @@ async function exportPDF(templateId=null){
    resumeState:state,
   });
   if(generation!==pdfPreviewGeneration)return;
-  showPdfPreview(blob,`${(state.docName||'resume').replace(/[^a-z0-9-_]+/gi,'-')}.pdf`,sheets.length,'Preview your resume PDF',renderedPages.map(page=>page.image));
+  if(publicPdfMode)document.body.classList.add('public-resume-pdf-ready');
+  showPdfPreview(blob,`${(state.docName||'resume').replace(/[^a-z0-9-_]+/gi,'-')}.pdf`,sheets.length,publicPdfMode?'Public resume PDF':'Preview your resume PDF',renderedPages.map(page=>page.image));
  }catch(e){
   console.error(e);
   status.textContent=e.message||'PDF preview could not be created. Close this window and try again.';
@@ -1845,6 +2183,7 @@ function showPdfPreview(blob,filename,pageCount,title,previewPages=[]){
  pdfPreviewBlob=blob;
  pdfPreviewFilename=filename;
  pdfPreviewUrl=URL.createObjectURL(blob);
+ if(publicPdfMode){location.replace(pdfPreviewUrl);return}
  $('pdfPreviewTitle').textContent=title;
  $('openPdfPreview').href=pdfPreviewUrl;
  const pages=$('pdfPreviewPages');
@@ -1860,12 +2199,12 @@ function showPdfPreview(blob,filename,pageCount,title,previewPages=[]){
  $('pdfPreviewFrame').hidden=false;
  const trialText=pdfPreviewUsesProTemplate&&!canUseFeature(FEATURE_IDS.ALL_TEMPLATES,verifiedEntitlement)
   ? !cloudUser
-   ? ' · Sign in with Google for two free Pro-template PDF downloads'
+   ? ' · Sign in for 2 free Pro PDFs'
    : proTemplateDownloadsRemaining===null
-    ? ' · Free Pro-template allowance will be checked when downloading'
-    : ` · ${proTemplateDownloadsRemaining} free Pro-template PDF download${proTemplateDownloadsRemaining===1?'':'s'} remaining`
+    ? ' · Free Pro PDFs checked at download'
+    : ` · ${proTemplateDownloadsRemaining} free Pro PDF${proTemplateDownloadsRemaining===1?'':'s'} left`
   : '';
- $('pdfPreviewStatus').textContent=`Text is selectable and searchable. ${pageCount} A4 page${pageCount===1?'':'s'}${trialText}. Review before downloading — the button is ready when you are.`;
+ $('pdfPreviewStatus').textContent=`Selectable, searchable text · ${pageCount} A4 page${pageCount===1?'':'s'}${trialText}.`;
  $('downloadPdfPreview').disabled=false;
  $('downloadPdfPreview').textContent='Download PDF';
 }
@@ -1899,6 +2238,7 @@ async function renderMobilePdfPages(blob,generation){
  }
 }
 function closePdfPreview(){
+ if(publicPdfMode){location.assign('/home.html');return}
  pdfPreviewGeneration++;
  $('pdfPreviewModalBg').classList.remove('show');
  $('pdfPreviewModalBg').setAttribute('aria-hidden','true');
@@ -1919,7 +2259,7 @@ async function downloadPreviewPdf(){
  button.disabled=true;
  button.textContent='Preparing download…';
  try{
-  if(usesProTemplate&&!canUseFeature(FEATURE_IDS.ALL_TEMPLATES,verifiedEntitlement)){
+  if(usesProTemplate&&!publicPdfMode&&!canUseFeature(FEATURE_IDS.ALL_TEMPLATES,verifiedEntitlement)){
    if(!cloudUser){
     closePdfPreview();
     showUpgrade('template-trial-sign-in','Sign in for free Pro-template downloads','Sign in with Google to use Pro templates and get two lifetime Pro-template PDF downloads.');
@@ -3583,10 +3923,12 @@ $('skipBackupApplyResumeImport').addEventListener('click',()=>applyResumeImport(
 $('cancelResumeImport').addEventListener('click',closeResumeImport);
 $('closeResumeImport').addEventListener('click',closeResumeImport);
 $('resumeImportModalBg').addEventListener('click',event=>{if(event.target===$('resumeImportModalBg'))closeResumeImport()});
- $('googleSignInBtn').addEventListener('click',async()=>{
+ const handleGoogleSignIn=async()=>{
   try{await signInWithGoogle()}
-  catch(error){toast(authErrorMessage(error))}
- });
+  catch(error){if(!isGoogleSignInCancellation(error))toast(authErrorMessage(error))}
+ };
+ $('googleSignInBtn').addEventListener('click',handleGoogleSignIn);
+ $('accountMenuSignInBtn').addEventListener('click',handleGoogleSignIn);
   $('browserSaveToggle').addEventListener('change',event=>{
    if(cloudUser){updateBrowserPersistenceUI();return}
    const enabled=event.target.checked;
@@ -3630,12 +3972,13 @@ $('resumeImportModalBg').addEventListener('click',event=>{if(event.target===$('r
     });
     if(!confirmed)return;
     $('accountMenu').open=false;
+    document.body.classList.add('auth-signout-pending');
     button.disabled=true;
     button.textContent='Signing out…';
     await signOutUser();
     window.location.assign('/home.html')
    }
-   catch(error){console.error('Could not sign out.',error);toast(error.message||'Could not sign out.')}
+   catch(error){document.body.classList.remove('auth-signout-pending');console.error('Could not sign out.',error);toast(error.message||'Could not sign out.')}
   finally{
    signOutPending=false;
    button.disabled=false;
@@ -3645,9 +3988,47 @@ $('resumeImportModalBg').addEventListener('click',event=>{if(event.target===$('r
  $('cloudResumesBtn').addEventListener('click',()=>{$('accountMenu').open=false;openCloudModal()});
  document.addEventListener('click',event=>{if(!$('accountMenu').contains(event.target))$('accountMenu').open=false});
  $('accountMenu').addEventListener('keydown',event=>{if(event.key==='Escape'&&$('accountMenu').open){$('accountMenu').open=false;$('accountMenu').querySelector('summary').focus()}});
+ const positionAccountMenuPanel=()=>{
+  const menu=$('accountMenu'),panel=menu.querySelector('.account-menu-panel');
+  if(!menu.open||!window.matchMedia('(max-width:640px)').matches){
+   panel.style.position='';
+   panel.style.top='';
+   panel.style.right='';
+   panel.style.width='';
+   panel.style.maxHeight='';
+   panel.style.overflowY='';
+   return;
+  }
+  const triggerBounds=menu.querySelector('summary').getBoundingClientRect();
+  panel.style.position='fixed';
+  panel.style.top=`${triggerBounds.bottom+8}px`;
+  panel.style.right='8px';
+  panel.style.width='min(300px, calc(100vw - 16px))';
+  panel.style.maxHeight=`calc(100dvh - ${triggerBounds.bottom+16}px)`;
+  panel.style.overflowY='auto';
+ };
+ $('accountMenu').addEventListener('toggle',positionAccountMenuPanel);
+ window.addEventListener('resize',positionAccountMenuPanel);
  $('closeCloudModal').addEventListener('click',closeCloudModal);
  $('closeCloudModalAction').addEventListener('click',closeCloudModal);
  $('cloudModalBg').addEventListener('click',event=>{if(event.target===$('cloudModalBg'))closeCloudModal()});
+ $('shareResumeBtn').addEventListener('click',()=>openShareResumeModal());
+ $('closeShareResume').addEventListener('click',closeShareResumeModal);
+ $('closeShareResumeAction').addEventListener('click',closeShareResumeModal);
+ $('shareResumeModalBg').addEventListener('click',event=>{if(event.target===$('shareResumeModalBg'))closeShareResumeModal()});
+ $('createResumeShare').addEventListener('click',()=>void createResumeShareLink());
+ $('copyResumeShare').addEventListener('click',()=>void copyResumeShareLink($('resumeShareLink').value,$('resumeShareLink')));
+ $('refreshSharedResumes').addEventListener('click',()=>void refreshSharedResumeList());
+ $('sharedResumeList').addEventListener('click',event=>{
+  const copy=event.target.closest('[data-copy-share]');
+  const copyEdit=event.target.closest('[data-copy-edit-share]');
+  const revoke=event.target.closest('[data-revoke-share]');
+  if(copy){const link=resumeShareUrl(copy.dataset.copyShare);void copyResumeShareLink(link)}
+  if(copyEdit){const link=resumeEditUrl(copyEdit.dataset.copyEditShare);void copyResumeShareLink(link)}
+  if(revoke)void revokeResumeShare(revoke.dataset.revokeShare);
+ });
+ $('saveSharedCopyBtn').addEventListener('click',()=>void saveIncomingSharedCopy());
+ $('incomingShareModalBg').addEventListener('click',event=>{if(event.target===$('incomingShareModalBg')&&!$('incomingShareError').hidden)location.assign('/home.html')});
  $('refreshCloudResumes').addEventListener('click',refreshCloudResumes);
  $('closeUpgrade').addEventListener('click',closeUpgrade);
  $('cancelUpgrade').addEventListener('click',closeUpgrade);
@@ -3661,8 +4042,13 @@ $('resumeImportModalBg').addEventListener('click',event=>{if(event.target===$('r
  $('saveCloudCopy').addEventListener('click',saveCurrentAsCloudCopy);
  $('cloudResumeList').addEventListener('click',event=>{
   const load=event.target.closest('[data-cloud-load]');
+  const share=event.target.closest('[data-cloud-share]');
   const remove=event.target.closest('[data-cloud-delete]');
   if(load)openCloudResume(load.dataset.cloudLoad);
+  if(share){
+   const resume=cloudResumes.find(item=>item.id===share.dataset.cloudShare);
+   if(resume)void createResumeShareLink(resume,share);
+  }
   if(remove)removeCloudResume(remove.dataset.cloudDelete);
  });
  $('downloadRecoveryBackup').addEventListener('click',downloadRecoveryData);
@@ -3695,15 +4081,16 @@ document.addEventListener('keydown',e=>{
   if(!e.shiftKey){e.preventDefault();undo();return}
  }
  if(modifier&&(key==='y'||(key==='z'&&e.shiftKey))){e.preventDefault();redo();return}
- if(e.key==='Escape'){if($('modalBg').classList.contains('show'))closeCustomSectionDialog();closeResumeImport();closeAts();closeCoverLetter();closePdfPreview();closeCloudModal();closeUpgrade()}
+ if(e.key==='Escape'){if($('modalBg').classList.contains('show'))closeCustomSectionDialog();closeResumeImport();closeAts();closeCoverLetter();closePdfPreview();closeCloudModal();closeShareResumeModal();closeUpgrade()}
 });
 const savedProject=homepageDemoMode
+ ||sharedCopyMode
  ?{state:null,key:null,raw:null,error:null,failedKey:null}
  :guestResumeStorage.load();
 if(savedProject.state)state=savedProject.state;
 guestResumeLoaded=Boolean(savedProject.state);
 let wizardDraftLoaded=false,wizardDraftError='',wizardDraftWarning='';
-if(requestedWizardResume){
+if(requestedWizardResume&&!sharedCopyMode){
  try{
   const serializedDraft=window.sessionStorage.getItem(RESUME_WIZARD_DRAFT_KEY);
   if(!serializedDraft)throw new Error('The resume wizard details could not be found in this browser session.');
@@ -3724,12 +4111,13 @@ if(requestedWizardResume){
  clearWizardResumeParam();
 }
 showRecoveryNotice(wizardDraftLoaded?{error:null}:savedProject);
-if(requestedHomepageTemplateId){
+if(requestedHomepageTemplateId&&!sharedCopyMode){
  if(applyHomepageTemplate())saveLocal();
  clearHomepageTemplateParam();
 }
 if(wizardDraftLoaded)saveLocal();
 addEventListener('pagehide',()=>{
+ if(sharedCopyMode)return;
  const persistenceMode=resumeStorageMode(cloudUser,guestResumeStorage.enabled);
  if(persistenceMode==='cloud'){
   if(cloudReady&&!cloudSaveBlocked){clearTimeout(cloudSaveTimer);void persistCloudResume()}
@@ -3760,10 +4148,10 @@ if(guestResumeStorage.preferenceError)setSaveState('Unable to save changes');
 if(wizardDraftError)toast(`${wizardDraftError} Please return to the wizard and try again.`);
 else if(wizardDraftWarning)toast(wizardDraftWarning);
 if(!homepageDemoMode){
+ if(incomingShareId)void loadIncomingSharedResume();
  if(!cloudConfigured)updateCloudAccount(null,new Error('Add the Firebase web-app settings to enable cloud saving.'));
  else observeAuth(updateCloudAccount);
 }
-const pageParams=new URLSearchParams(location.search);
 if(pageParams.get('tool')==='cover-letter')openCoverLetter();
 if(pageParams.get('open')==='import')openResumeImportPrompt();
 })();

@@ -13,12 +13,14 @@ const ratingField = document.querySelector('[data-rating-field]');
 const ratingHelp = document.querySelector('[data-rating-help]');
 const postStatus = document.querySelector('[data-post-status]');
 const submitPostButton = document.querySelector('[data-submit-post]');
+const cancelEditButton = document.querySelector('[data-cancel-edit]');
 const ratingAverage = document.querySelector('[data-rating-average]');
 const ratingStars = document.querySelector('[data-rating-summary-stars]');
 const ratingCount = document.querySelector('[data-rating-count]');
 const requestedPostId = new URLSearchParams(window.location.search).get('post');
 const commentCache = new Map();
 const commentCursors = new Map();
+const commentCounts = new Map();
 let currentUser = null;
 let posts = [];
 let currentFilter = 'all';
@@ -126,6 +128,7 @@ function setAuthState(user, error = null) {
     posts = posts.map(post => ({ ...post, isOwner: false }));
     commentCache.clear();
     commentCursors.clear();
+    commentCounts.clear();
   }
   signInPrompt.hidden = Boolean(user);
   signedInPanel.hidden = !user;
@@ -149,8 +152,11 @@ function createPostCard(post) {
   article.id = `community-post-${post.id}`;
 
   const metadata = createElement('div', 'community-post-meta');
+  const author = post.authorCompany
+    ? `${post.authorName || 'Google user'} · ${post.authorCompany}`
+    : post.authorName || 'Google user';
   metadata.append(
-    createElement('span', 'community-post-author', post.authorName || 'Google user'),
+    createElement('span', 'community-post-author', author),
     createElement('span', 'community-post-type', post.type === 'review' ? 'App review' : 'Discussion'),
     createElement('time', '', formatDate(post.createdAt))
   );
@@ -174,6 +180,9 @@ function createPostCard(post) {
   const commentsButton = createElement('button', 'community-button community-button-secondary', 'View comments');
   commentsButton.type = 'button';
   commentsButton.setAttribute('aria-expanded', 'false');
+  commentCounts.set(post.id, Number.isInteger(post.commentCount) ? post.commentCount : 0);
+  updateCommentsButton(commentsButton, commentCounts.get(post.id), false);
+  if (!post.commentCount) void refreshCommentCount(post.id, commentsButton);
   actions.append(commentsButton);
 
   if (currentUser && post.isOwner) {
@@ -203,27 +212,30 @@ function createPostCard(post) {
     loadMoreCommentsButton.disabled = true;
     void loadComments(post.id, commentList, commentStatus, {
       append: true,
-      loadMoreButton: loadMoreCommentsButton
+      loadMoreButton: loadMoreCommentsButton,
+      commentsButton
     }).finally(() => { loadMoreCommentsButton.disabled = false; });
   });
   comments.append(commentsHeading, commentList, loadMoreCommentsButton);
   commentsButton.addEventListener('click', async () => {
     comments.hidden = !comments.hidden;
     commentsButton.setAttribute('aria-expanded', String(!comments.hidden));
-    commentsButton.textContent = comments.hidden ? 'View comments' : 'Hide comments';
+    updateCommentsButton(commentsButton, commentCounts.get(post.id), !comments.hidden);
     if (!comments.hidden) await loadComments(post.id, commentList, commentStatus, {
-      loadMoreButton: loadMoreCommentsButton
+      loadMoreButton: loadMoreCommentsButton,
+      commentsButton
     });
   });
   if (currentUser) {
     const commentForm = createElement('form', 'community-comment-form');
-    const label = createElement('label', 'community-field');
+    const label = createElement('label', 'community-field community-comment-form-label');
     label.append(createElement('span', '', 'Add a comment'));
     const textarea = createElement('textarea');
     textarea.name = 'content';
     textarea.maxLength = 2000;
     textarea.required = true;
-    textarea.rows = 3;
+    textarea.rows = 1;
+    textarea.setAttribute('aria-label', 'Add a comment');
     textarea.placeholder = 'Write a thoughtful comment…';
     label.append(textarea);
     const formActions = createElement('div', 'community-comment-form-actions');
@@ -235,7 +247,7 @@ function createPostCard(post) {
     commentForm.append(label, formActions);
     commentForm.addEventListener('submit', event => {
       event.preventDefault();
-      void submitComment(post.id, commentForm, commentList, formStatus, submit, loadMoreCommentsButton);
+      void submitComment(post.id, commentForm, commentList, formStatus, submit, loadMoreCommentsButton, commentsButton);
     });
     comments.append(commentForm);
   } else {
@@ -245,9 +257,29 @@ function createPostCard(post) {
   return article;
 }
 
-function renderComments(comments, list, status, loadMoreButton, hasMore = false) {
+function updateCommentsButton(button, count, expanded = button.getAttribute('aria-expanded') === 'true') {
+  const label = count === undefined ? 'comments' : `comments (${count})`;
+  const action = expanded ? 'Hide' : 'View';
+  button.textContent = `${action} ${label}`;
+  button.setAttribute('aria-label', `${action} comments${count === undefined ? '' : `, ${count}`}`);
+}
+
+async function refreshCommentCount(postId, button) {
+  try {
+    const result = await requestApi(`/api/forum/posts/${encodeURIComponent(postId)}/comments?countOnly=1`);
+    if (!Number.isInteger(result.totalCount)) throw new Error('The community service returned an invalid comment count.');
+    commentCounts.set(postId, result.totalCount);
+    updateCommentsButton(button, result.totalCount);
+  } catch (error) {
+    console.error(`Could not load comment count for post ${postId}.`, error);
+    button.title = 'Comment count is temporarily unavailable.';
+  }
+}
+
+function renderComments(comments, list, status, loadMoreButton, hasMore = false, commentsButton = null) {
   list.replaceChildren();
   if (loadMoreButton) loadMoreButton.hidden = !hasMore;
+  if (commentsButton) updateCommentsButton(commentsButton, commentCounts.get(commentsButton.closest('.community-post-card')?.dataset.postId));
   if (!comments.length) {
     list.append(createElement('p', 'community-empty', 'No comments yet. Start the conversation.'));
     setStatus(status, '');
@@ -258,9 +290,15 @@ function renderComments(comments, list, status, loadMoreButton, hasMore = false)
     const metadata = createElement('div', 'community-comment-meta');
     metadata.append(
       createElement('strong', '', comment.authorName || 'Google user'),
-      createElement('time', '', formatDate(comment.createdAt))
+      createElement('time', '', formatDate(comment.updatedAt || comment.createdAt))
     );
+    if (comment.updatedAt) metadata.append(createElement('span', 'community-comment-edited', 'Edited'));
     if (currentUser && comment.isOwner) {
+      const postId = comment.postId || '';
+      const edit = createElement('button', 'community-button community-comment-edit', 'Edit');
+      edit.type = 'button';
+      edit.setAttribute('aria-label', 'Edit your comment');
+      edit.addEventListener('click', () => openCommentEditor(postId, comment, item, list, status, loadMoreButton));
       const remove = createElement('button', 'community-button community-danger community-comment-delete', 'Delete');
       remove.type = 'button';
       remove.setAttribute('aria-label', 'Delete your comment');
@@ -270,13 +308,15 @@ function renderComments(comments, list, status, loadMoreButton, hasMore = false)
           await requestApi(`/api/forum/posts/${encodeURIComponent(item.dataset.postId || '')}/comments/${encodeURIComponent(comment.id)}`, { method: 'DELETE' });
           const updated = (commentCache.get(item.dataset.postId) || []).filter(entry => entry.id !== comment.id);
           commentCache.set(item.dataset.postId, updated);
-          renderComments(updated, list, status, loadMoreButton, Boolean(commentCursors.get(item.dataset.postId)));
+          const count = Math.max(0, (commentCounts.get(item.dataset.postId) ?? updated.length + 1) - 1);
+          commentCounts.set(item.dataset.postId, count);
+          renderComments(updated, list, status, loadMoreButton, Boolean(commentCursors.get(item.dataset.postId)), commentsButton);
         } catch (error) {
           remove.disabled = false;
           setStatus(status, error.message, true);
         }
       });
-      metadata.append(remove);
+      metadata.append(edit, remove);
     }
     item.append(metadata, createElement('p', 'community-comment-content', comment.content));
     item.dataset.postId = comment.postId || '';
@@ -285,9 +325,63 @@ function renderComments(comments, list, status, loadMoreButton, hasMore = false)
   setStatus(status, `${comments.length} ${comments.length === 1 ? 'comment' : 'comments'}`);
 }
 
-async function loadComments(postId, list, status, { force = false, append = false, loadMoreButton } = {}) {
+function openCommentEditor(postId, comment, item, list, status, loadMoreButton) {
+  const form = createElement('form', 'community-comment-edit-form');
+  const textarea = createElement('textarea');
+  textarea.name = 'content';
+  textarea.maxLength = 2000;
+  textarea.required = true;
+  textarea.rows = 3;
+  textarea.setAttribute('aria-label', 'Edit your comment');
+  textarea.value = comment.content;
+  const actions = createElement('div', 'community-comment-edit-actions');
+  const cancel = createElement('button', 'community-button community-button-secondary', 'Cancel');
+  cancel.type = 'button';
+  cancel.addEventListener('click', () => renderComments(
+    commentCache.get(postId) || [],
+    list,
+    status,
+    loadMoreButton,
+    Boolean(commentCursors.get(postId))
+  ));
+  const save = createElement('button', 'community-button community-button-primary', 'Save changes');
+  save.type = 'submit';
+  actions.append(cancel, save);
+  form.append(textarea, actions);
+  form.addEventListener('submit', event => {
+    event.preventDefault();
+    void saveCommentEdit(postId, comment, form, list, status, loadMoreButton, save);
+  });
+  item.replaceChildren(item.querySelector('.community-comment-meta'), form);
+  textarea.focus();
+}
+
+async function saveCommentEdit(postId, comment, form, list, status, loadMoreButton, button) {
+  const content = new FormData(form).get('content')?.toString().trim();
+  if (!content) {
+    setStatus(status, 'Enter a comment before saving.', true);
+    return;
+  }
+  button.disabled = true;
+  setStatus(status, 'Saving comment changes…');
+  try {
+    const result = await requestApi(`/api/forum/posts/${encodeURIComponent(postId)}/comments/${encodeURIComponent(comment.id)}`, {
+      method: 'PATCH',
+      body: { content }
+    });
+    const updated = { ...comment, ...result.comment, postId };
+    const comments = (commentCache.get(postId) || []).map(entry => entry.id === comment.id ? updated : entry);
+    commentCache.set(postId, comments);
+    renderComments(comments, list, status, loadMoreButton, Boolean(commentCursors.get(postId)));
+  } catch (error) {
+    button.disabled = false;
+    setStatus(status, error.message, true);
+  }
+}
+
+async function loadComments(postId, list, status, { force = false, append = false, loadMoreButton, commentsButton } = {}) {
   if (!force && !append && commentCache.has(postId)) {
-    renderComments(commentCache.get(postId), list, status, loadMoreButton, Boolean(commentCursors.get(postId)));
+    renderComments(commentCache.get(postId), list, status, loadMoreButton, Boolean(commentCursors.get(postId)), commentsButton);
     return;
   }
   setStatus(status, append ? 'Loading older comments…' : 'Loading comments…');
@@ -299,13 +393,14 @@ async function loadComments(postId, list, status, { force = false, append = fals
     const allComments = append ? [...(commentCache.get(postId) || []), ...comments] : comments;
     commentCache.set(postId, allComments);
     commentCursors.set(postId, result.nextCursor);
-    renderComments(allComments, list, status, loadMoreButton, Boolean(result.nextCursor));
+    commentCounts.set(postId, Number.isInteger(result.totalCount) ? result.totalCount : allComments.length);
+    renderComments(allComments, list, status, loadMoreButton, Boolean(result.nextCursor), commentsButton);
   } catch (error) {
     setStatus(status, error.message, true);
   }
 }
 
-async function submitComment(postId, form, list, status, button, loadMoreButton) {
+async function submitComment(postId, form, list, status, button, loadMoreButton, commentsButton) {
   const content = new FormData(form).get('content')?.toString().trim();
   if (!content) {
     setStatus(status, 'Enter a comment before posting.', true);
@@ -319,7 +414,7 @@ async function submitComment(postId, form, list, status, button, loadMoreButton)
       body: { content }
     });
     form.reset();
-    await loadComments(postId, list, status, { force: true, loadMoreButton });
+    await loadComments(postId, list, status, { force: true, loadMoreButton, commentsButton });
   } catch (error) {
     setStatus(status, error.message, true);
   } finally {
@@ -388,6 +483,7 @@ async function loadPosts({ append = false } = {}) {
 function openEditor(post = null) {
   editingPostId = post?.id || null;
   postForm.reset();
+  cancelEditButton.hidden = !post;
   postType.disabled = Boolean(post);
   postType.value = post?.type || 'review';
   postForm.elements.title.value = post?.title || '';
@@ -399,6 +495,17 @@ function openEditor(post = null) {
   postForm.hidden = false;
   postForm.scrollIntoView({ behavior: 'smooth', block: 'center' });
   postForm.elements.title.focus({ preventScroll: true });
+}
+
+function closeEditor() {
+  postForm.hidden = true;
+  editingPostId = null;
+  cancelEditButton.hidden = true;
+  postType.disabled = false;
+  postForm.reset();
+  setRating(0);
+  setStatus(postStatus, '');
+  updatePostFormType();
 }
 
 async function deletePost(postId) {
@@ -453,14 +560,8 @@ async function submitPost(event) {
 }
 
 document.querySelector('[data-open-composer]')?.addEventListener('click', () => openEditor());
-document.querySelector('[data-close-composer]')?.addEventListener('click', () => {
-  postForm.hidden = true;
-  editingPostId = null;
-  postType.disabled = false;
-  postForm.reset();
-  setRating(0);
-  setStatus(postStatus, '');
-});
+document.querySelector('[data-close-composer]')?.addEventListener('click', closeEditor);
+cancelEditButton?.addEventListener('click', closeEditor);
 postForm?.addEventListener('submit', event => void submitPost(event));
 postType?.addEventListener('change', updatePostFormType);
 document.querySelectorAll('[data-rating-choice]').forEach(button => {

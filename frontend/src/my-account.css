@@ -136,6 +136,31 @@
   font-size: 15px;
 }
 
+.my-account-phone {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 7px;
+}
+
+.my-account-phone select {
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 46px;
+  padding: 10px 24px 10px 9px;
+  border: 1px solid rgba(210, 184, 126, .28);
+  border-radius: 9px;
+  background: rgba(0, 0, 0, .18);
+  color: var(--about-ink);
+  font: inherit;
+  font-size: 14px;
+}
+
+.my-account-phone select:focus-visible {
+  outline: 3px solid rgba(197, 166, 106, .36);
+  border-color: #b89456;
+}
+
 .my-account-field input:focus-visible {
   outline: 3px solid rgba(197, 166, 106, .36);
   border-color: #b89456;
@@ -206,6 +231,12 @@
   color: #292820;
 }
 
+:root[data-theme=light] .my-account-phone select {
+  border-color: #ddd3c0;
+  background: #fffefa;
+  color: #292820;
+}
+
 :root[data-theme=light] .my-account-field input[readonly] {
   background: #f0eee8;
   color: #667085;
@@ -239,5 +270,16 @@
 
   .my-account-actions .btn {
     width: 100%;
+  }
+
+  .my-account-phone {
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 6px;
+  }
+
+  .my-account-phone select {
+    padding-right: 18px;
+    padding-left: 7px;
+    font-size: 12px;
   }
 }

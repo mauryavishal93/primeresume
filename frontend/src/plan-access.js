@@ -48,6 +48,7 @@ export const PLAN_CONFIG = Object.freeze({
 export const PRICING_FEATURES = Object.freeze([
   Object.freeze({ label: 'Resume editor', free: 'Included', pro: 'Included' }),
   Object.freeze({ label: 'Resume templates', free: '6 templates', pro: 'All 25 templates' }),
+  Object.freeze({ label: 'Pro-template PDF downloads', free: '2 lifetime after Google sign-in', pro: 'Unlimited' }),
   Object.freeze({ label: 'Standard PDF export', free: 'Included', pro: 'Included' }),
   Object.freeze({ label: 'Resume-only ATS checks', free: 'Included', pro: 'Included' }),
   Object.freeze({ label: 'Job-description ATS comparison', free: 'Not available', pro: 'Included' }),
@@ -72,11 +73,11 @@ export function canUseFeature(featureId, entitlement, now = Date.now()) {
   if (entitlement?.planId !== PLAN_CONFIG.pro.id
     || entitlement.status !== 'active'
     || entitlement.source !== 'server-verified'
-    || !Number.isFinite(entitlement.validUntil)) {
+    || (entitlement.lifetime !== true && !Number.isFinite(entitlement.validUntil))) {
     return false;
   }
 
-  return entitlement.validUntil > now;
+  return entitlement.lifetime === true || entitlement.validUntil > now;
 }
 
 export function shouldPromptForJobDescriptionAtsUpgrade(jobDescription, entitlement) {

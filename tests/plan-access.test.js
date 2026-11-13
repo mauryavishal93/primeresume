@@ -34,6 +34,11 @@ test('templates are allocated without overlap and match the published plan count
   assert.equal((registry.match(/^import .* from '\.\/[^']+\/template\.js';$/gm) || []).length, 25);
   assert.match(registry, /export const templateDefs = Object\.freeze/);
   assert.equal(PRICING_FEATURES.find(feature => feature.label === 'Resume templates')?.pro, 'All 25 templates');
+  assert.deepEqual(PRICING_FEATURES.find(feature => feature.label === 'Pro-template PDF downloads'), {
+    label: 'Pro-template PDF downloads',
+    free: '2 lifetime after Google sign-in',
+    pro: 'Unlimited'
+  });
   assert.equal(TEMPLATE_IDS.FREE.some(isProTemplate), false);
   assert.equal(TEMPLATE_IDS.PRO.every(isProTemplate), true);
 });
@@ -95,8 +100,8 @@ test('homepage demo embeds an isolated live editor preview on both landing pages
   const editorSource = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
   assert.match(editorSource, /document\.documentElement\.classList\.toggle\('homepage-demo',homepageDemoMode\)/);
   assert.match(editorSource, /document\.body\.classList\.toggle\('homepage-demo',homepageDemoMode\)/);
-  assert.match(editorSource, /const savedProject=homepageDemoMode\s*\?\{state:null,key:null,raw:null,error:null,failedKey:null\}/);
-  assert.match(editorSource, /if\(!homepageDemoMode\)\{\s+if\(!cloudConfigured\)/);
+  assert.match(editorSource, /const savedProject=homepageDemoMode\s*\|\|sharedCopyMode\s*\?\{state:null,key:null,raw:null,error:null,failedKey:null\}/);
+  assert.match(editorSource, /if\(!homepageDemoMode\)\{\s+if\(incomingShareId\)void loadIncomingSharedResume\(\);\s+if\(!cloudConfigured\)/);
   assert.match(editorSource, /if\(homepageDemoMode\)return;try\{localStorage\.setItem\('resumeStudioUI'/);
   assert.match(editorSource, /onboardingDismissed=homepageDemoMode/);
   assert.match(editorSource, /function fitHomepageDemoZoom\(\)\{\s+if\(!homepageDemoMode\)return;\s+const root=\$\('sheets'\),style=getComputedStyle\(root\)/);
@@ -172,6 +177,18 @@ test('only recognized Pro features accept an active unexpired verified entitleme
     validUntil: 2_000
   };
 
+  assert.equal(canUseFeature(FEATURE_IDS.ALL_TEMPLATES, entitlement, 1_000), true);
+  assert.equal(canUseFeature(FEATURE_IDS.JOB_DESCRIPTION_ATS, entitlement, 1_000), true);
+});
+
+test('lifetime voucher entitlement grants Pro access without an expiry timestamp', () => {
+  const entitlement = {
+    planId: 'pro',
+    status: 'active',
+    source: 'server-verified',
+    lifetime: true,
+    validUntil: null
+  };
   assert.equal(canUseFeature(FEATURE_IDS.ALL_TEMPLATES, entitlement, 1_000), true);
   assert.equal(canUseFeature(FEATURE_IDS.JOB_DESCRIPTION_ATS, entitlement, 1_000), true);
 });
@@ -360,9 +377,9 @@ test('photo templates show an accessible avatar placeholder when no photo is upl
 
 test('flow pagination continues entry bullets without repeating the role header', () => {
   const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
-  assert.match(source, /if\(!a\.continuation\)el\.innerHTML=/);
-  assert.match(source, /const first=cont&&a\.k==='li'\?\{k:'entry',e:a\.e,continuation:true\}:a;/);
-  assert.match(source, /if\(cont&&a\.k==='li'\)appendAtom\(placed\.shell,a,placed\.st,s\);/);
+  assert.match(source, /if\(!a\.continuation\)\{const role=.*?el\.innerHTML=/);
+  assert.match(source, /const first=cont&&\(a\.k==='li'\|\|a\.k==='detail-paragraph'\)\?\{k:'entry',e:a\.e,continuation:true\}:a;/);
+  assert.match(source, /if\(cont&&\(a\.k==='li'\|\|a\.k==='detail-paragraph'\)\)appendAtom\(placed\.shell,a,placed\.st,s\);/);
   assert.match(source, /addEventListener\('focusout',e=>\{[\s\S]*?recordHistory\(before\);saveLocal\(\);renderSheets\(\);/);
 });
 
@@ -381,7 +398,7 @@ test('experience bullet Backspace and Delete merge adjacent points at line bound
   assert.match(source, /const rows=Array\.from\(document\.querySelectorAll\('#sheets \[data-entry-field="detail"\]'\)\)\.filter\(item=>item\.dataset\.sectionId===sectionId&&item\.dataset\.entry===entryIndex\)/);
   assert.match(source, /details\.splice\(priorIndex,count,joined\)/);
   assert.match(source, /itemIndex-count\+joinedCount/);
-  assert.match(source, /if\(backward\)\{[\s\S]*?prior\.focus\(\)/);
+  assert.match(source, /if\(backward\)\{[\s\S]*?focusDetailEditor\(prior\)/);
 });
 
 test('experience deletion never selects an entire neighboring line or document', () => {
@@ -393,7 +410,7 @@ test('experience deletion never selects an entire neighboring line or document',
 
 test('experience content reflows to the next page while the user is typing', () => {
   const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
-  assert.match(source, /function reflowOverflowingDetail\(el,force=false\)/);
+  assert.match(source, /function reflowOverflowingDetail\(el,force=false,immediate=false\)/);
   assert.match(source, /if\(!force&&el\.getBoundingClientRect\(\)\.bottom<=limit\+\.5\)return/);
   assert.match(source, /try\{renderSheets\(\)\}finally\{reflowingDetail=false\}/);
   assert.match(source, /const moved=Array\.from\(document\.querySelectorAll\('#sheets \[data-entry-field="detail"\]'\)\)/);
@@ -403,6 +420,7 @@ test('experience content reflows to the next page while the user is typing', () 
 test('billing and Plans pages expose voucher entry and label sample codes as examples', () => {
   const html = readFileSync(new URL('../frontend/billing.html', import.meta.url), 'utf8');
   const pricingHtml = readFileSync(new URL('../frontend/pricing.html', import.meta.url), 'utf8');
+  const serverSource = readFileSync(new URL('../backend/server.js', import.meta.url), 'utf8');
   const source = readFileSync(new URL('../frontend/src/billing.js', import.meta.url), 'utf8');
   const pricingSource = readFileSync(new URL('../frontend/src/pricing.js', import.meta.url), 'utf8');
   assert.match(html, /id="voucherForm"/);
@@ -410,16 +428,26 @@ test('billing and Plans pages expose voucher entry and label sample codes as exa
   assert.match(html, /Example formats only — these are not valid codes/);
   assert.match(source, /redeemBillingVoucher\(currentUser, code\)/);
   assert.match(source, /const voucherUnavailable = billingConfig\?\.entitlementEnabled === false/);
-  assert.match(source, /const disabled = signInRequired \|\| voucherUnavailable/);
+  assert.match(source, /const disabled = signInRequired \|\| planCheckPending \|\| proActive \|\| voucherUnavailable/);
   assert.match(source, /Voucher availability could not be checked\. Enter a code and the server will verify it/);
-  assert.match(source, /a valid voucher will start after your current access ends/i);
-  assert.match(source, /result\.queued/);
+  assert.match(source, /Voucher redemption is disabled while Pro is active/);
+  assert.match(serverSource, /hasActiveProEntitlement\(currentEntitlement, now\)/);
   assert.match(source, /billingConfig\?\.entitlementEnabled === false/);
   assert.match(pricingHtml, /id="pricingVoucherForm"/);
   assert.match(pricingHtml, /id="pricingVoucherSection"[^>]*aria-labelledby="pricingVoucherTitle">/);
   assert.match(pricingHtml, /id="pricingVoucherCode"/);
+  assert.match(pricingSource, /voucherInput\.disabled = signInRequired \|\| verificationUnavailable \|\| planCheckPending \|\| proActive/);
+  assert.match(pricingSource, /Voucher redemption is disabled while Pro is active/);
   assert.match(pricingSource, /redeemBillingVoucher\(currentUser, code\)/);
-  assert.match(pricingSource, /result\.queued/);
+  const adminHtml = readFileSync(new URL('../frontend/admin.html', import.meta.url), 'utf8');
+  const adminSource = readFileSync(new URL('../frontend/src/admin.js', import.meta.url), 'utf8');
+  assert.match(adminHtml, /Assign to user <span>\(optional\)<\/span><input id="voucher-uid" type="text"[^>]*placeholder="Firebase UID or account email"/);
+  assert.match(adminSource, /JSON\.stringify\(\{ duration: \$\('#voucher-duration'\)\.value, user: \$\('#voucher-uid'\)\.value \}\)/);
+  assert.match(adminSource, /Assigned to \$\{voucher\.assignedEmail \|\| voucher\.assignedUid\}/);
+  assert.match(adminHtml, /id="voucher-duration"/);
+  for (const option of ['1-month', '3-months', '6-months', '1-year', 'lifetime']) {
+    assert.match(adminHtml, new RegExp(`value="${option}"`));
+  }
 });
 
 test('subscription checkout lets the Razorpay plan determine its payment currency', () => {
@@ -437,6 +465,8 @@ test('Razorpay checkout shows status-specific success, pending, and failure popu
   assert.match(pricingSource, /title: 'Payment successful'/);
   assert.match(pricingSource, /title: result\.pending \? 'Payment successful — activation pending' : 'Payment verification pending'/);
   assert.match(pricingSource, /title: 'Payment verification issue'/);
+  assert.match(pricingSource, /let recoveredEntitlement = null;[\s\S]*?loadBillingEntitlement\(checkoutUser, \{ forceRefresh: true \}\)[\s\S]*?if \(recoveredEntitlement\?\.status === 'active'\)[\s\S]*?title: 'Pro access is active'/);
+  assert.match(pricingSource, /We could not confirm this checkout yet\. Do not make another payment\./);
   assert.match(pricingSource, /title: 'Payment failed'/);
   assert.match(pricingSource, /authentication_failed:/);
   assert.match(pricingSource, /insufficient_funds:/);
@@ -472,12 +502,30 @@ test('active subscribers see their plan and can manage billing even when checkou
   assert.match(purchaseControls, /'Switch to yearly'/);
   assert.match(purchaseControls, /monthlyButton\.disabled = false/);
   assert.match(purchaseControls, /yearlyButton\.disabled = entitlement\.scheduledPlan === 'yearly'/);
-  assert.match(purchaseControls, /Your active plan: Pro \$\{planLabel\}/);
+  assert.match(purchaseControls, /activePlan === 'voucher'\s*\?\s*entitlement\.lifetime \? 'Pro Lifetime Voucher' : 'Pro Voucher'/);
+  assert.match(purchaseControls, /entitlement\.source === 'admin'\s*\?\s*' \(Admin granted\)'/);
+  assert.match(purchaseControls, /\['monthly', 'yearly'\]\.includes\(activePlan\)\s*\?\s*' \(Subscription\)'/);
+  assert.match(purchaseControls, /Your active plan: \$\{planLabel\}\$\{activationSource\}/);
+  assert.doesNotMatch(purchaseControls, /Your active plan: Pro \$\{planLabel\}/);
   assert.match(purchaseControls, /monthlyBadge\.textContent = 'Active plan'/);
   assert.match(purchaseControls, /yearlyBadge\.textContent = activePlan === 'yearly' \? 'Active plan' : 'Scheduled'/);
   assert.match(pricingSource, /async function scheduleYearlySwitch\(\)/);
   assert.match(pricingSource, /scheduleBillingPlanChange\(currentUser, 'yearly'\)/);
   assert.match(pricingSource, /entitlement\?\.status === 'active'[\s\S]*?window\.location\.assign\('\/billing\.html'\)/);
+});
+
+test('inactive users see a friendly no-plan status on the Plans page', () => {
+  const pricingSource = readFileSync(new URL('../frontend/src/pricing.js', import.meta.url), 'utf8');
+  assert.match(pricingSource, /checkoutStatus\.textContent = 'No plan active'/);
+  assert.match(pricingSource, /error\.message === 'Could not load your plan status\.'\s*\?\s*'No plan active'/);
+});
+
+test('signed-out plan purchase buttons start Google sign-in and continue checkout after login', () => {
+  const pricingSource = readFileSync(new URL('../frontend/src/pricing.js', import.meta.url), 'utf8');
+  assert.match(pricingSource, /import \{ cloudConfigured, googleSignInErrorMessage, isGoogleSignInCancellation, observeAuth, signInWithGoogle \}/);
+  assert.match(pricingSource, /const credential = await signInWithGoogle\(\)/);
+  assert.match(pricingSource, /if \(credential\?\.user\) \{\s*currentUser = credential\.user/);
+  assert.match(pricingSource, /Google sign-in failed from the Plans page/);
 });
 
 test('Firestore rules restrict the lifetime Pro-template trial to two owner-only increments', () => {
@@ -496,4 +544,32 @@ test('Firestore rules scope the last-worked resume preference to its signed-in a
   assert.match(rules, /allow get: if request\.auth != null && request\.auth\.uid == userId/);
   assert.match(rules, /request\.resource\.data\.keys\(\)\.hasOnly\(\['lastWorkedResumeId'\]\)/);
   assert.match(rules, /request\.resource\.data\.lastWorkedResumeId is string/);
+});
+
+test('public resume links open generated PDFs in the browser viewer', () => {
+  const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
+  const styles = readFileSync(new URL('../frontend/src/style.css', import.meta.url), 'utf8');
+  const server = readFileSync(new URL('../backend/server.js', import.meta.url), 'utf8');
+  const editor = readFileSync(new URL('../frontend/editor.html', import.meta.url), 'utf8');
+  const vercel = JSON.parse(readFileSync(new URL('../vercel.json', import.meta.url), 'utf8'));
+  assert.match(source, /const publicSharePath=location\.pathname\.match\(/);
+  assert.match(source, /pageParams\.get\('share'\)\|\|publicSharePath\?\.\[1\]/);
+  assert.match(source, /pageParams\.get\('pdf'\)==='1'\|\|Boolean\(publicSharePath\)/);
+  assert.match(source, /'https:\/\/resumeout\.vercel\.app'/);
+  assert.match(source, /new URL\(`\/file\/d\/\$\{encodeURIComponent\(id\)\}\/view`,publicShareOrigin\)/);
+  assert.match(source, /url\.searchParams\.set\('resourcekey',id\)/);
+  assert.match(source, /if\(publicPdfMode\)\{[\s\S]*?setTimeout\(\(\)=>void exportPDF\(\),0\)/);
+  assert.match(source, /publicPdfMode\?'Public resume PDF':'Preview your resume PDF'/);
+  assert.match(source, /pdfPreviewUrl=URL\.createObjectURL\(blob\);\s*if\(publicPdfMode\)\{location\.replace\(pdfPreviewUrl\);return\}/);
+  assert.match(source, /window\.history\.replaceState\(null,'',location\.pathname\+location\.hash\)/);
+  assert.doesNotMatch(source, /delete snapshot\.importedSourceText/);
+  assert.match(styles, /body\.public-resume-pdf-ready \.topbar,body\.public-resume-pdf-ready \.layout/);
+  assert.match(styles, /body\.public-resume-pdf-ready #pdfPreviewModalBg \.pdf-preview-modal \.modal-actions\{display:flex!important;justify-content:center!important\}/);
+  assert.match(styles, /body\.public-resume-pdf-ready #pdfPreviewModalBg \.pdf-preview-modal #downloadPdfPreview\{flex:0 0 auto!important;width:auto!important;min-width:180px;margin-left:auto!important;margin-right:auto!important\}/);
+  assert.match(server, /https:\/\/resumeout\.vercel\.app\$\{request\.originalUrl/);
+  assert.match(server, /app\.get\('\/file\/d\/:shareId\/view'/);
+  assert.match(editor, /https:\/\/resumeout\.vercel\.app\$\{location\.pathname/);
+  assert.doesNotMatch(source+server+editor, /primeresume-ten\.vercel\.app/);
+  assert.ok(vercel.rewrites.some(rewrite => rewrite.source==='/file/d/:shareId/view'
+    && rewrite.destination==='/editor.html?share=:shareId&pdf=1'));
 });

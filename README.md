@@ -22,11 +22,38 @@ The admin page is available at `http://localhost:3000/admin.html` when using `np
 
 ## Deploy on Vercel
 
-Import this repository into Vercel with the repository root as the project root. `vercel.json` runs `npm run build` and publishes Vite's `dist/` output. The catch-all function in `api/[...path].js` runs the Express API directly on Vercel; no Render backend is required. Use Node.js 22.x.
+Import this repository into Vercel with the repository root as the project root. `vercel.json` runs `npm run build` and publishes Vite's `dist/` output. The `api/handler.js` function forwards API requests to the Express application in `backend/server.js`; no Render backend is required. Use Node.js 22.x.
 
 Add `FIREBASE_SERVICE_ACCOUNT_JSON` and `ADMIN_EMAILS` under **Project Settings → Environment Variables** in Vercel, then redeploy. Add the Razorpay and billing release variables there only when enabling paid checkout. Do not copy `.env` into the repository or expose server credentials as `VITE_*` variables.
 
+### Firebase environment configuration
+
+The browser Firebase config is selected at Vite build time using `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, and `VITE_FIREBASE_APP_ID`. Configure these separately in Vercel's **Preview** and **Production** environments: keep the existing Firebase project in Preview for testing and use the new `resumeout` project in Production only after its Google provider, Firestore rules/indexes, Auth accounts, and required data are ready. The current project remains the local fallback when these variables are unset; for local overrides, put the values in `frontend/.env.local`.
+
+The backend's `FIREBASE_SERVICE_ACCOUNT_JSON` must also be set separately for Preview and Production and must belong to the same Firebase project as that environment's client config. The app currently uses Firebase Authentication and Firestore; Firebase Storage and Analytics config fields are not needed by its current code.
+
+### Copy Firestore data to `resumeout`
+
+The guarded one-off script `scripts/copy-firestore.js` copies documents and nested subcollections from `buildmyportfolio-5b714` to `resumeout`, retaining document paths and remapping Firestore document references. It also walks subcollections for Auth user UIDs, even when a `users/{uid}` parent document does not exist. It reads the source service account from the ignored root `.env` and takes a `resumeout` service-account JSON file stored outside this repository. Create that target service account with the **Cloud Datastore User** role, keep its key private, and do not commit or share it. Managed Firestore export/import is not required, but reads/writes may still incur usage charges or hit quotas.
+
+Pause app writes to the source during the final copy. Run a read-only count first, then explicitly start the copy:
+
+```sh
+node --env-file=.env scripts/copy-firestore.js "$HOME/.config/resumeout-migration/resumeout-admin.json" --dry-run
+node --env-file=.env scripts/copy-firestore.js "$HOME/.config/resumeout-migration/resumeout-admin.json" --execute
+```
+
+If an earlier run copied root collections but missed user subcollections, first pause writes again and review `--dry-run`; it will report missing paths. Use `--resume` only when every document already in the target came from this migration:
+
+```sh
+node --env-file=.env scripts/copy-firestore.js "$HOME/.config/resumeout-migration/resumeout-admin.json" --resume
+```
+
+The script verifies both credential project IDs, refuses a non-empty target for a fresh `--execute`, prevents `--resume` from overwriting unrelated target paths, and checks that every discovered source document path exists in the target afterward. If interrupted, rerunning `--execute` resumes only when its in-progress marker is present; rerunning `--resume` is safe for an additive migration whose existing target paths are a subset of source paths. Verify the copied collections and user data before changing production configuration. This copies Firestore only; Firebase Authentication users must be migrated separately with matching UIDs, and Razorpay subscriptions are not copied.
+
 ## Production
+
+The public Vercel site is `https://resumeout.vercel.app`. Public resume share links use a Drive-style `/file/d/{shareId}/view?resourcekey={shareId}` URL; local-development share links also point to the public site.
 
 ```sh
 npm run build
@@ -39,26 +66,38 @@ The production build is generated in `dist/`. `npm start` serves the site and bi
 
 The root `render.yaml` configures a Render Node web service that serves the built site and trusted billing API. Push it to the `main` branch, then in Render choose **New > Blueprint** and connect `mauryavishal93/primeresume`. Render runs `npm install && npm run build`, then `npm start`. Approve the `buildmyportfolio` service to start the deploy. Because the GitHub repository is private, authorize Render to access it when prompted. Configure the secret environment variables described below before enabling billing.
 
-The site is multi-page: `/` opens the editor; `/editor.html` is the editor page; `/about.html` is the About page; `/privacy.html` is the privacy policy; `/pricing.html` is the plan and purchase page; `/terms.html` describes service terms; and `/refunds.html` describes refund status.
+The site is multi-page. Vercel serves `frontend/index.html` at `/`; the Express server redirects `/` to `/home.html`. `/editor.html` is the editor; `/about.html` is the About page; `/privacy.html` is the privacy policy; `/pricing.html` is the plan and purchase page; `/terms.html` describes service terms; and `/refunds.html` describes refund status.
 
 ## Project structure
 
-- `frontend/index.html`, `frontend/editor.html`, `frontend/about.html`, and `frontend/privacy.html` are the main HTML entry points.
+- `frontend/` contains the multi-page HTML entry points, browser assets, styles, and client-side modules.
+- `api/handler.js` adapts Vercel API requests to the Express app; `backend/server.js` defines API and static-site routes.
 - `frontend/pricing.html`, `frontend/src/pricing.js`, and `frontend/src/billing-client.js` provide the signed-in monthly/yearly purchase experience and call the same-origin billing API.
 - `frontend/src/main.js` owns editor state, resume rendering, editing controls, local autosave, JSON import/export, and PDF workflows.
 - `Templates/` contains the resume template registry and each template's metadata and styles; the six Free templates and 19 Pro templates share the editor renderer.
 - `frontend/src/plan-access.js` centralizes the Free/Pro feature definitions and UI gates. Editor access is based on entitlements loaded from the server; browser code is not the payment authority.
 - `frontend/src/firebase-cloud.js` provides Google authentication and per-user Firestore resume storage. Firebase SDK modules are loaded only when cloud/auth features are used.
-- `backend/server.js` verifies Firebase ID tokens, creates Razorpay subscriptions, verifies checkout signatures and provider state, processes signed webhooks, supports cancellation, and manages server-side Firestore entitlements.
+- `backend/server.js` verifies Firebase ID tokens, manages unlisted resume-share links with Firebase Admin, creates Razorpay subscriptions, verifies checkout signatures and provider state, processes signed webhooks, supports cancellation, and manages server-side Firestore entitlements.
 - `backend/billing.js` contains server-owned prices, subscription intervals, signature checks, and entitlement validity logic.
 - `firestore.rules` restricts resume documents to their authenticated owner and explicitly blocks all client access to billing documents. `firebase.json` maps the rules for Firebase CLI rules-only deployments; it does not configure Firebase Hosting.
 - `frontend/src/ats-scoring.js`, `frontend/src/cover-letter.js`, `frontend/src/cover-letter-pdf.js`, and `frontend/src/zoom.js` contain focused editor helpers.
 - `frontend/src/style.css` and `frontend/src/about.css` contain editor and informational-page styles.
-- `vite.config.js` configures the frontend build and local API proxy. `tests/` contains the Node.js test suite.
+- `vite.config.js` configures the frontend build and local API proxy. `vercel.json` and `render.yaml` describe the two deployment targets. `tests/` contains the Node.js regression suite.
+
+## Checks
+
+The regression suite includes a public-share route integration test that serves the generated editor page, so build the frontend before running the tests:
+
+```sh
+npm run build
+npm test
+```
+
+GitHub Actions runs both checks on Node.js 22 for pushes and pull requests.
 
 ## Data flow
 
-Guest resumes are saved in this browser by default. The editor header's **Save in this browser** toggle controls whether guest resume data is autosaved to `localStorage`; when off, edits stay in memory and are discarded on refresh or page close. The preference is remembered. Google-authenticated resumes always use account-scoped Firebase cloud storage and are never written to guest resume storage. The ID of the last-opened cloud resume is stored in a private account preference, so the editor reopens that resume on the user's next visit; if it was deleted, the most recently updated resume is opened instead. If the account has no saved resumes, a guest draft can be migrated or a new cloud resume is created. If saved project data cannot be read, the editor pauses autosave, keeps the original data available for download, and asks before replacing it; a valid legacy copy can be recovered. JSON imports are limited to 5 MB and validated before replacing the current project. Signed-in Free users may use any Pro template and get two lifetime Pro-template PDF downloads per Google account; each download counts, including repeats. Firestore rules protect account-scoped data and the account counter; active server-verified Pro subscribers are not limited. Deploy the updated rule before enabling this allowance with `firebase deploy --only firestore:rules`.
+Guest resumes are saved in this browser by default. The editor header's **Save in this browser** toggle controls whether guest resume data is autosaved to `localStorage`; when off, edits stay in memory and are discarded on refresh or page close. The preference is remembered. Google-authenticated resumes always use account-scoped Firebase cloud storage and are never written to guest resume storage. The ID of the last-opened cloud resume is stored in a private account preference, so the editor reopens that resume on the user's next visit; if it was deleted, the most recently updated resume is opened instead. If the account has no saved resumes, a guest draft can be migrated or a new cloud resume is created. Unlisted resume links are created and revoked through the authenticated server API; anyone with an active link can open its snapshot, and recipient edits remain separate from the owner's original. If saved project data cannot be read, the editor pauses autosave, keeps the original data available for download, and asks before replacing it; a valid legacy copy can be recovered. JSON imports are limited to 5 MB and validated before replacing the current project. Signed-in Free users may use any Pro template and get two lifetime Pro-template PDF downloads per Google account; each download counts, including repeats. Firestore rules protect account-scoped data and the account counter; active server-verified Pro subscribers are not limited. Deploy the updated rule before enabling this allowance with `firebase deploy --only firestore:rules`.
 
 Paid plan purchases require a signed-in Google account. The backend verifies the Firebase ID token, creates the subscription with a server-selected Razorpay plan, verifies the checkout signature and Razorpay subscription/payment state, and activates entitlements only from verified checkout/provider events. A signed-in user can cancel future renewals; access remains valid through the current paid period. Resume contents and job descriptions are not sent to Razorpay.
 
@@ -75,6 +114,6 @@ For localhost testing, add the rotated Razorpay **Test Mode** key pair, monthly/
 3. Create a Razorpay Test Mode webhook pointing to `https://<preview-deployment-url>/api/billing/webhook`. Subscribe to `subscription.activated`, `subscription.charged`, `subscription.halted`, `subscription.cancelled`, `subscription.completed`, and `subscription.expired`. Set the webhook's secret as `RAZORPAY_WEBHOOK_SECRET` in Vercel **Preview**. The backend verifies signatures against the exact raw body and records event IDs for idempotency.
 4. Set `BILLING_ENABLED=true` and `BILLING_TEST_MODE_ENABLED=true` in Vercel **Preview**, then redeploy the Preview. Do not set these test credentials or this test-mode flag in **Production**. Keep the Production billing and release-approval flags disabled while reviewing and publishing final service terms and refund information.
 5. After test-mode purchases, renewals, failed payments, cancellations, webhook replay, and expired entitlements have been verified and final policies are published, configure separate **live-mode** API keys, live plan IDs, and a live webhook secret in Vercel **Production**. Only then set `BILLING_TERMS_PUBLISHED=true`, `BILLING_REFUNDS_PUBLISHED=true`, `BILLING_TEST_MODE_VERIFIED=true`, `BILLING_LIVE_LAUNCH_APPROVED=true`, and `BILLING_ENABLED=true` in Production. Never copy test credentials to Production or provider secrets to Vite variables, frontend code, or browser storage.
-6. Optional vouchers are configured privately using the Render `PRO_VOUCHERS_JSON` server environment variable, for example `[{"code":"PRIVATE-CODE-123","durationDays":30,"maxRedemptions":50}]`. Use uppercase alphanumeric codes with optional hyphens, durations from 1 to 3,650 days, and a redemption cap. Codes are never returned by the public config endpoint; sample codes shown in the pricing page are examples only. Redemption requires Google sign-in and is limited to once per account per code. Public configured vouchers can be redeemed by any signed-in account; account-specific admin vouchers remain restricted to their assigned account. If Pro access is already active, the voucher is queued to start after the current access expires. Checkout can remain disabled while vouchers are active.
+6. Optional vouchers are configured privately using the Render `PRO_VOUCHERS_JSON` server environment variable, for example `[{"code":"PRIVATE-CODE-123","durationDays":30,"maxRedemptions":1}]`. Use uppercase alphanumeric codes with optional hyphens and durations from 1 to 3,650 days. Every code is enforced as single-use (keep `maxRedemptions` set to `1`). Codes are never returned by the public config endpoint; sample codes shown in the pricing page are examples only. Redemption requires Google sign-in and an account without active Pro access. Admin-generated vouchers can be assigned to a Firebase UID and then redeemed only by that account. The admin dashboard supports 1, 3, and 6 month, 1 year, and lifetime voucher durations; lifetime entitlements do not expire. Checkout can remain disabled while vouchers are active.
 
 The configured Razorpay subscriptions cover up to 100 years of billing cycles. Using Razorpay test credentials, verify purchases, renewals, failed payments, cancellations, webhook replay, and expired entitlements. Record and review those results, verify the production webhook and published policies, and only then approve the live launch. The repository contains no payment credentials; live purchases remain unavailable until all external services and release gates are explicitly configured.

@@ -1,4 +1,40 @@
 import { getFirebaseIdToken } from './firebase-cloud.js';
+import { clearSessionCache, readSessionCache, writeSessionCache } from './session-cache.js';
+
+const BILLING_ENTITLEMENT_CACHE_TTL_MS = 5 * 60 * 1000;
+const BILLING_CONFIG_CACHE_TTL_MS = 10 * 60 * 1000;
+const entitlementRequests = new Map();
+const entitlementCacheGenerations = new Map();
+let billingConfigRequest = null;
+
+function validServerEntitlement(entitlement) {
+  return Boolean(
+    entitlement
+    && entitlement.source === 'server-verified'
+    && ['active', 'inactive'].includes(entitlement.status)
+    && typeof entitlement.planId === 'string'
+    && (entitlement.lifetime === true
+      ? entitlement.validUntil === null
+      : Number.isFinite(entitlement.validUntil))
+  );
+}
+
+export function getCachedBillingEntitlement(user) {
+  if (!user?.uid) return null;
+  const cached = readSessionCache('billing-entitlement', user.uid, BILLING_ENTITLEMENT_CACHE_TTL_MS);
+  if (cached?.status === 'active' && cached.lifetime !== true && cached.validUntil <= Date.now()) {
+    clearBillingEntitlementCache(user);
+    return null;
+  }
+  return validServerEntitlement(cached) ? cached : null;
+}
+
+export function clearBillingEntitlementCache(user) {
+  if (user?.uid) {
+    entitlementCacheGenerations.set(user.uid, (entitlementCacheGenerations.get(user.uid) || 0) + 1);
+    clearSessionCache('billing-entitlement', user.uid);
+  }
+}
 
 export async function parseBillingResponse(response) {
   const responseText = await response.text();
@@ -30,6 +66,8 @@ export async function parseBillingResponse(response) {
 }
 
 async function billingRequest(path, user, options = {}) {
+  const mutating = (options.method || 'GET') !== 'GET';
+  if (mutating) clearBillingEntitlementCache(user);
   const token = await getFirebaseIdToken(user);
   const response = await fetch(`/api/billing/${path}`, {
     method: options.method || 'GET',
@@ -40,22 +78,38 @@ async function billingRequest(path, user, options = {}) {
     },
     ...(options.body ? { body: JSON.stringify(options.body) } : {})
   });
-  return parseBillingResponse(response);
+  const result = await parseBillingResponse(response);
+  if (mutating) clearBillingEntitlementCache(user);
+  return result;
 }
 
-export async function loadBillingConfig() {
-  const response = await fetch('/api/billing/config', { cache: 'no-store' });
-  const contentType = response.headers.get('content-type') || '';
-  if (!contentType.includes('application/json')) {
-    const availability = response.ok
-      ? 'returned an unexpected non-JSON response'
-      : `is unavailable (HTTP ${response.status})`;
-    throw new Error(`The billing service ${availability}. Check that the backend is running and /api is routed to it.`);
+export async function loadBillingConfig({ forceRefresh = false } = {}) {
+  if (!forceRefresh) {
+    const cached = readSessionCache('billing-config', '', BILLING_CONFIG_CACHE_TTL_MS);
+    if (cached) return cached;
+    if (billingConfigRequest) return billingConfigRequest;
   }
+  const request = (async () => {
+    const response = await fetch('/api/billing/config', { cache: 'no-store' });
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      const availability = response.ok
+        ? 'returned an unexpected non-JSON response'
+        : `is unavailable (HTTP ${response.status})`;
+      throw new Error(`The billing service ${availability}. Check that the backend is running and /api is routed to it.`);
+    }
 
-  const config = await response.json();
-  if (!response.ok) throw new Error(config.error || 'Could not load paid plan configuration.');
-  return config;
+    const config = await response.json();
+    if (!response.ok) throw new Error(config.error || 'Could not load paid plan configuration.');
+    writeSessionCache('billing-config', '', config);
+    return config;
+  })();
+  billingConfigRequest = request;
+  try {
+    return await request;
+  } finally {
+    if (billingConfigRequest === request) billingConfigRequest = null;
+  }
 }
 
 export async function loadBillingActivity(user) {
@@ -75,9 +129,28 @@ export async function requestBillingRefundReview(user, paymentId, reason = '') {
   });
 }
 
-export async function loadBillingEntitlement(user) {
-  const result = await billingRequest('entitlement', user);
-  return result.entitlement;
+export async function loadBillingEntitlement(user, { forceRefresh = false } = {}) {
+  if (!forceRefresh) {
+    const cached = getCachedBillingEntitlement(user);
+    if (cached) return cached;
+  }
+  if (!user?.uid) throw new Error('Sign in before checking plan access.');
+  if (entitlementRequests.has(user.uid)) return entitlementRequests.get(user.uid);
+  const generation = entitlementCacheGenerations.get(user.uid) || 0;
+  const request = (async () => {
+    const result = await billingRequest('entitlement', user);
+    if (validServerEntitlement(result.entitlement)
+      && (entitlementCacheGenerations.get(user.uid) || 0) === generation) {
+      writeSessionCache('billing-entitlement', user.uid, result.entitlement);
+    }
+    return result.entitlement;
+  })();
+  entitlementRequests.set(user.uid, request);
+  try {
+    return await request;
+  } finally {
+    if (entitlementRequests.get(user.uid) === request) entitlementRequests.delete(user.uid);
+  }
 }
 
 export async function redeemBillingVoucher(user, code) {

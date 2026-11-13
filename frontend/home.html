@@ -340,7 +340,7 @@
     </style>
     <link rel="stylesheet" href="/src/homepage.css">
   </head>
-  <body class="about-page landing-page">
+  <body class="about-page landing-page site-mobile-header">
     <header class="about-header">
       <a class="about-brand" href="/home.html" aria-label="ResumeOut.com home">
         <img class="about-logo" src="/images/resumeout-mark.svg" alt="" aria-hidden="true">
@@ -367,6 +367,7 @@
         <a class="btn outline" href="/community.html">Community</a>
         <div class="landing-header-actions">
           <a class="btn outline" href="/pricing.html">Plans</a>
+          <a class="btn outline landing-support-link" href="/support.html">Support</a>
           <a class="btn outline landing-import-button" href="/editor.html?open=import"><svg class="landing-import-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M4 15v3a2 2 0 0 0 2 2h14"/></svg>Import resume</a>
           <a class="btn soft about-editor" href="/editor.html">Open editor</a>
         </div>
@@ -399,8 +400,19 @@
       </section>
 
       <a class="landing-scratch-cta" href="/resume-wizard.html">
-        <span class="landing-scratch-title">Build my resume from scratch <span aria-hidden="true">→</span></span>
-        <span class="landing-scratch-subtitle">Guided step-by-step resume creation</span>
+        <span class="landing-scratch-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M7 3.75h7l4 4v12.5H7a2 2 0 0 1-2-2v-12.5a2 2 0 0 1 2-2Z"/>
+            <path d="M14 3.75v4h4M8.5 12h7M8.5 15.5h7"/>
+            <path d="M4 7.5h-.5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2H14"/>
+          </svg>
+        </span>
+        <span class="landing-scratch-copy">
+          <span class="landing-scratch-eyebrow">GUIDED RESUME BUILDER</span>
+          <span class="landing-scratch-title">Build my resume from scratch</span>
+          <span class="landing-scratch-subtitle">A simple step-by-step start, tailored to your experience.</span>
+        </span>
+        <span class="landing-scratch-arrow" aria-hidden="true">→</span>
       </a>
 
       <div class="feature-strip" aria-label="Product highlights">
@@ -561,6 +573,7 @@
             <div class="landing-tool-list">
               <div class="landing-tool-row"><span>Resume editing</span><span>Included</span></div>
               <div class="landing-tool-row"><span>Standard PDF export</span><span>Included</span></div>
+              <div class="landing-tool-row"><span>Pro-template PDF downloads</span><span>2 after Google sign-in</span></div>
               <div class="landing-tool-row"><span>Resume-only ATS checks</span><span>Included</span></div>
               <div class="landing-tool-row"><span>Basic cover-letter tools</span><span>Included</span></div>
             </div>
@@ -599,7 +612,7 @@
           <div>
             <h3>More room to grow</h3>
             <p>Compare Free and Pro options before choosing a plan.</p>
-            <ul><li>Six Free templates</li><li>Pro template access and downloads with eligible plans</li><li>Job-description ATS comparison with Pro</li></ul>
+            <ul><li>Six Free templates</li><li>Sign in with Google for first 2 free Pro-template PDF downloads per account</li><li>Pro unlocks all templates and unlimited downloads</li><li>Job-description ATS comparison with Pro</li></ul>
             <div class="hero-actions landing-pricing-actions">
               <a class="btn outline" href="/pricing.html">Compare all plans</a>
             </div>
@@ -615,7 +628,7 @@
         </div>
         <div class="landing-faq">
           <details><summary>Is ResumeOut.com free to use?</summary><p>The core editor is free to use. Visit the Plans page for current feature details and paid options.</p></details>
-          <details><summary>Can I download my resume as a PDF?</summary><p>Standard PDF export is included. Some Pro-template downloads have plan limits; check the Plans page for current details.</p></details>
+          <details><summary>Can I download my resume as a PDF?</summary><p>Standard PDF export is included. Sign in with Google to get 2 lifetime downloads using Pro templates per account. Pro subscribers get unlimited Pro-template downloads.</p></details>
           <details><summary>Are the templates ATS-friendly?</summary><p>Templates are designed with readable resume structure in mind. ATS systems vary, so no template can guarantee a particular screening outcome.</p></details>
           <details><summary>Can I import my existing resume?</summary><p>Yes. Choose Import resume to bring a supported file into the editor and review the imported content before applying it.</p></details>
           <details><summary>Can I save and edit my resume later?</summary><p>Use browser saving or sign in with Google for account-based cloud resume sync.</p></details>
@@ -638,7 +651,7 @@
       <nav aria-label="Footer navigation">
         <a href="/privacy.html">Privacy Policy</a>
         <a href="/terms.html">Terms of Service</a>
-        <a href="/about.html">Contact Us</a>
+        <a href="/support.html">Contact Us</a>
       </nav>
     </footer>
     <script type="module" src="/src/theme.js"></script>
