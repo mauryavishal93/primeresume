@@ -61,7 +61,7 @@ const selectedCurrency = preferredPricingCurrency();
 $('#supportLink')?.addEventListener('click', event => {
   event.preventDefault();
   if (typeof supportDialog?.showModal === 'function') supportDialog.showModal();
-  else window.location.href = 'mailto:buildymyportfolio@gmail.com';
+  else window.location.href = 'mailto:resumeout@gmail.com';
 });
 $('#closeSupportDialog')?.addEventListener('click', () => supportDialog?.close());
 supportDialog?.addEventListener('click', event => {
