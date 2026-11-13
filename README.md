@@ -26,6 +26,31 @@ Import this repository into Vercel with the repository root as the project root.
 
 Add `FIREBASE_SERVICE_ACCOUNT_JSON` and `ADMIN_EMAILS` under **Project Settings → Environment Variables** in Vercel, then redeploy. Add the Razorpay and billing release variables there only when enabling paid checkout. Do not copy `.env` into the repository or expose server credentials as `VITE_*` variables.
 
+### Firebase environment configuration
+
+The browser Firebase config is selected at Vite build time using `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, and `VITE_FIREBASE_APP_ID`. Configure these separately in Vercel's **Preview** and **Production** environments: keep the existing Firebase project in Preview for testing and use the new `resumeout` project in Production only after its Google provider, Firestore rules/indexes, Auth accounts, and required data are ready. The current project remains the local fallback when these variables are unset; for local overrides, put the values in `frontend/.env.local`.
+
+The backend's `FIREBASE_SERVICE_ACCOUNT_JSON` must also be set separately for Preview and Production and must belong to the same Firebase project as that environment's client config. The app currently uses Firebase Authentication and Firestore; Firebase Storage and Analytics config fields are not needed by its current code.
+
+### Copy Firestore data to `resumeout`
+
+The guarded one-off script `scripts/copy-firestore.js` copies documents and nested subcollections from `buildmyportfolio-5b714` to `resumeout`, retaining document paths and remapping Firestore document references. It also walks subcollections for Auth user UIDs, even when a `users/{uid}` parent document does not exist. It reads the source service account from the ignored root `.env` and takes a `resumeout` service-account JSON file stored outside this repository. Create that target service account with the **Cloud Datastore User** role, keep its key private, and do not commit or share it. Managed Firestore export/import is not required, but reads/writes may still incur usage charges or hit quotas.
+
+Pause app writes to the source during the final copy. Run a read-only count first, then explicitly start the copy:
+
+```sh
+node --env-file=.env scripts/copy-firestore.js "$HOME/.config/resumeout-migration/resumeout-admin.json" --dry-run
+node --env-file=.env scripts/copy-firestore.js "$HOME/.config/resumeout-migration/resumeout-admin.json" --execute
+```
+
+If an earlier run copied root collections but missed user subcollections, first pause writes again and review `--dry-run`; it will report missing paths. Use `--resume` only when every document already in the target came from this migration:
+
+```sh
+node --env-file=.env scripts/copy-firestore.js "$HOME/.config/resumeout-migration/resumeout-admin.json" --resume
+```
+
+The script verifies both credential project IDs, refuses a non-empty target for a fresh `--execute`, prevents `--resume` from overwriting unrelated target paths, and checks that every discovered source document path exists in the target afterward. If interrupted, rerunning `--execute` resumes only when its in-progress marker is present; rerunning `--resume` is safe for an additive migration whose existing target paths are a subset of source paths. Verify the copied collections and user data before changing production configuration. This copies Firestore only; Firebase Authentication users must be migrated separately with matching UIDs, and Razorpay subscriptions are not copied.
+
 ## Production
 
 The public Vercel site is `https://resumeout.vercel.app`. Public resume share links use a Drive-style `/file/d/{shareId}/view?resourcekey={shareId}` URL; local-development share links also point to the public site.

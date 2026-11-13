@@ -1,11 +1,22 @@
 import { clearUserSessionCache } from './session-cache.js';
 
-const firebaseConfig = {
+const existingFirebaseConfig = {
   apiKey: 'AIzaSyCxl9HVMLrWJg-H9RxaEAVJJJk6iiWlIVU',
   authDomain: 'buildmyportfolio-5b714.firebaseapp.com',
   projectId: 'buildmyportfolio-5b714',
   appId: '1:1044468425413:web:b7bd4d482eb7d9b67146ac'
 };
+
+export function resolveFirebaseConfig(environment = {}, fallback = existingFirebaseConfig) {
+  return {
+    apiKey: environment.VITE_FIREBASE_API_KEY || fallback.apiKey,
+    authDomain: environment.VITE_FIREBASE_AUTH_DOMAIN || fallback.authDomain,
+    projectId: environment.VITE_FIREBASE_PROJECT_ID || fallback.projectId,
+    appId: environment.VITE_FIREBASE_APP_ID || fallback.appId
+  };
+}
+
+const firebaseConfig = resolveFirebaseConfig(import.meta.env || {});
 
 export const cloudConfigured = Object.values(firebaseConfig).every(value => typeof value === 'string' && value.length > 0);
 

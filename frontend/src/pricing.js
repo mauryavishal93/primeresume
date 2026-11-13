@@ -499,7 +499,31 @@ async function startCheckout(planKey) {
           }
         } catch (error) {
           console.error('Payment verification request failed.', error);
-          const message = `${error.message} If your payment completed, it will be reconciled through Razorpay.`;
+          let recoveredEntitlement = null;
+          for (let attempt = 0; attempt < 5; attempt += 1) {
+            try {
+              recoveredEntitlement = await loadBillingEntitlement(checkoutUser, { forceRefresh: true });
+              if (recoveredEntitlement?.status === 'active') break;
+            } catch (reconciliationError) {
+              console.warn('Could not refresh Pro access after checkout verification failed.', reconciliationError);
+            }
+            if (attempt < 4) await delay(2000);
+          }
+          if (recoveredEntitlement?.status === 'active') {
+            entitlement = recoveredEntitlement;
+            entitlementResolved = true;
+            updatePurchaseControls();
+            updateVoucherControls();
+            const message = 'Your account has active Pro access. If this checkout was for a renewal, Razorpay will reconcile its payment record.';
+            checkoutStatus.textContent = message;
+            await alertModern({
+              title: 'Pro access is active',
+              message,
+              confirmText: 'Continue'
+            });
+            return;
+          }
+          const message = 'We could not confirm this checkout yet. Do not make another payment. If Razorpay completed the payment, it will be reconciled shortly; check your plan status again or contact support if Pro access does not appear.';
           checkoutStatus.textContent = message;
           await alertModern({
             title: 'Payment verification issue',

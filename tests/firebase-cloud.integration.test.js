@@ -1,7 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createFirebaseCloudClient, googleSignInErrorMessage, isDisabledAccountSignInError, isGoogleSignInCancellation } from '../frontend/src/firebase-cloud.js';
+import { createFirebaseCloudClient, googleSignInErrorMessage, isDisabledAccountSignInError, isGoogleSignInCancellation, resolveFirebaseConfig } from '../frontend/src/firebase-cloud.js';
 import { chooseAuthenticatedResume } from '../frontend/src/resume-persistence.js';
+
+test('Firebase web config can be selected per build environment', () => {
+  assert.deepEqual(resolveFirebaseConfig({
+    VITE_FIREBASE_API_KEY: 'new-api-key',
+    VITE_FIREBASE_AUTH_DOMAIN: 'resumeout.firebaseapp.com',
+    VITE_FIREBASE_PROJECT_ID: 'resumeout',
+    VITE_FIREBASE_APP_ID: 'new-app-id'
+  }), {
+    apiKey: 'new-api-key',
+    authDomain: 'resumeout.firebaseapp.com',
+    projectId: 'resumeout',
+    appId: 'new-app-id'
+  });
+  assert.equal(resolveFirebaseConfig({}).projectId, 'buildmyportfolio-5b714');
+});
 
 function createFakeFirebase({ popupError = null, popupDelay = null, signOutError = null } = {}) {
   const records = new Map();
