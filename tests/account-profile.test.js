@@ -69,16 +69,19 @@ test('all pages hydrate the account icon from cache before auth modules execute'
   assert.ok(transformedEditor.indexOf('id="accountMenu"') < transformedEditor.indexOf('menu.dataset.authShellVisible'));
 });
 
-test('cached Pro badge renders before Firebase restores auth without granting feature access', () => {
+test('cached Pro badge stays visible for the matching account during auth and entitlement refresh', () => {
   assert.match(authNavigation, /const initialProBadgeHint = getCachedProBadgeHint\(\);[\s\S]*?proBadge\.hidden = false/);
+  assert.match(authNavigation, /hintMatchesUser = hint && \([\s\S]*?currentUser\?\.uid === hint\.uid/);
   assert.match(authNavigation, /updateProBadge\(null\);[\s\S]*?loadBillingEntitlement\(user, \{ forceRefresh: true \}\)/);
-  assert.match(authNavigation, /!document\.body\.classList\.contains\('auth-state-ready'\)/);
+  assert.match(authNavigation, /clearBillingEntitlementCache\(user\);\s*updateProBadge\(null\)/);
+  assert.doesNotMatch(authNavigation, /catch \(error\) \{\s*if \(requestId === entitlementRequest\) \{\s*clearCachedProBadgeHint\(user\.uid\)/);
   const editorSource = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
   assert.match(editorSource, /updateProLabel\(\);[\s\S]*?async function refreshEditorBillingStatus/);
   assert.match(editorSource, /canUseFeature\(FEATURE_IDS\.ALL_TEMPLATES,verifiedEntitlement\)\|\|cachedBadgeIsCurrent/);
-  assert.match(editorSource, /cachedBadgeIsCurrent=!authStateResolved&&proBadgeHint\?\.validUntil>Date\.now\(\)/);
+  assert.match(editorSource, /cachedBadgeIsCurrent=proBadgeHint\?\.validUntil>Date\.now\(\)&&\(!authStateResolved\|\|cloudUser\?\.uid===proBadgeHint\.uid\)/);
   assert.match(editorSource, /verifiedEntitlement=config\.entitlementEnabled\?await loadBillingEntitlement\(user,\{forceRefresh:true\}\):null/);
   assert.match(editorSource, /verifiedEntitlement=null;\s*updateProLabel\(\);\s*renderTemplates\(\)/);
+  assert.match(editorSource, /clearBillingEntitlementCache\(user\);\s*proBadgeHint=getCachedProBadgeHint\(\)/);
 });
 
 test('shared auth controls stay hidden until logout navigation completes', () => {

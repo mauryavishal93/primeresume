@@ -173,9 +173,12 @@ window.addEventListener('account-profile-updated', event => {
 function updateProBadge(entitlement) {
   const hasVerifiedPro = canUseFeature(FEATURE_IDS.ALL_TEMPLATES, entitlement);
   const hint = getCachedProBadgeHint();
-  const hasPro = hasVerifiedPro || Boolean(
+  const hintMatchesUser = hint && (
     !document.body.classList.contains('auth-state-ready')
-      && hint?.validUntil > Date.now()
+    || currentUser?.uid === hint.uid
+  );
+  const hasPro = hasVerifiedPro || Boolean(
+    hintMatchesUser && hint.validUntil > Date.now()
   );
   if (proBadge) proBadge.hidden = !hasPro;
   document.title = hasPro ? `${originalTitle} | Pro` : originalTitle;
@@ -205,7 +208,6 @@ async function refreshProBadge(user) {
     }
   } catch (error) {
     if (requestId === entitlementRequest) {
-      clearCachedProBadgeHint(user.uid);
       clearBillingEntitlementCache(user);
       updateProBadge(null);
     }

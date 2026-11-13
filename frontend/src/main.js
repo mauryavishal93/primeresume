@@ -181,7 +181,7 @@ function insertPointerLine(sectionId,afterLine){
  requestAnimationFrame(()=>$('inspector').querySelector(`[data-section-pointer-line][data-section-id="${sectionId}"][data-line="${lineIndex}"]`)?.focus());
 }
 function toast(msg){$('toast').textContent=msg;$('toast').classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('toast').classList.remove('show'),2300)}
-function updateProLabel(){const cachedBadgeIsCurrent=!authStateResolved&&proBadgeHint?.validUntil>Date.now();const isPro=canUseFeature(FEATURE_IDS.ALL_TEMPLATES,verifiedEntitlement)||cachedBadgeIsCurrent;const badge=$('proBrandBadge');if(badge)badge.hidden=!isPro;document.title=isPro?`${baseDocumentTitle} | Pro`:baseDocumentTitle}
+function updateProLabel(){const cachedBadgeIsCurrent=proBadgeHint?.validUntil>Date.now()&&(!authStateResolved||cloudUser?.uid===proBadgeHint.uid);const isPro=canUseFeature(FEATURE_IDS.ALL_TEMPLATES,verifiedEntitlement)||cachedBadgeIsCurrent;const badge=$('proBrandBadge');if(badge)badge.hidden=!isPro;document.title=isPro?`${baseDocumentTitle} | Pro`:baseDocumentTitle}
 updateProLabel();
 async function refreshEditorBillingStatus(user,generation){
  try{
@@ -207,8 +207,7 @@ async function refreshEditorBillingStatus(user,generation){
   console.error('Could not load the signed-in account billing status.',error);
   verifiedEntitlement=null;
   clearBillingEntitlementCache(user);
-  clearCachedProBadgeHint(user.uid);
-  proBadgeHint=null;
+  proBadgeHint=getCachedProBadgeHint();
   updateProLabel();
   renderTemplates();
  }
