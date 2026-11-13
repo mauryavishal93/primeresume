@@ -61,11 +61,11 @@ The site is multi-page. Vercel serves `frontend/index.html` at `/`; the Express 
 
 ## Checks
 
-Run the automated regression suite and production build before submitting changes:
+The regression suite includes a public-share route integration test that serves the generated editor page, so build the frontend before running the tests:
 
 ```sh
-npm test
 npm run build
+npm test
 ```
 
 GitHub Actions runs both checks on Node.js 22 for pushes and pull requests.
