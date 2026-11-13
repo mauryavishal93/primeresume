@@ -5,6 +5,7 @@ import { getAccountPhotoUrl, getAccountPhotoUrls } from '../frontend/src/account
 
 const page = readFileSync(new URL('../frontend/my-account.html', import.meta.url), 'utf8');
 const authNavigation = readFileSync(new URL('../frontend/src/auth-nav.js', import.meta.url), 'utf8');
+const aboutStyles = readFileSync(new URL('../frontend/src/about.css', import.meta.url), 'utf8');
 const editor = readFileSync(new URL('../frontend/editor.html', import.meta.url), 'utf8');
 const rules = readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8');
 const vite = readFileSync(new URL('../vite.config.js', import.meta.url), 'utf8');
@@ -26,6 +27,33 @@ test('my account is available from the account menu on shared pages and in the e
   assert.match(authNavigation, /const about = addMenuItem\(panel, 'a', 'account-menu-item', 'About', '\/about\.html'\);\s*const supportLink = addMenuItem\(panel, 'a', 'account-menu-item', 'Support', '\/support\.html'\)/);
   assert.match(readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8'), /\$\('myAccountLink'\)\.hidden=!user/);
   assert.match(vite, /myAccount: fileURLToPath\(new URL\('\.\/frontend\/my-account\.html'/);
+});
+
+test('guest account menu offers Google sign-in instead of a Guest profile', () => {
+  assert.match(authNavigation, /account-menu-signin', 'Sign in with Google'/);
+  assert.match(authNavigation, /accountMenu\.profile\.hidden = !user/);
+  assert.match(authNavigation, /accountMenu\.menuSignInButton\.hidden = Boolean\(user\)/);
+  assert.match(authNavigation, /accountMenu\?\.menuSignInButton\.addEventListener\('click', handleGoogleSignIn\)/);
+});
+
+test('shared auth controls stay hidden until Firebase restores the account state', () => {
+  assert.match(aboutStyles, /body:not\(\.auth-state-ready\) \.auth-actions \[data-auth-sign-in\],body:not\(\.auth-state-ready\) \.site-account-menu\{visibility:hidden\}/);
+  assert.match(authNavigation, /function updateAuthControls\(user, error\)\s*\{\s*document\.body\.classList\.add\('auth-state-ready'\)/);
+});
+
+test('shared auth controls stay hidden until logout navigation completes', () => {
+  assert.match(aboutStyles, /body\.auth-signout-pending \.auth-actions \[data-auth-sign-in\],body\.auth-signout-pending \.site-account-menu\{visibility:hidden\}/);
+  assert.match(authNavigation, /document\.body\.classList\.add\('auth-signout-pending'\);\s*await signOutUser\(\);\s*window\.location\.assign\('\/home\.html'\)/);
+  assert.match(authNavigation, /catch \(error\) \{\s*document\.body\.classList\.remove\('auth-signout-pending'\)/);
+});
+
+test('all shared-navigation pages use the same sign-out transition', () => {
+  const pages = ['about', 'admin', 'billing', 'community', 'home', 'index', 'my-account', 'my-posts', 'pricing', 'privacy', 'refunds', 'resume-wizard', 'support', 'terms'];
+  for (const page of pages) {
+    const html = readFileSync(new URL(`../frontend/${page}.html`, import.meta.url), 'utf8');
+    assert.match(html, /<body class="[^"]*about-page/, `${page} should use the shared page auth styles`);
+    assert.match(html, /src="\/src\/auth-nav\.js"/, `${page} should use the shared auth and sign-out handler`);
+  }
 });
 
 test('account avatars use the Google provider photo when the Firebase user photo is unavailable', () => {

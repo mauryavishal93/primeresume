@@ -62,6 +62,9 @@ function createAccountMenu() {
   identity.append(name, email);
   profile.append(largeAvatar, identity);
   panel.append(profile);
+  const menuSignInButton = addMenuItem(panel, 'button', 'account-menu-item account-menu-signin', 'Sign in with Google');
+  menuSignInButton.type = 'button';
+  menuSignInButton.hidden = true;
 
   const accountLink = addMenuItem(panel, 'a', 'account-menu-item', 'My account', '/my-account.html');
   accountLink.hidden = true;
@@ -132,7 +135,7 @@ function createAccountMenu() {
     }
   });
 
-  return { menu, summary, avatar, largeAvatar, name, email, about, accountLink, billingLink, myPostsLink };
+  return { menu, summary, avatar, largeAvatar, profile, name, email, menuSignInButton, about, accountLink, billingLink, myPostsLink };
 }
 
 const accountMenu = createAccountMenu();
@@ -174,6 +177,7 @@ async function refreshProBadge(user) {
 }
 
 function updateAuthControls(user, error) {
+  document.body.classList.add('auth-state-ready');
   if (error) {
     void refreshProBadge(null);
     console.error('Could not initialize account controls.', error);
@@ -190,6 +194,10 @@ function updateAuthControls(user, error) {
     }
     if (accountMenu) {
       accountMenu.menu.hidden = false;
+      accountMenu.profile.hidden = true;
+      accountMenu.menuSignInButton.hidden = false;
+      accountMenu.menuSignInButton.disabled = true;
+      accountMenu.menuSignInButton.textContent = 'Cloud setup needed';
       accountMenu.name.textContent = 'Guest';
       accountMenu.email.textContent = '';
       accountMenu.avatar.textContent = 'G';
@@ -220,7 +228,12 @@ function updateAuthControls(user, error) {
   if (accountMenu) {
     accountMenu.menu.hidden = false;
     accountMenu.myPostsLink.hidden = !user;
+    accountMenu.profile.hidden = !user;
+    accountMenu.menuSignInButton.hidden = Boolean(user);
+    accountMenu.menuSignInButton.disabled = false;
+    accountMenu.menuSignInButton.textContent = 'Sign in with Google';
     if (user) {
+      accountMenu.menu.open = false;
       const accountName = user.displayName?.trim() || user.email?.split('@')[0] || 'Google user';
       const initial = Array.from(accountName)[0]?.toLocaleUpperCase() || 'U';
       accountMenu.avatar.textContent = initial;
@@ -262,7 +275,7 @@ function updateAuthControls(user, error) {
   }
 }
 
-signInButton?.addEventListener('click', async () => {
+async function handleGoogleSignIn() {
   try {
     await signInWithGoogle();
   } catch (error) {
@@ -273,7 +286,10 @@ signInButton?.addEventListener('click', async () => {
       status.classList.add('auth-error');
     }
   }
-});
+}
+
+signInButton?.addEventListener('click', handleGoogleSignIn);
+accountMenu?.menuSignInButton.addEventListener('click', handleGoogleSignIn);
 
 signOutButton?.addEventListener('click', async () => {
   if (signOutPending) return;
@@ -293,9 +309,11 @@ signOutButton?.addEventListener('click', async () => {
       status.textContent = 'Signing out…';
       status.classList.remove('auth-error');
     }
+    document.body.classList.add('auth-signout-pending');
     await signOutUser();
     window.location.assign('/home.html');
   } catch (error) {
+    document.body.classList.remove('auth-signout-pending');
     console.error('Could not sign out.', error);
     if (status) {
       status.textContent = error.message || 'Could not sign out.';

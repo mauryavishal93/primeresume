@@ -47,6 +47,7 @@ function createFakeFirebase({ popupError = null, popupDelay = null, signOutError
       }
       if (activePopupError) throw activePopupError;
       signedInWith = provider;
+      return { user: auth.currentUser };
     },
     signInWithRedirect: async (_auth, provider) => { redirectedWith = provider; },
     signOut: async () => {
@@ -187,7 +188,8 @@ test('Google auth, token ownership, and auth observer lifecycle use the signed-i
   firebase.emitAuth(firebase.auth.currentUser);
   assert.equal(observedUser.uid, 'user-1');
 
-  await firebase.client.signInWithGoogle();
+  const signInResult = await firebase.client.signInWithGoogle();
+  assert.equal(signInResult.user.uid, 'user-1');
   assert.ok(firebase.signedInWith instanceof firebase.GoogleAuthProvider);
   assert.equal(await firebase.client.getFirebaseIdToken(firebase.auth.currentUser), 'firebase-token');
   await assert.rejects(firebase.client.getFirebaseIdToken({ uid: 'someone-else' }), /Sign in/);

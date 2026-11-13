@@ -485,6 +485,14 @@ test('active subscribers see their plan and can manage billing even when checkou
   assert.match(pricingSource, /entitlement\?\.status === 'active'[\s\S]*?window\.location\.assign\('\/billing\.html'\)/);
 });
 
+test('signed-out plan purchase buttons start Google sign-in and continue checkout after login', () => {
+  const pricingSource = readFileSync(new URL('../frontend/src/pricing.js', import.meta.url), 'utf8');
+  assert.match(pricingSource, /import \{ cloudConfigured, googleSignInErrorMessage, isGoogleSignInCancellation, observeAuth, signInWithGoogle \}/);
+  assert.match(pricingSource, /const credential = await signInWithGoogle\(\)/);
+  assert.match(pricingSource, /if \(credential\?\.user\) \{\s*currentUser = credential\.user/);
+  assert.match(pricingSource, /Google sign-in failed from the Plans page/);
+});
+
 test('Firestore rules restrict the lifetime Pro-template trial to two owner-only increments', () => {
   const rules = readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8');
   assert.match(rules, /match \/users\/\{userId\}\/trial\/proTemplateDownloads/);

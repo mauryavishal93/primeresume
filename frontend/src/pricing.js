@@ -6,7 +6,7 @@ import {
   scheduleBillingPlanChange,
   verifyBillingCheckout
 } from './billing-client.js';
-import { cloudConfigured, observeAuth, signInWithGoogle } from './firebase-cloud.js';
+import { cloudConfigured, googleSignInErrorMessage, isGoogleSignInCancellation, observeAuth, signInWithGoogle } from './firebase-cloud.js';
 import { alertModern, confirmModern } from './modern-modal.js';
 import { PLAN_CONFIG, PRICING_FEATURES } from './plan-access.js';
 import { formatCurrencyPrice, preferredPricingCurrency } from './pricing-currency.js';
@@ -363,8 +363,28 @@ async function startCheckout(planKey) {
     return;
   }
   if (!currentUser) {
-    checkoutStatus.textContent = 'Sign in with Google before starting a purchase.';
-    return;
+    monthlyButton.disabled = true;
+    yearlyButton.disabled = true;
+    checkoutStatus.textContent = 'Opening Google sign-in…';
+    try {
+      const credential = await signInWithGoogle();
+      if (credential?.user) {
+        currentUser = credential.user;
+      } else {
+        updatePurchaseControls();
+        if (credential === null) checkoutStatus.textContent = '';
+        return;
+      }
+    } catch (error) {
+      if (!isGoogleSignInCancellation(error)) {
+        console.error('Google sign-in failed from the Plans page.', error);
+        checkoutStatus.textContent = googleSignInErrorMessage(error);
+      } else {
+        checkoutStatus.textContent = '';
+      }
+      updatePurchaseControls();
+      return;
+    }
   }
 
   monthlyButton.disabled = true;

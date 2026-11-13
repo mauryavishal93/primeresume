@@ -61,6 +61,13 @@ test('homepage redesign sections and existing walkthrough stay consistent on bot
   }
 });
 
+test('homepage footer Contact Us links to Support on both entry points', () => {
+  for (const page of ['home.html', 'index.html']) {
+    const html = readFileSync(new URL(`../frontend/${page}`, import.meta.url), 'utf8');
+    assert.match(html, /<footer class="landing-footer">[\s\S]*?<a href="\/support\.html">Contact Us<\/a>/);
+  }
+});
+
 test('home and Plans pages explain the Google sign-in Pro-template PDF allowance', () => {
   for (const page of ['home.html', 'index.html']) {
     const html = readFileSync(new URL(`../frontend/${page}`, import.meta.url), 'utf8');

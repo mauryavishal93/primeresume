@@ -626,6 +626,10 @@ function updateSharedCopyAuth(user){
  $('googleSignInBtn').hidden=!!user;
  $('cloudActions').hidden=!!user;
  $('accountMenu').hidden=false;
+ $('accountMenuProfile').hidden=!user;
+ $('accountMenuSignInBtn').hidden=!!user;
+ $('accountMenuSignInBtn').disabled=false;
+ $('accountMenuSignInBtn').textContent='Sign in with Google';
  $('cloudResumesBtn').hidden=!user;
  $('myPostsLink').hidden=!user;
  $('myAccountLink').hidden=!user;
@@ -658,6 +662,7 @@ function updateSharedCopyAuth(user){
 }
 async function updateCloudAccount(user,error){
  authStateResolved=true;
+ document.body.classList.remove('auth-state-pending');
  if(error){
   proTemplateDownloadsRemaining=null;
   verifiedEntitlement=null;
@@ -668,6 +673,10 @@ async function updateCloudAccount(user,error){
   $('googleSignInBtn').title=error.message;
   $('cloudActions').hidden=false;
   $('accountMenu').hidden=false;
+  $('accountMenuProfile').hidden=true;
+  $('accountMenuSignInBtn').hidden=false;
+  $('accountMenuSignInBtn').disabled=true;
+  $('accountMenuSignInBtn').textContent='Cloud setup needed';
   $('cloudResumesBtn').hidden=true;
   $('myPostsLink').hidden=true;
   $('myAccountLink').hidden=true;
@@ -739,6 +748,10 @@ async function updateCloudAccount(user,error){
  $('googleSignInBtn').hidden=!!user;
  $('cloudActions').hidden=!!user;
  $('accountMenu').hidden=false;
+ $('accountMenuProfile').hidden=!user;
+ $('accountMenuSignInBtn').hidden=!!user;
+ $('accountMenuSignInBtn').disabled=false;
+ $('accountMenuSignInBtn').textContent='Sign in with Google';
  $('cloudResumesBtn').hidden=!user;
  $('myPostsLink').hidden=!user;
  $('myAccountLink').hidden=!user;
@@ -746,6 +759,7 @@ async function updateCloudAccount(user,error){
  $('googleSignOutBtn').disabled=false;
  $('googleSignOutBtn').textContent='Sign out';
  if(user){
+  $('accountMenu').open=false;
   const accountName=user.displayName?.trim()||user.email?.split('@')[0]||'Google user';
   const initial=Array.from(accountName)[0]?.toLocaleUpperCase()||'U';
   $('accountMenu').querySelector('summary').setAttribute('aria-label',`Account menu for ${accountName}`);
@@ -3861,10 +3875,12 @@ $('skipBackupApplyResumeImport').addEventListener('click',()=>applyResumeImport(
 $('cancelResumeImport').addEventListener('click',closeResumeImport);
 $('closeResumeImport').addEventListener('click',closeResumeImport);
 $('resumeImportModalBg').addEventListener('click',event=>{if(event.target===$('resumeImportModalBg'))closeResumeImport()});
- $('googleSignInBtn').addEventListener('click',async()=>{
+ const handleGoogleSignIn=async()=>{
   try{await signInWithGoogle()}
   catch(error){if(!isGoogleSignInCancellation(error))toast(authErrorMessage(error))}
- });
+ };
+ $('googleSignInBtn').addEventListener('click',handleGoogleSignIn);
+ $('accountMenuSignInBtn').addEventListener('click',handleGoogleSignIn);
   $('browserSaveToggle').addEventListener('change',event=>{
    if(cloudUser){updateBrowserPersistenceUI();return}
    const enabled=event.target.checked;
@@ -3908,12 +3924,13 @@ $('resumeImportModalBg').addEventListener('click',event=>{if(event.target===$('r
     });
     if(!confirmed)return;
     $('accountMenu').open=false;
+    document.body.classList.add('auth-signout-pending');
     button.disabled=true;
     button.textContent='Signing out…';
     await signOutUser();
     window.location.assign('/home.html')
    }
-   catch(error){console.error('Could not sign out.',error);toast(error.message||'Could not sign out.')}
+   catch(error){document.body.classList.remove('auth-signout-pending');console.error('Could not sign out.',error);toast(error.message||'Could not sign out.')}
   finally{
    signOutPending=false;
    button.disabled=false;
@@ -3923,6 +3940,27 @@ $('resumeImportModalBg').addEventListener('click',event=>{if(event.target===$('r
  $('cloudResumesBtn').addEventListener('click',()=>{$('accountMenu').open=false;openCloudModal()});
  document.addEventListener('click',event=>{if(!$('accountMenu').contains(event.target))$('accountMenu').open=false});
  $('accountMenu').addEventListener('keydown',event=>{if(event.key==='Escape'&&$('accountMenu').open){$('accountMenu').open=false;$('accountMenu').querySelector('summary').focus()}});
+ const positionAccountMenuPanel=()=>{
+  const menu=$('accountMenu'),panel=menu.querySelector('.account-menu-panel');
+  if(!menu.open||!window.matchMedia('(max-width:640px)').matches){
+   panel.style.position='';
+   panel.style.top='';
+   panel.style.right='';
+   panel.style.width='';
+   panel.style.maxHeight='';
+   panel.style.overflowY='';
+   return;
+  }
+  const triggerBounds=menu.querySelector('summary').getBoundingClientRect();
+  panel.style.position='fixed';
+  panel.style.top=`${triggerBounds.bottom+8}px`;
+  panel.style.right='8px';
+  panel.style.width='min(300px, calc(100vw - 16px))';
+  panel.style.maxHeight=`calc(100dvh - ${triggerBounds.bottom+16}px)`;
+  panel.style.overflowY='auto';
+ };
+ $('accountMenu').addEventListener('toggle',positionAccountMenuPanel);
+ window.addEventListener('resize',positionAccountMenuPanel);
  $('closeCloudModal').addEventListener('click',closeCloudModal);
  $('closeCloudModalAction').addEventListener('click',closeCloudModal);
  $('cloudModalBg').addEventListener('click',event=>{if(event.target===$('cloudModalBg'))closeCloudModal()});

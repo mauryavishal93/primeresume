@@ -12,7 +12,7 @@ if (location.hostname.toLowerCase() === 'buildmyportfolio.onrender.com') {
 </script>
 <link rel="stylesheet" href="/src/style.css">
 </head>
-<body>
+<body class="auth-state-pending">
 <header class="topbar">
  <a class="brand" href="/home.html" aria-label="ResumeOut.com home"><img class="logo" src="/images/resumeout-mark.svg" alt="" aria-hidden="true"><span class="brand-name"><span class="brand-resume">Resume</span><span class="brand-out">Out</span><span class="brand-domain">.com</span></span><span class="pro-brand-badge" id="proBrandBadge" aria-label="Pro plan" hidden>Pro</span></a>
  <input id="docName" class="docname" aria-label="Project name" value="Untitled resume">
@@ -49,10 +49,11 @@ if (location.hostname.toLowerCase() === 'buildmyportfolio.onrender.com') {
    <span class="account-avatar" id="accountAvatar" aria-hidden="true">U</span>
   </summary>
   <div class="account-menu-panel">
-   <div class="account-menu-profile">
+   <div class="account-menu-profile" id="accountMenuProfile" hidden>
     <span class="account-avatar account-avatar-large" id="accountAvatarLarge" aria-hidden="true">U</span>
     <span class="account-menu-identity"><strong id="accountUserName">User</strong><span id="accountUserEmail"></span></span>
    </div>
+   <button class="account-menu-item" id="accountMenuSignInBtn" type="button" hidden>Sign in with Google</button>
    <a class="account-menu-item" id="myAccountLink" href="/my-account.html" hidden>My account</a>
    <button class="account-menu-item" id="cloudResumesBtn" type="button" hidden>My cloud resumes</button>
    <a class="account-menu-item" id="myPostsLink" href="/my-posts.html" hidden>My posts</a>

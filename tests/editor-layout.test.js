@@ -92,6 +92,11 @@ test('mobile resume canvas aligns A4 pages and fits them below the desktop zoom 
 test('editor account menu links to Community and My posts', () => {
   const html = readFileSync(new URL('../frontend/editor.html', import.meta.url), 'utf8');
   const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
+  assert.match(html, /<body class="auth-state-pending">/);
+  assert.match(styles, /body\.auth-state-pending #googleSignInBtn,body\.auth-state-pending #accountMenu,body\.auth-signout-pending #googleSignInBtn,body\.auth-signout-pending #accountMenu\{visibility:hidden\}/);
+  assert.match(source, /async function updateCloudAccount\(user,error\)\{\s*authStateResolved=true;\s*document\.body\.classList\.remove\('auth-state-pending'\)/);
+  assert.match(source, /document\.body\.classList\.add\('auth-signout-pending'\);\s*button\.disabled=true;\s*button\.textContent='Signing out…';\s*await signOutUser\(\)/);
+  assert.match(source, /catch\(error\)\{document\.body\.classList\.remove\('auth-signout-pending'\)/);
   const accountMenu = html.slice(html.indexOf('id="accountMenu"'), html.indexOf('</details>', html.indexOf('id="accountMenu"')));
   const options = [
     'My cloud resumes',
@@ -110,6 +115,11 @@ test('editor account menu links to Community and My posts', () => {
     previousIndex = optionIndex;
   }
   assert.match(accountMenu, /id="myPostsLink"[^>]*hidden/);
+  assert.match(accountMenu, /id="accountMenuSignInBtn"[^>]*hidden>Sign in with Google<\/button>/);
+  assert.match(accountMenu, /class="account-menu-profile" id="accountMenuProfile" hidden/);
+  assert.match(source, /\$\('accountMenuProfile'\)\.hidden=!user/);
+  assert.match(source, /\$\('accountMenuSignInBtn'\)\.hidden=!!user/);
+  assert.match(source, /\$\('accountMenuSignInBtn'\)\.addEventListener\('click',handleGoogleSignIn\)/);
   assert.match(source, /\$\('myPostsLink'\)\.hidden=true/);
   assert.match(source, /\$\('myPostsLink'\)\.hidden=!user/);
 });
@@ -126,6 +136,11 @@ test('mobile editor header grid rules do not reposition links inside the account
   assert.doesNotMatch(styles, /(?:^|})#aboutLink\{grid-area:about\}/);
   assert.match(styles, /\.topbar>\[data-theme-toggle\]\{grid-area:theme;width:100%\}/);
   assert.match(styles, /width:min\(300px,calc\(100vw - 32px\)\)/);
+  const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
+  assert.match(source, /window\.matchMedia\('\(max-width:640px\)'\)\.matches/);
+  assert.match(source, /panel\.style\.position='fixed'/);
+  assert.match(source, /panel\.style\.maxHeight=`calc\(100dvh - \$\{triggerBounds\.bottom\+16\}px\)`/);
+  assert.match(source, /accountMenu'\)\.addEventListener\('toggle',positionAccountMenuPanel\)/);
 });
 
 test('mobile editor gives header actions readable, touch-friendly rows', () => {

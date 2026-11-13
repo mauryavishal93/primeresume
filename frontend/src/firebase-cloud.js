@@ -162,9 +162,9 @@ export function createFirebaseCloudClient({ config = firebaseConfig, loadSdk = l
       try {
         const { auth, authSdk } = await getServices();
         const provider = new authSdk.GoogleAuthProvider();
-        await authSdk.signInWithPopup(auth, provider);
+        return await authSdk.signInWithPopup(auth, provider);
       } catch (error) {
-        if (isGoogleSignInCancellation(error)) return;
+        if (isGoogleSignInCancellation(error)) return null;
         if (!['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment'].includes(error?.code)) {
           throw error;
         }
