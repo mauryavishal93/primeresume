@@ -20,6 +20,9 @@
   --border: var(--admin-border);
   --surface: var(--admin-surface);
   --surface-2: var(--admin-surface-2);
+  --admin-font-small: 12px;
+  --admin-font-body: 14px;
+  --admin-font-primary: 15px;
 }
 
 :root[data-theme='light'] {
@@ -51,7 +54,7 @@
 
 .forum-deleted-label {
   color: var(--admin-danger);
-  font-size: 0.82rem;
+  font-size: var(--admin-font-small);
   font-weight: 700;
 }
 
@@ -72,6 +75,8 @@ body.admin-page {
     linear-gradient(180deg, var(--admin-bg) 0%, var(--admin-bg-2) 100%);
   color: var(--admin-text);
   font-family: Inter, 'Segoe UI', sans-serif;
+  font-size: var(--admin-font-body);
+  line-height: 1.5;
 }
 
 .admin-page .about-header {
@@ -100,7 +105,7 @@ body.admin-page {
   background: rgba(255, 255, 255, 0.03);
   color: var(--admin-text);
   text-decoration: none;
-  font-size: 0.82rem;
+  font-size: var(--admin-font-body);
   font-weight: 700;
   letter-spacing: 0.01em;
   transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, background 0.18s ease;
@@ -182,8 +187,8 @@ body.admin-page {
 }
 
 .admin-shell {
-  width: min(1220px, calc(100% - 32px));
-  margin: 40px auto 80px;
+  width: min(1320px, calc(100% - 40px));
+  margin: 32px auto 64px;
 }
 
 #admin-content[hidden] {
@@ -222,7 +227,7 @@ body.admin-page {
   background: transparent;
   color: var(--admin-muted);
   font: inherit;
-  font-size: 0.88rem;
+  font-size: var(--admin-font-body);
   font-weight: 650;
   text-align: left;
   cursor: pointer;
@@ -304,7 +309,7 @@ body.admin-page {
   border: 1px solid var(--admin-border);
   border-radius: 10px;
   color: var(--admin-primary-2);
-  font-size: 0.8rem;
+  font-size: var(--admin-font-small);
   font-weight: 700;
 }
 
@@ -315,12 +320,12 @@ body.admin-page {
 .forum-content-description {
   margin: 0;
   color: var(--admin-muted);
-  font-size: 0.88rem;
+  font-size: var(--admin-font-body);
 }
 
 .forum-activity-status {
   color: var(--admin-muted);
-  font-size: 0.88rem;
+  font-size: var(--admin-font-body);
 }
 
 .forum-activity-status.is-error {
@@ -354,7 +359,7 @@ body.admin-page {
   display: inline-block;
   margin-top: 8px;
   color: var(--admin-primary-2);
-  font-size: 0.78rem;
+  font-size: var(--admin-font-small);
   font-weight: 700;
 }
 
@@ -378,7 +383,7 @@ body.admin-page {
 .forum-activity-user,
 .forum-activity-actor {
   color: var(--admin-muted);
-  font-size: 0.8rem;
+  font-size: var(--admin-font-small);
 }
 
 .forum-activity-user,
@@ -390,7 +395,7 @@ body.admin-page {
 .forum-activity-entry h3 {
   margin: 10px 0;
   color: var(--admin-text);
-  font-size: 1rem;
+  font-size: var(--admin-font-primary);
   overflow-wrap: anywhere;
 }
 
@@ -403,14 +408,14 @@ body.admin-page {
   padding: 8px 0;
   color: var(--admin-primary-2);
   cursor: pointer;
-  font-size: 0.84rem;
+  font-size: var(--admin-font-body);
   font-weight: 700;
 }
 
 .forum-activity-snapshot div,
 .forum-content-text {
   color: var(--admin-muted);
-  font-size: 0.84rem;
+  font-size: var(--admin-font-body);
   line-height: 1.55;
   white-space: pre-wrap;
 }
@@ -440,7 +445,7 @@ body.admin-page {
   background: var(--admin-surface-2);
   color: var(--admin-muted);
   font: inherit;
-  font-size: .88rem;
+  font-size: var(--admin-font-body);
   font-weight: 700;
   cursor: pointer;
 }
@@ -479,7 +484,7 @@ body.admin-page {
   background: var(--admin-surface-2);
   color: var(--admin-text);
   font: inherit;
-  font-size: .84rem;
+  font-size: var(--admin-font-body);
 }
 
 .forum-post-filters input:focus-visible,
@@ -516,7 +521,7 @@ body.admin-page {
 
 .admin-hero {
   border-radius: 24px;
-  padding: 26px 28px;
+  padding: 22px 24px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -533,7 +538,7 @@ body.admin-page {
   margin: 0;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  font-size: 11px;
+  font-size: var(--admin-font-small);
   font-weight: 700;
   color: var(--admin-primary-2);
 }
@@ -551,7 +556,7 @@ body.admin-page {
 }
 
 .admin-hero h1 {
-  font-size: clamp(2rem, 3vw, 3.1rem);
+  font-size: clamp(1.8rem, 2.6vw, 2.5rem);
   letter-spacing: -0.04em;
   line-height: 1.05;
 }
@@ -560,7 +565,15 @@ body.admin-page {
   margin: 0;
   color: var(--admin-muted);
   max-width: 620px;
-  font-size: 0.98rem;
+  font-size: var(--admin-font-primary);
+  line-height: 1.55;
+}
+
+.admin-access h2,
+.admin-card-title h2,
+.voucher-manager summary h2 {
+  font-size: 1.18rem;
+  line-height: 1.3;
 }
 
 .admin-hero-actions {
@@ -587,7 +600,7 @@ body.admin-page {
   border: 1px solid var(--admin-border);
   background: rgba(255, 255, 255, 0.03);
   color: var(--admin-muted);
-  font-size: 0.74rem;
+  font-size: var(--admin-font-small);
   font-weight: 700;
 }
 
@@ -606,7 +619,7 @@ body.admin-page {
   background: rgba(94, 234, 212, 0.08);
   border: 1px solid rgba(94, 234, 212, 0.24);
   color: var(--admin-primary-2);
-  font-size: 0.8rem;
+  font-size: var(--admin-font-body);
   font-weight: 700;
 }
 
@@ -731,7 +744,7 @@ body.admin-page {
 }
 
 .summary-label {
-  font-size: 0.76rem;
+  font-size: var(--admin-font-small);
   color: var(--admin-muted);
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -775,12 +788,12 @@ body.admin-page {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  font-size: 0.76rem;
+  font-size: var(--admin-font-small);
   color: var(--admin-muted);
 }
 
 .stat-trend {
-  font-size: 0.68rem;
+  font-size: var(--admin-font-small);
   font-weight: 700;
   border-radius: 999px;
   padding: 5px 8px;
@@ -800,8 +813,8 @@ body.admin-page {
 
 .admin-stats strong {
   display: block;
-  margin-top: 18px;
-  font-size: clamp(1.8rem, 2vw, 2.5rem);
+  margin-top: 14px;
+  font-size: clamp(1.55rem, 1.8vw, 2.1rem);
   font-weight: 800;
   letter-spacing: -0.04em;
 }
@@ -810,7 +823,7 @@ body.admin-page {
   display: block;
   margin-top: 6px;
   color: var(--admin-muted);
-  font-size: 0.76rem;
+  font-size: var(--admin-font-small);
 }
 
 .payments-card {
@@ -844,7 +857,7 @@ body.admin-page {
 
 .admin-card {
   border-radius: 24px;
-  padding: 20px;
+  padding: 18px;
 }
 
 .pricing-config-card {
@@ -863,7 +876,7 @@ body.admin-page {
   grid-column: 1 / -1;
   margin: 8px 0 0;
   color: var(--admin-text);
-  font-size: 0.9rem;
+  font-size: var(--admin-font-body);
   letter-spacing: 0;
 }
 
@@ -876,7 +889,7 @@ body.admin-page {
   display: grid;
   gap: 8px;
   color: var(--admin-muted);
-  font-size: 0.76rem;
+  font-size: var(--admin-font-small);
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -903,7 +916,7 @@ body.admin-page {
 
 .pricing-summary {
   color: var(--admin-muted);
-  font-size: 0.9rem;
+  font-size: var(--admin-font-body);
 }
 
 .admin-card-title {
@@ -923,7 +936,7 @@ body.admin-page {
 }
 
 .user-count-label {
-  font-size: 0.72rem;
+  font-size: var(--admin-font-small);
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -949,7 +962,7 @@ body.admin-page {
 
 .filter-group label {
   color: var(--admin-muted);
-  font-size: 0.72rem;
+  font-size: var(--admin-font-small);
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -990,12 +1003,12 @@ table {
 th,
 td {
   text-align: left;
-  padding: 14px 16px;
+  padding: 12px 14px;
   vertical-align: top;
 }
 
 th {
-  font-size: 0.72rem;
+  font-size: var(--admin-font-small);
   text-transform: uppercase;
   letter-spacing: 0.12em;
   color: var(--admin-muted);
@@ -1028,7 +1041,7 @@ tbody tr:hover {
 }
 
 .account-email {
-  font-size: 0.82rem;
+  font-size: var(--admin-font-small);
   color: var(--admin-muted);
 }
 
@@ -1038,7 +1051,7 @@ tbody tr:hover {
   gap: 6px;
   padding: 6px 10px;
   border-radius: 999px;
-  font-size: 0.72rem;
+  font-size: var(--admin-font-small);
   font-weight: 700;
   background: rgba(148, 163, 184, 0.08);
   color: var(--admin-text);
@@ -1050,10 +1063,16 @@ tbody tr:hover {
   border: 1px solid rgba(94, 234, 212, 0.18);
 }
 
+.status-pill.danger {
+  background: rgba(248, 113, 113, 0.1);
+  color: #fca5a5;
+  border: 1px solid rgba(248, 113, 113, 0.24);
+}
+
 .activation-label {
   margin-top: 8px;
   color: var(--admin-muted);
-  font-size: 0.8rem;
+  font-size: var(--admin-font-small);
 }
 
 .account-value {
@@ -1075,7 +1094,7 @@ tbody tr:hover {
   background: rgba(255, 255, 255, 0.02);
   color: var(--admin-text);
   cursor: pointer;
-  font-size: 0.76rem;
+  font-size: var(--admin-font-small);
   font-weight: 700;
   transition: border-color 0.18s ease, transform 0.18s ease;
 }
@@ -1113,7 +1132,7 @@ tbody tr:hover {
 
 .collapse-label {
   color: var(--admin-muted);
-  font-size: 0.75rem;
+  font-size: var(--admin-font-small);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -1128,7 +1147,7 @@ tbody tr:hover {
 .grant-body label {
   display: grid;
   gap: 7px;
-  font-size: 0.76rem;
+  font-size: var(--admin-font-small);
   font-weight: 700;
   color: var(--admin-muted);
 }
@@ -1233,12 +1252,12 @@ tbody tr:hover {
 
 .voucher-row span {
   color: var(--admin-muted);
-  font-size: 0.8rem;
+  font-size: var(--admin-font-body);
 }
 
 .delete-available {
   color: var(--admin-muted);
-  font-size: 0.7rem;
+  font-size: var(--admin-font-small);
 }
 
 .empty-voucher-list,
@@ -1247,7 +1266,7 @@ tbody tr:hover {
 .empty {
   color: var(--admin-muted);
   margin: 0;
-  font-size: 0.9rem;
+  font-size: var(--admin-font-body);
 }
 
 .empty-table-state {
@@ -1287,7 +1306,7 @@ tbody tr:hover {
 
 .detail-header h2 {
   margin: 0;
-  font-size: clamp(1.3rem, 2vw, 1.8rem);
+  font-size: clamp(1.2rem, 1.7vw, 1.5rem);
 }
 
 #detail-body {
@@ -1312,7 +1331,7 @@ tbody tr:hover {
 .detail-summary span {
   display: block;
   color: var(--admin-muted);
-  font-size: 0.72rem;
+  font-size: var(--admin-font-small);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -1320,7 +1339,7 @@ tbody tr:hover {
 .detail-summary strong {
   display: block;
   margin-top: 8px;
-  font-size: 0.94rem;
+  font-size: var(--admin-font-primary);
   line-height: 1.4;
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -1342,7 +1361,7 @@ tbody tr:hover {
 
 .detail-columns h3 {
   margin: 0 0 12px;
-  font-size: 1rem;
+  font-size: var(--admin-font-primary);
 }
 
 .detail-list {
@@ -1363,7 +1382,7 @@ tbody tr:hover {
 }
 
 .detail-list strong {
-  font-size: 0.8rem;
+  font-size: var(--admin-font-body);
   word-break: break-all;
 }
 
@@ -1381,7 +1400,7 @@ tbody tr:hover {
 .grant-body p {
   margin: 0;
   color: var(--admin-muted);
-  font-size: 0.78rem;
+  font-size: var(--admin-font-body);
 }
 
 .grant-body textarea {
@@ -1429,6 +1448,8 @@ tbody tr:hover {
 @media (max-width: 720px) {
   .admin-shell {
     width: min(100%, calc(100% - 20px));
+    margin-top: 20px;
+    margin-bottom: 40px;
   }
 
   #admin-content:not([hidden]) {
@@ -1462,6 +1483,11 @@ tbody tr:hover {
   .admin-hero {
     flex-direction: column;
     align-items: flex-start;
+    padding: 20px;
+  }
+
+  .admin-hero h1 {
+    font-size: clamp(1.7rem, 7vw, 2.1rem);
   }
 
   .admin-hero-actions {

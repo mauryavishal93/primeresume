@@ -21,6 +21,7 @@
     "firebase-admin": "^13.10.0",
     "html2canvas": "^1.4.1",
     "jspdf": "^4.2.1",
+    "libphonenumber-js": "^1.13.16",
     "mammoth": "^1.13.0",
     "pdfjs-dist": "5.5.207",
     "tesseract.js": "^7.0.0"

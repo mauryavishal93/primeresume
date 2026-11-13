@@ -215,7 +215,9 @@ async function refreshBillingPage(user, authError = null) {
 
   if (currentUser?.uid !== user.uid || requestId !== refreshId) return;
   const [entitlementResult, activityResult, paymentsResult] = await Promise.allSettled([
-    billingConfig?.entitlementEnabled ? loadBillingEntitlement(user) : Promise.resolve(null),
+    billingConfig?.entitlementEnabled
+      ? loadBillingEntitlement(user, { forceRefresh: true })
+      : Promise.resolve(null),
     loadBillingActivity(user),
     loadBillingPayments(user)
   ]);

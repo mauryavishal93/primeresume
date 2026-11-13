@@ -19,7 +19,7 @@ button,a{font:inherit}
 .about-nav{display:flex;align-items:center;gap:10px}
 .about-nav>.site-account-menu{margin-left:auto}
 .auth-actions{display:flex;align-items:center;gap:6px}
-body:not(.auth-state-ready) .auth-actions [data-auth-sign-in],body:not(.auth-state-ready) .site-account-menu{visibility:hidden}
+body:not(.auth-state-ready) .auth-actions [data-auth-sign-in],body:not(.auth-state-ready) .site-account-menu:not([data-auth-shell-visible]){visibility:hidden}
 body.auth-signout-pending .auth-actions [data-auth-sign-in],body.auth-signout-pending .site-account-menu{visibility:hidden}
 .auth-actions [hidden]{display:none!important}
 .auth-status{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}

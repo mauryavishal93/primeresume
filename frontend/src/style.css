@@ -832,4 +832,4 @@ body.homepage-demo{height:100vh;min-height:0;overflow:hidden;background:#e8edf3}
  body.homepage-demo .left-scroll,
  body.homepage-demo #inspector{height:100%;min-height:0}
 }
-body.auth-state-pending #googleSignInBtn,body.auth-state-pending #accountMenu,body.auth-signout-pending #googleSignInBtn,body.auth-signout-pending #accountMenu{visibility:hidden}
+body.auth-state-pending:not(.account-avatar-cached) #googleSignInBtn,body.auth-state-pending #accountMenu:not([data-auth-shell-visible]),body.auth-signout-pending #googleSignInBtn,body.auth-signout-pending #accountMenu{visibility:hidden}

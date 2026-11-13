@@ -485,6 +485,12 @@ test('active subscribers see their plan and can manage billing even when checkou
   assert.match(pricingSource, /entitlement\?\.status === 'active'[\s\S]*?window\.location\.assign\('\/billing\.html'\)/);
 });
 
+test('inactive users see a friendly no-plan status on the Plans page', () => {
+  const pricingSource = readFileSync(new URL('../frontend/src/pricing.js', import.meta.url), 'utf8');
+  assert.match(pricingSource, /checkoutStatus\.textContent = 'No plan active'/);
+  assert.match(pricingSource, /error\.message === 'Could not load your plan status\.'\s*\?\s*'No plan active'/);
+});
+
 test('signed-out plan purchase buttons start Google sign-in and continue checkout after login', () => {
   const pricingSource = readFileSync(new URL('../frontend/src/pricing.js', import.meta.url), 'utf8');
   assert.match(pricingSource, /import \{ cloudConfigured, googleSignInErrorMessage, isGoogleSignInCancellation, observeAuth, signInWithGoogle \}/);

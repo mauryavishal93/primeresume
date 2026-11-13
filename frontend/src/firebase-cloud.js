@@ -1,3 +1,5 @@
+import { clearUserSessionCache } from './session-cache.js';
+
 const firebaseConfig = {
   apiKey: 'AIzaSyCxl9HVMLrWJg-H9RxaEAVJJJk6iiWlIVU',
   authDomain: 'buildmyportfolio-5b714.firebaseapp.com',
@@ -177,7 +179,9 @@ export function createFirebaseCloudClient({ config = firebaseConfig, loadSdk = l
 
   async function signOutUser() {
     const { auth, authSdk } = await getServices();
+    const signedOutUid = auth.currentUser?.uid;
     await authSdk.signOut(auth);
+    if (signedOutUid) clearUserSessionCache(signedOutUid);
   }
 
   async function getFirebaseIdToken(user) {

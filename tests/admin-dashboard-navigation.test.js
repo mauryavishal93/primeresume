@@ -24,6 +24,38 @@ test('voucher-based Pro accounts are labeled as Voucher in the plan and activati
   assert.match(source, /activationSource === 'voucher' \? 'Voucher'/);
 });
 
+test('admin typography uses consistent 12px, 14px, and 15px text categories', () => {
+  assert.match(styles, /--admin-font-small:\s*12px/);
+  assert.match(styles, /--admin-font-body:\s*14px/);
+  assert.match(styles, /--admin-font-primary:\s*15px/);
+  assert.match(styles, /body\.admin-page[\s\S]*?font-size:\s*var\(--admin-font-body\)/);
+});
+
+test('admin can cancel subscriptions immediately or at period end and manage account access', () => {
+  const adminScript = readFileSync(new URL('../frontend/src/admin.js', import.meta.url), 'utf8');
+  const adminPage = readFileSync(new URL('../frontend/admin.html', import.meta.url), 'utf8');
+  assert.match(adminScript, /data-timing="immediate"/);
+  assert.match(adminScript, /data-timing="period-end"/);
+  assert.match(adminScript, /Cancel at next renewal/);
+  assert.match(adminScript, /subscriptionId && !user\.cancelAtCycleEnd/);
+  assert.match(adminScript, /\/ban`/);
+  assert.match(adminScript, /\/unban`/);
+  assert.match(adminScript, /method: 'DELETE'/);
+  assert.match(adminPage, /id="cancel-timing"[\s\S]*?value="immediate"[\s\S]*?value="period-end"/);
+});
+
+test('billing, pricing, editor, and navigation refresh entitlement after admin changes', () => {
+  const sources = [
+    'auth-nav.js',
+    'billing.js',
+    'pricing.js',
+    'main.js'
+  ].map(file => readFileSync(new URL(`../frontend/src/${file}`, import.meta.url), 'utf8'));
+  for (const script of sources) {
+    assert.match(script, /loadBillingEntitlement\([^;]*forceRefresh:\s*true/);
+  }
+});
+
 test('admin category navigation switches panels and adapts to narrow screens', () => {
   assert.match(source, /function selectAdminCategory\(category\)/);
   assert.match(source, /panel\.hidden = panel\.dataset\.adminCategory !== category/);

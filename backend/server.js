@@ -651,7 +651,19 @@ function userCheckoutDocument(db, uid) {
   return db.doc(`users/${uid}/billing/checkout`);
 }
 
+async function linkedSubscriptionId(db, uid, entitlement) {
+  let subscriptionId = entitlement?.subscriptionId;
+  if (typeof subscriptionId !== 'string' || !/^sub_[A-Za-z0-9]+$/.test(subscriptionId)) {
+    const checkoutSnapshot = await userCheckoutDocument(db, uid).get();
+    subscriptionId = checkoutSnapshot.data()?.subscriptionId;
+  }
+  return typeof subscriptionId === 'string' && /^sub_[A-Za-z0-9]+$/.test(subscriptionId)
+    ? subscriptionId
+    : null;
+}
+
 function activatePendingVouchers(entitlement, now = Date.now()) {
+  if (entitlement?.adminRevoked === true) return null;
   const pendingVouchers = Array.isArray(entitlement?.pendingVouchers)
     ? entitlement.pendingVouchers
     : [];
@@ -691,7 +703,9 @@ function schedulePendingVouchers(pendingVouchers, startsAt) {
 function publicEntitlement(data) {
   const validUntil = Number(data?.validUntil) || 0;
   const pendingVouchers = Array.isArray(data?.pendingVouchers) ? data.pendingVouchers : [];
-  const status = data?.planId === 'pro' && validUntil > Date.now() ? 'active' : 'inactive';
+  const status = data?.adminRevoked !== true && data?.planId === 'pro' && validUntil > Date.now()
+    ? 'active'
+    : 'inactive';
   return {
     planId: data?.planId || 'free',
     billingPlan: data?.billingPlan || null,
@@ -1988,6 +2002,7 @@ app.post('/api/billing/webhook', async (request, response) => {
       const eventRef = db.collection('billingWebhookEvents').doc(eventId);
       const entitlementRef = userEntitlementDocument(db, mapping.uid);
       const checkoutRef = userCheckoutDocument(db, mapping.uid);
+      const subscriptionRef = subscriptionDocument(db, subscriptionId);
       const eventPaymentId = typeof payment?.id === 'string' && /^pay_[A-Za-z0-9]+$/.test(payment.id)
         ? payment.id
         : null;
@@ -1995,35 +2010,52 @@ app.post('/api/billing/webhook', async (request, response) => {
         const duplicate = await transaction.get(eventRef);
         if (duplicate.exists) return;
 
-        const currentEntitlement = await transaction.get(entitlementRef);
-        const currentCheckout = await transaction.get(checkoutRef);
+        const [currentEntitlement, currentCheckout, currentSubscription] = await Promise.all([
+          transaction.get(entitlementRef),
+          transaction.get(checkoutRef),
+          transaction.get(subscriptionRef)
+        ]);
+        const currentMapping = currentSubscription.data() || mapping;
+        const entitlementData = currentEntitlement.data() || {};
+        const revokedBeforeThisSubscription = entitlementData.adminRevoked === true
+          && (!Number(entitlementData.adminRevokedAt)
+            || Number(currentMapping.createdAt) <= Number(entitlementData.adminRevokedAt));
+        const subscriptionRevoked = currentMapping.adminRevoked === true || revokedBeforeThisSubscription;
         const validUntil = Number(subscription?.current_end) * 1000
-          || Number(currentEntitlement.data()?.validUntil)
+          || Number(entitlementData.validUntil)
           || 0;
         const isPaidThrough = validUntil > Date.now();
         const activated = ['subscription.activated', 'subscription.charged'].includes(event.event);
-        const pendingPlanMatches = subscription?.plan_id === mapping.pendingPlanId;
-        const currentPlanMatches = subscription?.plan_id === mapping.planId;
+        const pendingPlanMatches = subscription?.plan_id === currentMapping.pendingPlanId;
+        const currentPlanMatches = subscription?.plan_id === currentMapping.planId;
         const providerPlanKey = pendingPlanMatches
-          ? mapping.pendingPlanKey
+          ? currentMapping.pendingPlanKey
           : currentPlanMatches
-            ? mapping.planKey
+            ? currentMapping.planKey
             : planKeyForRazorpayPlanId(subscription?.plan_id);
         const providerCurrency = pendingPlanMatches
-          ? mapping.pendingCurrency
+          ? currentMapping.pendingCurrency
           : currentPlanMatches
-            ? mapping.currency || 'INR'
+            ? currentMapping.currency || 'INR'
             : currencyForRazorpayPlanId(subscription?.plan_id);
         const planChangeApplied = event.event === 'subscription.charged'
           && providerPlanKey
-          && (pendingPlanMatches || providerPlanKey !== mapping.planKey || providerCurrency !== (mapping.currency || 'INR'));
+          && (pendingPlanMatches || providerPlanKey !== currentMapping.planKey || providerCurrency !== (currentMapping.currency || 'INR'));
         const planChangeCancelled = ['subscription.cancelled', 'subscription.completed', 'subscription.expired'].includes(event.event)
           && !isPaidThrough;
-        const billingPlanKey = planChangeApplied ? providerPlanKey : mapping.planKey;
-        const billingCurrency = planChangeApplied ? providerCurrency : mapping.currency || providerCurrency || 'INR';
-        const scheduledPlan = planChangeApplied || planChangeCancelled ? null : mapping.pendingPlanKey || null;
-        const scheduledAt = scheduledPlan ? Number(mapping.scheduledAt) || null : null;
-        const entitlement = activated
+        const billingPlanKey = planChangeApplied ? providerPlanKey : currentMapping.planKey;
+        const billingCurrency = planChangeApplied ? providerCurrency : currentMapping.currency || providerCurrency || 'INR';
+        const scheduledPlan = planChangeApplied || planChangeCancelled ? null : currentMapping.pendingPlanKey || null;
+        const scheduledAt = scheduledPlan ? Number(currentMapping.scheduledAt) || null : null;
+        const entitlement = subscriptionRevoked
+          ? {
+              planId: 'free',
+              billingPlan: 'free',
+              status: 'inactive',
+              source: 'server-verified',
+              validUntil: 0
+            }
+          : activated
           ? entitlementFromSubscription(subscription, billingPlanKey)
           : isPaidThrough
             ? {
@@ -2035,20 +2067,33 @@ app.post('/api/billing/webhook', async (request, response) => {
               }
             : {
                 planId: 'free',
-                billingPlan: mapping.planKey,
+                billingPlan: currentMapping.planKey,
                 status: 'inactive',
                 source: 'server-verified',
                 validUntil: 0
               };
-        if (entitlement) {
+        if (entitlement && !subscriptionRevoked) {
           entitlement.billingPlan = billingPlanKey;
           entitlement.currency = billingCurrency;
           entitlement.scheduledPlan = scheduledPlan;
           entitlement.scheduledAt = scheduledAt;
           entitlement.subscriptionId = subscriptionId;
           entitlement.cancelAtCycleEnd = event.event === 'subscription.cancelled'
-            || currentEntitlement.data()?.cancelAtCycleEnd === true
-            || mapping.cancelAtCycleEnd === true;
+            ||             entitlementData.cancelAtCycleEnd === true
+            || currentMapping.cancelAtCycleEnd === true;
+        } else if (entitlement) {
+          entitlement.planId = 'free';
+          entitlement.billingPlan = 'free';
+          entitlement.status = 'inactive';
+          entitlement.source = 'server-verified';
+          entitlement.validUntil = 0;
+          entitlement.adminRevoked = true;
+          entitlement.adminRevokedAt = entitlementData.adminRevokedAt || Date.now();
+          entitlement.subscriptionId = null;
+          entitlement.cancelAtCycleEnd = false;
+          entitlement.scheduledPlan = null;
+          entitlement.scheduledAt = null;
+          entitlement.pendingVouchers = [];
         }
 
         transaction.create(eventRef, { event: event.event, subscriptionId, receivedAt: Date.now() });
@@ -2060,7 +2105,7 @@ app.post('/api/billing/webhook', async (request, response) => {
             ? Number(payment.created_at) * 1000
             : Date.now();
           transaction.set(db.doc(`billingPayments/${payment.id}`), {
-            uid: mapping.uid,
+            uid: currentMapping.uid,
             providerPaymentId: payment.id,
             subscriptionId,
             planKey: billingPlanKey,
@@ -2072,7 +2117,7 @@ app.post('/api/billing/webhook', async (request, response) => {
             createdAt: paymentCreatedAt
           }, { merge: true });
           transaction.set(db.doc(`billingAccessHistory/${payment.id}`), {
-            uid: mapping.uid,
+            uid: currentMapping.uid,
             subscriptionId,
             planKey: billingPlanKey,
             validFrom: paymentCreatedAt,
@@ -2087,14 +2132,15 @@ app.post('/api/billing/webhook', async (request, response) => {
           }, { merge: true });
         }
         transaction.set(subscriptionDocument(db, subscriptionId), {
-          status: subscription?.status || event.event.replace('subscription.', ''),
-          currentEnd: validUntil,
+          status: subscriptionRevoked ? 'cancelled' : subscription?.status || event.event.replace('subscription.', ''),
+          currentEnd: subscriptionRevoked ? 0 : validUntil,
+          ...(subscriptionRevoked ? { adminRevoked: true } : {}),
           ...(planChangeApplied ? {
             planKey: billingPlanKey,
             currency: billingCurrency,
             planId: subscription.plan_id,
-            amount: Number.isSafeInteger(mapping.pendingPlanAmount)
-              ? mapping.pendingPlanAmount
+            amount: Number.isSafeInteger(currentMapping.pendingPlanAmount)
+              ? currentMapping.pendingPlanAmount
               : billingPlan(billingPlanKey, billingCurrency)?.amount
           } : {}),
           ...(planChangeApplied || planChangeCancelled ? {
@@ -2110,31 +2156,48 @@ app.post('/api/billing/webhook', async (request, response) => {
         const nextEntitlement = {
           ...(entitlement || {
             planId: 'free',
-            billingPlan: mapping.planKey,
+            billingPlan: currentMapping.planKey,
             status: 'inactive',
             source: 'server-verified',
             validUntil: 0
           }),
-          pendingVouchers: schedulePendingVouchers(
-            Array.isArray(currentEntitlement.data()?.pendingVouchers)
-              ? currentEntitlement.data().pendingVouchers
-              : [],
-            Number(entitlement?.validUntil) || 0
-          )
+          pendingVouchers: subscriptionRevoked
+            ? []
+            : schedulePendingVouchers(
+                Array.isArray(currentEntitlement.data()?.pendingVouchers)
+                  ? currentEntitlement.data().pendingVouchers
+                  : [],
+                Number(entitlement?.validUntil) || 0
+              )
         };
+        if (subscriptionRevoked) {
+          nextEntitlement.adminRevoked = true;
+          nextEntitlement.adminRevokedAt = entitlementData.adminRevokedAt || Date.now();
+          nextEntitlement.planId = 'free';
+          nextEntitlement.billingPlan = 'free';
+          nextEntitlement.status = 'inactive';
+          nextEntitlement.validUntil = 0;
+          nextEntitlement.subscriptionId = null;
+          nextEntitlement.cancelAtCycleEnd = false;
+          nextEntitlement.scheduledPlan = null;
+          nextEntitlement.scheduledAt = null;
+        } else {
+          nextEntitlement.adminRevoked = false;
+        }
         transaction.set(entitlementRef, activatePendingVouchers(nextEntitlement) || nextEntitlement);
         if (currentCheckout.data()?.subscriptionId === subscriptionId) {
           if (['subscription.completed', 'subscription.expired'].includes(event.event) && !isPaidThrough) {
             transaction.delete(checkoutRef);
           } else {
             transaction.set(checkoutRef, {
-              status: event.event.replace('subscription.', ''),
-              currentEnd: validUntil,
+              status: subscriptionRevoked ? 'cancelled' : event.event.replace('subscription.', ''),
+              currentEnd: subscriptionRevoked ? 0 : validUntil,
+              cancelAtCycleEnd: subscriptionRevoked ? false : currentCheckout.data()?.cancelAtCycleEnd || false,
               planKey: billingPlanKey,
               currency: billingCurrency,
-              scheduledPlan,
-              scheduledAt,
-              planChangeStatus: scheduledPlan ? mapping.pendingPlanStatus || 'scheduled' : null,
+              scheduledPlan: subscriptionRevoked ? null : scheduledPlan,
+              scheduledAt: subscriptionRevoked ? null : scheduledAt,
+              planChangeStatus: scheduledPlan ? currentMapping.pendingPlanStatus || 'scheduled' : null,
               updatedAt: Date.now()
             }, { merge: true });
           }
@@ -2303,7 +2366,8 @@ app.get('/api/billing/entitlement', requireEntitlementConfig, requireFirebaseUse
         if (data !== current) transaction.set(entitlementRef, data);
       });
     }
-    if (data.billingPlan !== 'voucher' && publicEntitlement(data).status !== 'active') {
+    if (data.billingPlan !== 'voucher'
+      && !(data.source === 'admin' && publicEntitlement(data).status === 'active')) {
       const checkoutSnapshot = await userCheckoutDocument(db, request.user.uid).get();
       const checkoutSubscriptionId = typeof checkoutSnapshot.data()?.subscriptionId === 'string'
         ? checkoutSnapshot.data().subscriptionId.trim()
@@ -2333,8 +2397,64 @@ app.get('/api/billing/entitlement', requireEntitlementConfig, requireFirebaseUse
       }
 
       const mapping = mappingSnapshot?.data() || {};
+      const mappingRevoked = mapping.adminRevoked === true
+        || data.adminRevoked === true
+          && (!Number(mapping.createdAt) || Number(mapping.createdAt) <= Number(data.adminRevokedAt));
       if (mappingSnapshot?.exists
         && mapping.uid === request.user.uid
+        && mappingRevoked) {
+        data = {
+          ...data,
+          planId: 'free',
+          billingPlan: 'free',
+          status: 'inactive',
+          source: 'server-verified',
+          validUntil: null,
+          subscriptionId: null,
+          adminRevoked: true,
+          adminRevokedAt: Number(mapping.adminRevokedAt) || Number(data.adminRevokedAt) || Date.now(),
+          cancelAtCycleEnd: false,
+          scheduledPlan: null,
+          scheduledAt: null,
+          pendingVouchers: []
+        };
+        await entitlementRef.set(data, { merge: true });
+        await userCheckoutDocument(db, request.user.uid).set({
+          subscriptionId,
+          status: 'cancelled',
+          currentEnd: 0,
+          cancelAtCycleEnd: false,
+          updatedAt: Date.now()
+        }, { merge: true });
+        if (mapping.adminRevoked !== true) {
+          await subscriptionDocument(db, subscriptionId).set({
+            adminRevoked: true,
+            adminRevokedAt: data.adminRevokedAt || Date.now(),
+            status: 'cancelled',
+            currentEnd: 0,
+            updatedAt: Date.now()
+          }, { merge: true });
+        }
+      } else if (data.adminRevoked === true
+        && (!mappingSnapshot?.exists || mapping.uid !== request.user.uid)) {
+        data = {
+          ...data,
+          planId: 'free',
+          billingPlan: 'free',
+          status: 'inactive',
+          source: 'server-verified',
+          validUntil: null,
+          subscriptionId: null,
+          cancelAtCycleEnd: false,
+          scheduledPlan: null,
+          scheduledAt: null,
+          pendingVouchers: []
+        };
+        await entitlementRef.set(data, { merge: true });
+      }
+      if (mappingSnapshot?.exists
+        && mapping.uid === request.user.uid
+        && !mappingRevoked
         && /^sub_[A-Za-z0-9]+$/.test(subscriptionId)
         && Object.hasOwn(BILLING_PLANS, mapping.planKey)
         && isRazorpayPlanId(mapping.planId)) {
@@ -2362,12 +2482,54 @@ app.get('/api/billing/entitlement', requireEntitlementConfig, requireFirebaseUse
             source: 'server-verified',
             validUntil,
             subscriptionId,
+            adminRevoked: false,
             cancelAtCycleEnd: providerStatus !== 'active'
               || data.cancelAtCycleEnd === true
               || mapping.cancelAtCycleEnd === true,
             updatedAt: Date.now()
           };
           await db.runTransaction(async transaction => {
+            const [currentEntitlement, currentSubscription] = await Promise.all([
+              transaction.get(entitlementRef),
+              transaction.get(subscriptionDocument(db, subscriptionId))
+            ]);
+            const currentMapping = currentSubscription.data() || {};
+            const currentData = currentEntitlement.data() || {};
+            const currentRevocationApplies = currentData.adminRevoked === true
+              && (!Number(currentMapping.createdAt)
+                || Number(currentMapping.createdAt) <= Number(currentData.adminRevokedAt));
+            if (currentMapping.uid !== request.user.uid
+              || currentMapping.adminRevoked === true
+              || currentRevocationApplies) {
+              const revokedEntitlement = {
+                ...(currentEntitlement.data() || {}),
+                planId: 'free',
+                billingPlan: 'free',
+                status: 'inactive',
+                source: 'server-verified',
+                validUntil: null,
+                subscriptionId: null,
+                adminRevoked: true,
+                adminRevokedAt: Number(currentMapping.adminRevokedAt)
+                  || Number(currentData.adminRevokedAt)
+                  || Date.now(),
+                cancelAtCycleEnd: false,
+                scheduledPlan: null,
+                scheduledAt: null,
+                pendingVouchers: [],
+                updatedAt: Date.now()
+              };
+              transaction.set(entitlementRef, revokedEntitlement);
+              transaction.set(userCheckoutDocument(db, request.user.uid), {
+                subscriptionId,
+                status: 'cancelled',
+                currentEnd: 0,
+                cancelAtCycleEnd: false,
+                updatedAt: Date.now()
+              }, { merge: true });
+              data = revokedEntitlement;
+              return;
+            }
             transaction.set(entitlementRef, nextEntitlement);
             transaction.set(subscriptionDocument(db, subscriptionId), {
               status: providerStatus,
@@ -2382,9 +2544,39 @@ app.get('/api/billing/entitlement', requireEntitlementConfig, requireFirebaseUse
               currentEnd: validUntil,
               updatedAt: Date.now()
             }, { merge: true });
+            data = nextEntitlement;
           });
-          data = nextEntitlement;
+        } else if (data.adminRevoked === true) {
+          data = {
+            ...data,
+            planId: 'free',
+            billingPlan: 'free',
+            status: 'inactive',
+            source: 'server-verified',
+            validUntil: null,
+            subscriptionId: null,
+            cancelAtCycleEnd: false,
+            scheduledPlan: null,
+            scheduledAt: null,
+            pendingVouchers: []
+          };
+          await entitlementRef.set(data, { merge: true });
         }
+      } else if (data.adminRevoked === true) {
+        data = {
+          ...data,
+          planId: 'free',
+          billingPlan: 'free',
+          status: 'inactive',
+          source: 'server-verified',
+          validUntil: null,
+          subscriptionId: null,
+          cancelAtCycleEnd: false,
+          scheduledPlan: null,
+          scheduledAt: null,
+          pendingVouchers: []
+        };
+        await entitlementRef.set(data, { merge: true });
       }
     }
     const entitlement = publicEntitlement(data);
@@ -2570,7 +2762,7 @@ app.get('/api/admin/dashboard', requireFirebaseUser, requireAdmin, async (reques
       do {
         const page = await auth.listUsers(1000, pageToken);
         for (const record of page.users || []) {
-          users.push({ uid: record.uid, email: record.email || '', name: record.displayName || '', photoURL: record.photoURL || '', createdAt: record.metadata?.creationTime || null });
+          users.push({ uid: record.uid, email: record.email || '', name: record.displayName || '', photoURL: record.photoURL || '', createdAt: record.metadata?.creationTime || null, disabled: record.disabled === true });
           seen.add(record.uid);
         }
         pageToken = page.pageToken;
@@ -2594,7 +2786,16 @@ app.get('/api/admin/dashboard', requireFirebaseUser, requireAdmin, async (reques
     const enriched = await Promise.all(users.map(async user => {
       const snapshot = await db.doc(`users/${user.uid}/billing/entitlement`).get();
       const entitlement = snapshot.exists ? snapshot.data() : null;
-      const active = entitlement?.planId === 'pro' && Number(entitlement?.validUntil) > now && entitlement?.status === 'active';
+      const subscriptionId = await linkedSubscriptionId(db, user.uid, entitlement);
+      const mappingSnapshot = subscriptionId
+        ? await subscriptionDocument(db, subscriptionId).get()
+        : null;
+      const adminRevoked = entitlement?.adminRevoked === true
+        || mappingSnapshot?.data()?.uid === user.uid && mappingSnapshot.data()?.adminRevoked === true;
+      const active = !adminRevoked
+        && entitlement?.planId === 'pro'
+        && Number(entitlement?.validUntil) > now
+        && entitlement?.status === 'active';
       const payments = paymentDocuments.filter(payment => payment.uid === user.uid && ['captured', 'success'].includes(String(payment.status)));
       const paidAmountByCurrency = payments.reduce((amounts, payment) => {
         const currency = payment.currency || 'INR';
@@ -2604,6 +2805,7 @@ app.get('/api/admin/dashboard', requireFirebaseUser, requireAdmin, async (reques
       return {
         ...user,
         isPro: active,
+        disabled: user.disabled === true,
         plan: active ? entitlement.billingPlan || 'pro' : 'free',
         activationSource: entitlement?.billingPlan === 'voucher'
           ? 'voucher'
@@ -2613,6 +2815,10 @@ app.get('/api/admin/dashboard', requireFirebaseUser, requireAdmin, async (reques
               ? 'payment'
               : null,
         validUntil: entitlement?.validUntil || null,
+        subscriptionId: active && ['monthly', 'yearly'].includes(entitlement?.billingPlan)
+          ? subscriptionId
+          : null,
+        cancelAtCycleEnd: entitlement?.cancelAtCycleEnd === true,
         paidAmount: paidAmountByCurrency.INR || 0,
         paidAmountByCurrency,
         paymentCount: payments.length
@@ -2705,7 +2911,26 @@ app.get('/api/admin/users/:uid', requireFirebaseUser, requireAdmin, async (reque
       typeof db.collection === 'function' ? db.collection(`users/${uid}/billingActivity`).get().catch(() => ({ docs: [] })) : Promise.resolve({ docs: [] }),
       typeof db.collection === 'function' ? db.collection('billingAccessHistory').get().catch(() => ({ docs: [] })) : Promise.resolve({ docs: [] })
     ]);
-    const entitlement = entitlementSnapshot.exists ? entitlementSnapshot.data() : null;
+    const storedEntitlement = entitlementSnapshot.exists ? entitlementSnapshot.data() : null;
+    const subscriptionId = await linkedSubscriptionId(db, uid, storedEntitlement);
+    const subscriptionSnapshot = subscriptionId
+      ? await subscriptionDocument(db, subscriptionId).get()
+      : null;
+    const isAdminRevoked = storedEntitlement?.adminRevoked === true
+      || subscriptionSnapshot?.data()?.uid === uid && subscriptionSnapshot.data()?.adminRevoked === true;
+    const entitlement = isAdminRevoked
+      ? {
+          ...storedEntitlement,
+          planId: 'free',
+          billingPlan: 'free',
+          status: 'inactive',
+          validUntil: null,
+          subscriptionId: null,
+          cancelAtCycleEnd: false,
+          scheduledPlan: null,
+          scheduledAt: null
+        }
+      : storedEntitlement;
     let payments = (paymentsSnapshot.docs || []).map(document => ({ id: document.id, ...(document.data() || {}) })).filter(payment => payment.uid === uid);
     const activity = (activitySnapshot.docs || []).map(document => ({ id: document.id, ...(document.data() || {}) })).sort((a, b) => Number(b.occurredAt || b.createdAt || 0) - Number(a.occurredAt || a.createdAt || 0));
     let accessHistory = (accessHistorySnapshot.docs || [])
@@ -2751,6 +2976,12 @@ app.get('/api/admin/users/:uid', requireFirebaseUser, requireAdmin, async (reque
     const paidAmount = paidAmountByCurrency.INR || 0;
     response.json({
       uid, email: authRecord?.email || '', name: authRecord?.displayName || '', photoURL: authRecord?.photoURL || '', createdAt: authRecord?.metadata?.creationTime || null,
+      disabled: authRecord?.disabled === true,
+      subscriptionId: entitlement?.planId === 'pro'
+        && entitlement.status === 'active'
+        && ['monthly', 'yearly'].includes(entitlement.billingPlan)
+        ? subscriptionId
+        : null,
       entitlement, voucher, payments, accessHistory, activity, paidAmount, paidAmountByCurrency
     });
   } catch (error) {
@@ -2776,7 +3007,7 @@ app.post('/api/admin/users/:uid/pro', requireFirebaseUser, requireAdmin, async (
     const validUntil = grantedAt + durationDays * 86400000;
     await db.doc(`users/${uid}/billing/entitlement`).set({
       planId: 'pro', billingPlan: plan, status: 'active', source: 'admin', validUntil,
-      subscriptionId: null, cancelAtCycleEnd: false, updatedAt: grantedAt
+      subscriptionId: null, adminRevoked: false, cancelAtCycleEnd: false, updatedAt: grantedAt
     }, { merge: true });
     const paid = amount > 0;
     const paymentId = paid ? transactionId : `FREE-${randomUUID().slice(0, 8).toUpperCase()}`;
@@ -2814,6 +3045,7 @@ app.post('/api/admin/users/:uid/pro', requireFirebaseUser, requireAdmin, async (
 
 app.post('/api/admin/users/:uid/cancel-pro', requireFirebaseUser, requireAdmin, async (request, response) => {
   const reason = typeof request.body?.reason === 'string' ? request.body.reason.trim() : '';
+  const timing = request.body?.timing === 'period-end' ? 'period-end' : 'immediate';
   if (!reason) {
     response.status(400).json({ error: 'Enter a reason for cancelling Pro access.' });
     return;
@@ -2824,22 +3056,296 @@ app.post('/api/admin/users/:uid/cancel-pro', requireFirebaseUser, requireAdmin, 
     const entitlementRef = db.doc(`users/${uid}/billing/entitlement`);
     const entitlementSnapshot = await entitlementRef.get();
     const entitlement = entitlementSnapshot.data() || {};
-    await entitlementRef.set({
-      planId: 'free', billingPlan: 'free', status: 'inactive', source: 'admin', validUntil: null,
-      subscriptionId: null, cancelAtCycleEnd: false, updatedAt: Date.now()
-    }, { merge: true });
+    const subscriptionId = await linkedSubscriptionId(db, uid, entitlement);
+    if (timing === 'period-end'
+      && (!subscriptionId
+        || Number(entitlement.validUntil) <= Date.now()
+        || entitlement.planId !== 'pro'
+        || entitlement.status !== 'active'
+        || !['monthly', 'yearly'].includes(entitlement.billingPlan))) {
+      response.status(400).json({ error: 'This account has no active paid subscription to cancel at period end.' });
+      return;
+    }
+    let providerResult = null;
+    let subscriptionRef = null;
+    let subscriptionsToRevoke = [];
+    if (subscriptionId) {
+      subscriptionRef = subscriptionDocument(db, subscriptionId);
+      const mapping = await subscriptionRef.get();
+      if (mapping.exists && mapping.data()?.uid !== uid) {
+        response.status(409).json({ error: 'The subscription is not linked to this account.' });
+        return;
+      }
+      if (timing === 'period-end' && mapping.exists && mapping.data()?.pendingPlanStatus === 'scheduling') {
+        response.status(409).json({ error: 'A plan change is being scheduled. Try again after it completes.' });
+        return;
+      }
+      if (timing === 'period-end') {
+        providerResult = await razorpayRequest(`/subscriptions/${encodeURIComponent(subscriptionId)}/cancel`, {
+          method: 'POST',
+          body: { cancel_at_cycle_end: true }
+        });
+      }
+    }
+    if (timing === 'immediate') {
+      const userSubscriptionSnapshot = await db.collection(subscriptionCollection)
+        .where('uid', '==', uid)
+        .get();
+      subscriptionsToRevoke = (userSubscriptionSnapshot.docs || [])
+        .filter(document => document.data()?.uid === uid)
+        .map(document => ({
+          id: document.id,
+          ref: subscriptionDocument(db, document.id),
+          mapping: document.data() || {}
+        }));
+      if (subscriptionId && !subscriptionsToRevoke.some(item => item.id === subscriptionId)) {
+        subscriptionsToRevoke.push({
+          id: subscriptionId,
+          ref: subscriptionRef,
+          mapping: {}
+        });
+      }
+    }
     const cancelledAt = Date.now();
+    const validUntil = Number(entitlement.validUntil) || 0;
+    const periodEndCancellation = timing === 'period-end';
+    const entitlementUpdate = periodEndCancellation
+      ? {
+          planId: 'pro', status: 'active', source: 'server-verified',
+          validUntil, cancelAtCycleEnd: true, updatedAt: cancelledAt
+        }
+      : {
+          planId: 'free', billingPlan: 'free', status: 'inactive', source: 'admin', validUntil: null,
+          subscriptionId: null, adminRevoked: true, adminRevokedAt: cancelledAt,
+          cancelAtCycleEnd: false, scheduledPlan: null, scheduledAt: null,
+          planChangeStatus: null, pendingVouchers: [], updatedAt: cancelledAt
+        };
+    await db.runTransaction(async transaction => {
+      transaction.set(entitlementRef, entitlementUpdate, { merge: true });
+      if (periodEndCancellation && subscriptionRef) {
+        transaction.set(subscriptionRef, {
+          uid,
+          status: providerResult?.status || 'active',
+          cancelAtCycleEnd: true,
+          currentEnd: validUntil,
+          updatedAt: cancelledAt
+        }, { merge: true });
+      }
+      if (!periodEndCancellation) {
+        for (const subscription of subscriptionsToRevoke) {
+          transaction.set(subscription.ref, {
+            uid,
+            status: 'cancelled',
+            cancelAtCycleEnd: false,
+            adminRevoked: true,
+            adminRevokedAt: cancelledAt,
+            currentEnd: 0,
+            pendingPlanKey: null,
+            pendingPlanId: null,
+            pendingPlanAmount: null,
+            pendingPlanStatus: null,
+            planChangeRequestId: null,
+            scheduledAt: null,
+            updatedAt: cancelledAt
+          }, { merge: true });
+        }
+        transaction.set(userCheckoutDocument(db, uid), {
+          subscriptionId: subscriptionId || null,
+          status: 'cancelled',
+          currentEnd: 0,
+          cancelAtCycleEnd: false,
+          scheduledPlan: null,
+          scheduledAt: null,
+          updatedAt: cancelledAt
+        }, { merge: true });
+      }
+    });
+    const providerCancellationErrors = [];
+    if (!periodEndCancellation) {
+      for (const subscription of subscriptionsToRevoke) {
+        if (['cancelled', 'completed', 'expired'].includes(String(subscription.mapping.status))) continue;
+        try {
+          providerResult = await razorpayRequest(`/subscriptions/${encodeURIComponent(subscription.id)}/cancel`, {
+            method: 'POST',
+            body: { cancel_at_cycle_end: false }
+          });
+          await subscription.ref.set({
+            status: providerResult?.status || 'cancelled',
+            providerCancellationPending: false,
+            updatedAt: Date.now()
+          }, { merge: true });
+        } catch (error) {
+          providerCancellationErrors.push(subscription.id);
+          await subscription.ref.set({
+            providerCancellationPending: true,
+            providerCancellationError: String(error.message || 'Razorpay cancellation failed').slice(0, 500),
+            updatedAt: Date.now()
+          }, { merge: true });
+        }
+      }
+    }
     await db.doc(`users/${uid}/billingActivity/${randomUUID()}`).set({
-      type: 'pro_cancelled', status: 'cancelled', title: 'Pro access cancelled by admin',
+      type: periodEndCancellation ? 'subscription_cancel_scheduled' : 'pro_cancelled',
+      status: periodEndCancellation ? 'scheduled' : 'cancelled',
+      title: periodEndCancellation ? 'Subscription cancellation scheduled by admin' : 'Pro access cancelled by admin',
       detail: reason, reason, planKey: entitlement.billingPlan || 'pro',
       previousPlan: entitlement.billingPlan || 'pro', previousSource: entitlement.source || null,
       previousValidUntil: entitlement.validUntil || null, actorType: 'admin', actorUid: request.user.uid,
       cancelledBy: request.user.uid, cancelledByEmail: request.user.email || null,
+      cancellationTiming: timing,
+      accessThrough: periodEndCancellation ? validUntil : cancelledAt,
       createdAt: cancelledAt, occurredAt: cancelledAt
     });
-    response.json({ uid, isPro: false, reason, cancelledAt });
+    response.json({
+      uid,
+      isPro: periodEndCancellation && validUntil > Date.now(),
+      timing,
+      validUntil: periodEndCancellation ? validUntil : null,
+      reason,
+      cancelledAt,
+      providerCancellationPending: providerCancellationErrors.length > 0
+    });
+    if (providerCancellationErrors.length) {
+      response.status(502).json({
+        error: 'Pro access was revoked immediately, but Razorpay could not cancel every linked subscription. Retry cancellation or contact support.',
+        revoked: true,
+        providerCancellationPending: providerCancellationErrors.length
+      });
+      return;
+    }
   } catch (error) {
-    response.status(500).json({ error: 'Unable to cancel Pro access.' });
+    console.error('Admin subscription cancellation failed.', error);
+    response.status(error.status === 503 ? 503 : 502).json({ error: 'Unable to cancel the subscription. No Pro changes were applied; retry or contact support.' });
+  }
+});
+
+async function adminTarget(uid, request, response) {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(uid) || uid === request.user.uid) {
+    response.status(400).json({ error: 'This account cannot be changed by this action.' });
+    return null;
+  }
+  const { auth } = await getFirebaseAdmin();
+  const target = await auth.getUser(uid);
+  if (isAdminUser({ email: target.email })) {
+    response.status(403).json({ error: 'Administrator accounts cannot be banned or deleted here.' });
+    return null;
+  }
+  return { auth, target };
+}
+
+app.post('/api/admin/users/:uid/ban', requireFirebaseUser, requireAdmin, async (request, response) => {
+  try {
+    const target = await adminTarget(request.params.uid, request, response);
+    if (!target) return;
+    const { auth, target: user } = target;
+    if (user.disabled) {
+      response.json({ uid: user.uid, disabled: true });
+      return;
+    }
+    const { db } = await getFirebaseAdmin();
+    const entitlementRef = userEntitlementDocument(db, user.uid);
+    const entitlementSnapshot = await entitlementRef.get();
+    const entitlement = entitlementSnapshot.data() || {};
+    const subscriptionId = await linkedSubscriptionId(db, user.uid, entitlement);
+    let providerResult = null;
+    if (subscriptionId) {
+      const mappingRef = subscriptionDocument(db, subscriptionId);
+      const mapping = await mappingRef.get();
+      if (mapping.exists && mapping.data()?.uid !== user.uid) {
+        response.status(409).json({ error: 'The subscription is not linked to this account.' });
+        return;
+      }
+      providerResult = await razorpayRequest(`/subscriptions/${encodeURIComponent(subscriptionId)}/cancel`, {
+        method: 'POST',
+        body: { cancel_at_cycle_end: false }
+      });
+      await mappingRef.set({ status: providerResult.status || 'cancelled', cancelAtCycleEnd: false, adminRevoked: true, updatedAt: Date.now() }, { merge: true });
+    }
+    const bannedAt = Date.now();
+    await entitlementRef.set({
+      planId: 'free', billingPlan: 'free', status: 'inactive', source: 'admin',
+      validUntil: null, subscriptionId: null, adminRevoked: true, adminRevokedAt: bannedAt,
+      cancelAtCycleEnd: false, updatedAt: bannedAt
+    }, { merge: true });
+    await userCheckoutDocument(db, user.uid).set({
+      subscriptionId: subscriptionId || null,
+      status: providerResult?.status || 'cancelled',
+      currentEnd: 0,
+      cancelAtCycleEnd: false,
+      updatedAt: bannedAt
+    }, { merge: true });
+    await auth.updateUser(user.uid, { disabled: true });
+    await auth.revokeRefreshTokens(user.uid);
+    await db.doc(`users/${user.uid}/adminStatus/current`).set({
+      disabled: true, reason: String(request.body?.reason || '').trim().slice(0, 500),
+      actorUid: request.user.uid, updatedAt: bannedAt
+    }, { merge: true });
+    await db.doc(`users/${user.uid}/billingActivity/${randomUUID()}`).set({
+      type: 'account_banned', status: 'disabled', title: 'Account banned by admin',
+      detail: String(request.body?.reason || '').trim(), actorType: 'admin', actorUid: request.user.uid,
+      createdAt: bannedAt, occurredAt: bannedAt
+    });
+    response.json({ uid: user.uid, disabled: true, isPro: false, subscriptionCancelled: Boolean(subscriptionId) });
+  } catch (error) {
+    console.error('Admin account ban failed.', error);
+    response.status(error.status === 503 ? 503 : 502).json({ error: 'Unable to ban this account. Retry or contact support.' });
+  }
+});
+
+app.post('/api/admin/users/:uid/unban', requireFirebaseUser, requireAdmin, async (request, response) => {
+  try {
+    const target = await adminTarget(request.params.uid, request, response);
+    if (!target) return;
+    const { auth, target: user } = target;
+    await auth.updateUser(user.uid, { disabled: false });
+    const { db } = await getFirebaseAdmin();
+    const updatedAt = Date.now();
+    await db.doc(`users/${user.uid}/adminStatus/current`).set({
+      disabled: false, actorUid: request.user.uid, updatedAt
+    }, { merge: true });
+    await db.doc(`users/${user.uid}/billingActivity/${randomUUID()}`).set({
+      type: 'account_unbanned', status: 'enabled', title: 'Account unbanned by admin',
+      actorType: 'admin', actorUid: request.user.uid, createdAt: updatedAt, occurredAt: updatedAt
+    });
+    response.json({ uid: user.uid, disabled: false });
+  } catch (error) {
+    console.error('Admin account unban failed.', error);
+    response.status(500).json({ error: 'Unable to unban this account.' });
+  }
+});
+
+app.delete('/api/admin/users/:uid', requireFirebaseUser, requireAdmin, async (request, response) => {
+  try {
+    const target = await adminTarget(request.params.uid, request, response);
+    if (!target) return;
+    const { auth, target: user } = target;
+    const { db } = await getFirebaseAdmin();
+    const entitlementRef = userEntitlementDocument(db, user.uid);
+    const entitlementSnapshot = await entitlementRef.get();
+    const subscriptionId = await linkedSubscriptionId(db, user.uid, entitlementSnapshot.data());
+    if (subscriptionId) {
+      const mappingRef = subscriptionDocument(db, subscriptionId);
+      const mapping = await mappingRef.get();
+      if (mapping.exists && mapping.data()?.uid !== user.uid) {
+        response.status(409).json({ error: 'The subscription is not linked to this account.' });
+        return;
+      }
+      await razorpayRequest(`/subscriptions/${encodeURIComponent(subscriptionId)}/cancel`, {
+        method: 'POST',
+        body: { cancel_at_cycle_end: false }
+      });
+      await mappingRef.set({ status: 'cancelled', cancelAtCycleEnd: false, adminRevoked: true, updatedAt: Date.now() }, { merge: true });
+    }
+    if (typeof db.recursiveDelete !== 'function') {
+      response.status(503).json({ error: 'Safe account data deletion is unavailable on this server.' });
+      return;
+    }
+    await db.recursiveDelete(db.doc(`users/${user.uid}`));
+    await auth.deleteUser(user.uid);
+    response.json({ uid: user.uid, deleted: true });
+  } catch (error) {
+    console.error('Admin account deletion failed.', error);
+    response.status(500).json({ error: 'Unable to delete this account. Retry or contact support.' });
   }
 });
 
@@ -3043,6 +3549,9 @@ app.post('/api/billing/subscriptions', requireBillingConfig, requireFirebaseUser
       }
     });
     await db.runTransaction(async transaction => {
+      const entitlementSnapshot = await transaction.get(userEntitlementDocument(db, request.user.uid));
+      const revocationAt = Number(entitlementSnapshot.data()?.adminRevokedAt) || 0;
+      const createdAt = Math.max(Date.now(), revocationAt + 1);
       transaction.create(subscriptionDocument(db, created.id), {
         uid: request.user.uid,
         planKey,
@@ -3051,15 +3560,15 @@ app.post('/api/billing/subscriptions', requireBillingConfig, requireFirebaseUser
         amount: plan.amount,
         status: created.status || 'created',
         currentEnd: 0,
-        createdAt: Date.now(),
-        updatedAt: Date.now()
+        createdAt,
+        updatedAt: createdAt
       });
       transaction.set(checkoutRef, {
         subscriptionId: created.id,
         planId: providerPlan.id,
         amount: plan.amount,
         status: created.status || 'created',
-        updatedAt: Date.now()
+        updatedAt: createdAt
       }, { merge: true });
     });
     await recordBillingActivity(db, request.user.uid, {
@@ -3146,7 +3655,21 @@ app.post('/api/billing/verify', requireBillingConfig, requireFirebaseUser, async
     const entitlement = entitlementFromSubscription(subscription, mapping.planKey);
     if (payment.status === 'captured' && entitlement?.status === 'active') {
       entitlement.currency = currency;
+      let accessRevoked = false;
       await db.runTransaction(async transaction => {
+        const currentMappingSnapshot = await transaction.get(mappingRef);
+        const currentMapping = currentMappingSnapshot.data() || {};
+        const currentEntitlementSnapshot = await transaction.get(userEntitlementDocument(db, request.user.uid));
+        const currentEntitlement = currentEntitlementSnapshot.data() || {};
+        const currentRevocationApplies = currentEntitlement.adminRevoked === true
+          && (!Number(currentMapping.createdAt)
+            || Number(currentMapping.createdAt) <= Number(currentEntitlement.adminRevokedAt));
+        if (currentMapping.uid !== request.user.uid
+          || currentMapping.adminRevoked === true
+          || currentRevocationApplies) {
+          accessRevoked = true;
+          return;
+        }
         transaction.set(mappingRef, {
           status: subscription.status,
           currentEnd: entitlement.validUntil,
@@ -3162,6 +3685,7 @@ app.post('/api/billing/verify', requireBillingConfig, requireFirebaseUser, async
           ...entitlement,
           currency,
           subscriptionId: razorpaySubscriptionId,
+          adminRevoked: false,
           cancelAtCycleEnd: false
         });
         transaction.set(db.doc(`billingAccessHistory/${razorpayPaymentId}`), {
@@ -3179,6 +3703,12 @@ app.post('/api/billing/verify', requireBillingConfig, requireFirebaseUser, async
           createdAt: Number(payment.created_at) > 0 ? Number(payment.created_at) * 1000 : Date.now()
         }, { merge: true });
       });
+      if (accessRevoked) {
+        response.status(409).json({
+          error: 'Pro access for this subscription was revoked by an administrator. Start a new subscription to restore access.'
+        });
+        return;
+      }
       await db.doc(`billingPayments/${razorpayPaymentId}`).set({
         uid: request.user.uid, providerPaymentId: razorpayPaymentId, subscriptionId: razorpaySubscriptionId,
         planKey: mapping.planKey, status: 'captured', amount: expectedAmount,

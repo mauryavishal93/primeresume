@@ -1,11 +1,14 @@
 import { cloudConfigured, observeAuth, getAccountProfile, saveAccountProfile } from './firebase-cloud.js';
 import { getAccountPhotoUrl, setAccountAvatar } from './account-avatar.js';
+import { cacheAccountPhoto, clearCachedAccountAvatar } from './session-cache.js';
+import { formatNationalPhoneNumber, formatPhoneInput, getDefaultPhoneCountry, getPhoneCountryCallingCode, getPhoneCountryLabel, getPhoneCountryOptions, parseAccountPhoneNumber, splitAccountPhoneNumber } from './phone-number.js';
 
 const form = document.querySelector('#accountForm');
 const fields = document.querySelector('#accountFields');
 const nameInput = document.querySelector('#accountName');
 const emailInput = document.querySelector('#accountEmail');
 const mobileInput = document.querySelector('#accountMobile');
+const countrySelect = document.querySelector('#accountCountry');
 const photoInput = document.querySelector('#accountPhoto');
 const photoPreview = document.querySelector('#accountPhotoPreview');
 const removePhotoButton = document.querySelector('#removeAccountPhoto');
@@ -16,6 +19,29 @@ let currentUser = null;
 let requestId = 0;
 let photoDataUrl = '';
 let fallbackPhotoUrl = '';
+const defaultPhoneCountry = getDefaultPhoneCountry();
+const phoneCountryOptions = getPhoneCountryOptions();
+
+for (const option of phoneCountryOptions) {
+  const element = document.createElement('option');
+  element.value = option.country;
+  element.textContent = getPhoneCountryLabel(option.country, option.callingCode);
+  element.title = `${option.name} (+${option.callingCode})`;
+  countrySelect.append(element);
+}
+countrySelect.value = defaultPhoneCountry;
+
+function sizeCountrySelect() {
+  const selectedCountry = phoneCountryOptions.find(option => option.country === countrySelect.value);
+  const selectedLabel = getPhoneCountryLabel(countrySelect.value, getPhoneCountryCallingCode(countrySelect.value));
+  const measureContext = document.createElement('canvas').getContext('2d');
+  if (!measureContext) throw new Error('Your browser could not measure the country selector text.');
+  measureContext.font = getComputedStyle(countrySelect).font;
+  countrySelect.style.width = `${Math.ceil(measureContext.measureText(selectedLabel).width + 48)}px`;
+  countrySelect.title = selectedCountry ? `${selectedCountry.name} (+${selectedCountry.callingCode})` : selectedLabel;
+}
+
+sizeCountrySelect();
 
 function showStatus(message, state = '') {
   status.textContent = message;
@@ -93,9 +119,16 @@ async function updateAccountPage(user, error) {
   try {
     const profile = await getAccountProfile(user);
     if (currentRequest !== requestId || currentUser?.uid !== user.uid) return;
-    mobileInput.value = profile.mobileNumber;
+    const savedPhone = splitAccountPhoneNumber(profile.mobileNumber, defaultPhoneCountry);
+    countrySelect.value = savedPhone.country;
+    sizeCountrySelect();
+    mobileInput.value = savedPhone.nationalNumber;
     photoDataUrl = profile.photoDataUrl;
+    if (photoDataUrl) cacheAccountPhoto(user.uid, photoDataUrl);
     updatePhotoPreview();
+    window.dispatchEvent(new CustomEvent('account-profile-updated', {
+      detail: { uid: user.uid, displayName: nameInput.value, photoDataUrl }
+    }));
     showStatus('');
     setFormEnabled(true);
   } catch (loadError) {
@@ -106,6 +139,27 @@ async function updateAccountPage(user, error) {
 }
 
 nameInput.addEventListener('input', () => updatePhotoPreview());
+
+mobileInput.addEventListener('input', () => {
+  const caret = mobileInput.selectionStart ?? mobileInput.value.length;
+  const digitsBeforeCaret = (mobileInput.value.slice(0, caret).match(/\d/g) || []).length;
+  const formatted = formatPhoneInput(mobileInput.value, countrySelect.value);
+  countrySelect.value = formatted.country;
+  sizeCountrySelect();
+  mobileInput.value = formatted.value;
+  let nextCaret = 0;
+  let digitsSeen = 0;
+  while (nextCaret < formatted.value.length && digitsSeen < digitsBeforeCaret) {
+    if (/\d/.test(formatted.value[nextCaret])) digitsSeen++;
+    nextCaret++;
+  }
+  mobileInput.setSelectionRange(nextCaret, nextCaret);
+});
+
+countrySelect.addEventListener('change', () => {
+  sizeCountrySelect();
+  mobileInput.value = formatNationalPhoneNumber(mobileInput.value.replace(/\D/g, ''), countrySelect.value);
+});
 
 photoInput.addEventListener('change', async () => {
   const [file] = photoInput.files || [];
@@ -143,11 +197,17 @@ form.addEventListener('submit', async event => {
   saveButton.textContent = 'Saving…';
   showStatus('Saving your account details…');
   try {
-    const profile = await saveAccountProfile(user, nameInput.value, mobileInput.value, photoDataUrl);
+    const phone = parseAccountPhoneNumber(mobileInput.value, countrySelect.value);
+    const profile = await saveAccountProfile(user, nameInput.value, phone?.number || '', photoDataUrl);
     if (currentUser?.uid !== user.uid) return;
     nameInput.value = profile.name;
-    mobileInput.value = profile.mobile;
+    const savedPhone = splitAccountPhoneNumber(profile.mobile, defaultPhoneCountry);
+    countrySelect.value = savedPhone.country;
+    sizeCountrySelect();
+    mobileInput.value = savedPhone.nationalNumber;
     photoDataUrl = profile.photo;
+    if (!photoDataUrl) clearCachedAccountAvatar(user.uid);
+    cacheAccountPhoto(user.uid, photoDataUrl);
     updatePhotoPreview();
     window.dispatchEvent(new CustomEvent('account-profile-updated', {
       detail: { uid: user.uid, displayName: profile.name, photoDataUrl: profile.photo }

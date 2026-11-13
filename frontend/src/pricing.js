@@ -259,6 +259,7 @@ function updatePurchaseControls() {
     yearlyButton.textContent = 'Start yearly subscription';
     monthlyButton.disabled = false;
     yearlyButton.disabled = false;
+    checkoutStatus.textContent = 'No plan active';
   }
 
   const monthlyBadge = $('#monthlyPlanBadge');
@@ -286,13 +287,17 @@ async function refreshPricingState(user) {
     if (!billingConfig) {
       billingConfig = await loadBillingConfig();
     }
-    if (billingConfig.entitlementEnabled) entitlement = await loadBillingEntitlement(user);
+    if (billingConfig.entitlementEnabled) {
+      entitlement = await loadBillingEntitlement(user, { forceRefresh: true });
+    }
     if (currentUser?.uid !== user.uid) return;
     updatePurchaseControls();
     updateVoucherControls();
   } catch (error) {
     console.error('Could not load billing status.', error);
-    checkoutStatus.textContent = error.message;
+    checkoutStatus.textContent = error.message === 'Could not load your plan status.'
+      ? 'No plan active'
+      : error.message;
     updatePurchaseControls();
     updateVoucherControls();
   }

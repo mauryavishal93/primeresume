@@ -2,7 +2,7 @@ import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { estimateExperienceYears, GENERIC_ATS_WEIGHTING, weightedScore } from './ats-scoring.js';
 import { buildCoverLetterDraft } from './cover-letter.js';
 import { buildCoverLetterPdf } from './cover-letter-pdf.js';
-import { loadBillingConfig, loadBillingEntitlement } from './billing-client.js';
+import { clearBillingEntitlementCache, loadBillingConfig, loadBillingEntitlement } from './billing-client.js';
 import { alertModern, confirmModern, promptModern } from './modern-modal.js';
 import { canUseFeature, FEATURE_IDS, isProTemplate, PLAN_CONFIG, shouldPromptForJobDescriptionAtsUpgrade, TEMPLATE_IDS } from './plan-access.js';
 import { formatCurrencyPrice, preferredPricingCurrency } from './pricing-currency.js';
@@ -25,6 +25,7 @@ import {
  signInWithGoogle, signOutUser
 } from './firebase-cloud.js';
 import { getAccountPhotoUrls, setAccountAvatar } from './account-avatar.js';
+import { cacheAccountPhoto, cacheAccountPhotoFromUrls, cacheProBadgeHint, clearCachedProBadgeHint, clearUserSessionCache, getCachedAccountAvatarHint, getCachedAccountPhoto, getCachedProBadgeHint } from './session-cache.js';
 import { zoomFromPinch } from './zoom.js';
 
 (()=>{'use strict';
@@ -130,6 +131,16 @@ const guestResumeStorage=createGuestResumeStorage(browserStorage,normalizeState)
 let lastWorkedResumeWrite=Promise.resolve();
 let guestResumeLoaded=false,guestResumeDirty=false,wizardResumeDraftPending=false,authGeneration=0,authStateResolved=false,cloudSessionGeneration=0,cloudReady=false,cloudDraftDirty=false,sharedCopyMode=!!incomingShareId,sharedResumeName='';
 let verifiedEntitlement=null,pendingProTemplate=null,pendingUpgradeFeature='';
+let proBadgeHint=getCachedProBadgeHint();
+const initialAccountAvatarHint=getCachedAccountAvatarHint();
+if(initialAccountAvatarHint){
+ document.body.classList.add('account-avatar-cached');
+ $('accountMenu').dataset.authShellVisible='true';
+ $('accountMenuProfile').hidden=true;
+ const initialAvatar=$('accountAvatar'),initialLargeAvatar=$('accountAvatarLarge');
+ setAccountAvatar(initialAvatar,'U',initialAccountAvatarHint.photoDataUrl);
+ setAccountAvatar(initialLargeAvatar,'U',initialAccountAvatarHint.photoDataUrl);
+}
 let billingPricingConfig=null;
 let cloudUser=null,activeCloudResumeId=null,activeCloudRevision=null,cloudSaveTimer=null,cloudSaving=false,cloudSavePending=false,cloudSaveBlocked=false,cloudResumes=[],proTemplateDownloadsRemaining=null,openCloudOnAuth=new URLSearchParams(location.search).get('open')==='cloud';
 let signOutPending=false;
@@ -170,20 +181,34 @@ function insertPointerLine(sectionId,afterLine){
  requestAnimationFrame(()=>$('inspector').querySelector(`[data-section-pointer-line][data-section-id="${sectionId}"][data-line="${lineIndex}"]`)?.focus());
 }
 function toast(msg){$('toast').textContent=msg;$('toast').classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('toast').classList.remove('show'),2300)}
-function updateProLabel(){const isPro=canUseFeature(FEATURE_IDS.ALL_TEMPLATES,verifiedEntitlement);const badge=$('proBrandBadge');if(badge)badge.hidden=!isPro;document.title=isPro?`${baseDocumentTitle} | Pro`:baseDocumentTitle}
+function updateProLabel(){const cachedBadgeIsCurrent=!authStateResolved&&proBadgeHint?.validUntil>Date.now();const isPro=canUseFeature(FEATURE_IDS.ALL_TEMPLATES,verifiedEntitlement)||cachedBadgeIsCurrent;const badge=$('proBrandBadge');if(badge)badge.hidden=!isPro;document.title=isPro?`${baseDocumentTitle} | Pro`:baseDocumentTitle}
+updateProLabel();
 async function refreshEditorBillingStatus(user,generation){
  try{
+  verifiedEntitlement=null;
+  updateProLabel();
+  renderTemplates();
   const config=await loadBillingConfig();
   if(authGeneration!==generation||cloudUser?.uid!==user.uid)return;
   billingPricingConfig=config;
-  verifiedEntitlement=config.entitlementEnabled?await loadBillingEntitlement(user):null;
+  verifiedEntitlement=config.entitlementEnabled?await loadBillingEntitlement(user,{forceRefresh:true}):null;
   if(authGeneration!==generation||cloudUser?.uid!==user.uid)return;
+  if(config.entitlementEnabled){
+   cacheProBadgeHint(user.uid,verifiedEntitlement);
+   proBadgeHint=getCachedProBadgeHint();
+  }else{
+   clearCachedProBadgeHint(user.uid);
+   proBadgeHint=null;
+  }
   updateProLabel();
   renderTemplates();
  }catch(error){
   if(authGeneration!==generation||cloudUser?.uid!==user.uid)return;
   console.error('Could not load the signed-in account billing status.',error);
   verifiedEntitlement=null;
+  clearBillingEntitlementCache(user);
+  clearCachedProBadgeHint(user.uid);
+  proBadgeHint=null;
   updateProLabel();
   renderTemplates();
  }
@@ -646,6 +671,13 @@ function updateSharedCopyAuth(user){
   $('accountAvatarLarge').textContent=initial;
   setAccountAvatar($('accountAvatar'),initial,getAccountPhotoUrls(user));
   setAccountAvatar($('accountAvatarLarge'),initial,getAccountPhotoUrls(user));
+  const cachedPhoto=getCachedAccountPhoto(user.uid);
+  if(cachedPhoto){
+   const photos=getAccountPhotoUrls(user,cachedPhoto);
+   setAccountAvatar($('accountAvatar'),initial,photos);
+   setAccountAvatar($('accountAvatarLarge'),initial,photos);
+  }
+  void cacheAccountPhotoFromUrls(user.uid,getAccountPhotoUrls(user));
   $('accountMenu').querySelector('summary').setAttribute('aria-label',`Account menu for ${accountName}`);
  }else{
   $('accountUserName').textContent='Guest';
@@ -663,7 +695,10 @@ function updateSharedCopyAuth(user){
 async function updateCloudAccount(user,error){
  authStateResolved=true;
  document.body.classList.remove('auth-state-pending');
+ document.body.classList.remove('account-avatar-cached');
  if(error){
+  clearCachedProBadgeHint(proBadgeHint?.uid);
+  proBadgeHint=null;
   proTemplateDownloadsRemaining=null;
   verifiedEntitlement=null;
   updateProTemplatePreviewAllowance();
@@ -704,6 +739,14 @@ async function updateCloudAccount(user,error){
  const accountChanged=transition!=='unchanged';
  const guestLogin=transition==='guest-login';
  const loggingOut=transition==='logout';
+ if(previousUser && previousUser.uid!==user?.uid){
+  clearUserSessionCache(previousUser.uid);
+  clearBillingEntitlementCache(previousUser);
+ }
+ if(!user||proBadgeHint?.uid&&proBadgeHint.uid!==user.uid){
+  clearCachedProBadgeHint(proBadgeHint?.uid);
+  proBadgeHint=null;
+ }
  const accountSwitch=transition==='account-switch';
  const hasGuestDraft=guestLogin&&(guestResumeLoaded||guestResumeDirty||wizardResumeDraftPending);
  const generation=accountChanged?++authGeneration:authGeneration;
@@ -767,15 +810,21 @@ async function updateCloudAccount(user,error){
   $('accountUserEmail').textContent=user.email||'';
   $('accountAvatar').textContent=initial;
   $('accountAvatarLarge').textContent=initial;
-  setAccountAvatar($('accountAvatar'),initial,getAccountPhotoUrls(user));
-  setAccountAvatar($('accountAvatarLarge'),initial,getAccountPhotoUrls(user));
   const accountUid=user.uid;
-  void getAccountProfile(user).then(profile=>{
-   if(cloudUser?.uid!==accountUid)return;
-   const photos=getAccountPhotoUrls(user,profile.photoDataUrl);
-   setAccountAvatar($('accountAvatar'),initial,photos);
-   setAccountAvatar($('accountAvatarLarge'),initial,photos);
-  }).catch(profileError=>console.error('Could not load the account profile image.',profileError));
+  const cachedPhoto=getCachedAccountPhoto(accountUid);
+  const photos=getAccountPhotoUrls(user,cachedPhoto??'');
+  setAccountAvatar($('accountAvatar'),initial,photos);
+  setAccountAvatar($('accountAvatarLarge'),initial,photos);
+  void cacheAccountPhotoFromUrls(accountUid,getAccountPhotoUrls(user));
+  if(cachedPhoto===null){
+   void getAccountProfile(user).then(profile=>{
+    if(cloudUser?.uid!==accountUid)return;
+    cacheAccountPhoto(accountUid,profile.photoDataUrl);
+    const photos=getAccountPhotoUrls(user,profile.photoDataUrl);
+    setAccountAvatar($('accountAvatar'),initial,photos);
+    setAccountAvatar($('accountAvatarLarge'),initial,photos);
+   }).catch(profileError=>console.error('Could not load the account profile image.',profileError));
+  }
  }else{
   $('accountUserName').textContent='Guest';
   $('accountUserEmail').textContent='';
@@ -880,7 +929,7 @@ window.addEventListener('focus',async()=>{
  try{
   const config=await loadBillingConfig();
   billingPricingConfig=config;
-  const entitlement=config.entitlementEnabled?await loadBillingEntitlement(user):null;
+  const entitlement=config.entitlementEnabled?await loadBillingEntitlement(user,{forceRefresh:true}):null;
   if(cloudUser?.uid!==user.uid)return;
   verifiedEntitlement=entitlement;
   if(!canUseFeature(FEATURE_IDS.ALL_TEMPLATES,verifiedEntitlement)) {

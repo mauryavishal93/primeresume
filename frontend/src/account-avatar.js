@@ -11,9 +11,11 @@ export function getAccountPhotoUrl(user) {
 
 export function setAccountAvatar(element, initial, photoUrls = '') {
   if (!element) return;
-  element.replaceChildren();
   const candidates = [...new Set((Array.isArray(photoUrls) ? photoUrls : [photoUrls])
     .filter(photoUrl => typeof photoUrl === 'string' && photoUrl.trim()))];
+  const currentImage = element.querySelector('img');
+  if (currentImage && candidates[0] && currentImage.getAttribute('src') === candidates[0]) return;
+  element.replaceChildren();
   if (!candidates.length) {
     element.textContent = initial;
     return;

@@ -1,5 +1,5 @@
 import { getFirebaseIdToken, isGoogleSignInCancellation, observeAuth, signInWithGoogle } from './firebase-cloud.js';
-import { alertModern, confirmModern } from './modern-modal.js';
+import { alertModern, confirmModern, promptModern } from './modern-modal.js';
 
 let currentUser;
 let dashboard;
@@ -309,7 +309,7 @@ function renderUsers() {
     const paid = formatMoneyByCurrency(user.paidAmountByCurrency || { INR: user.paidAmount });
     const status = userIsActive(user) ? 'Active' : 'Inactive';
     const activeClass = userIsActive(user) ? 'pro' : '';
-    return `<tr><td><button class="account-link" data-user="${escapeHtml(user.uid)}"><span class="account-name">${escapeHtml(user.name || 'User')}</span><span class="account-email">${escapeHtml(user.email || user.uid)}</span></button></td><td><span class="status-pill ${user.isPro ? 'pro' : activeClass}">${user.isPro ? 'Pro' : status}</span><div class="activation-label">${escapeHtml(activation)}</div></td><td><strong>${paid}</strong><div class="activation-label">${Number(user.paymentCount) || 0} payment(s)</div></td><td>${user.validUntil ? new Date(user.validUntil).toLocaleString() : '—'}</td><td><div class="row-actions">${user.isPro ? '' : `<button class="mini-button" data-action="grant" data-plan="monthly" data-uid="${escapeHtml(user.uid)}">Monthly Pro</button><button class="mini-button" data-action="grant" data-plan="yearly" data-uid="${escapeHtml(user.uid)}">Yearly Pro</button>`}${user.isPro ? `<button class="mini-button danger" data-action="cancel" data-uid="${escapeHtml(user.uid)}">Cancel Pro</button>` : ''}</div></td></tr>`;
+    return `<tr><td><button class="account-link" data-user="${escapeHtml(user.uid)}"><span class="account-name">${escapeHtml(user.name || 'User')}</span><span class="account-email">${escapeHtml(user.email || user.uid)}</span></button></td><td><span class="status-pill ${user.disabled ? 'danger' : user.isPro ? 'pro' : activeClass}">${user.disabled ? 'Banned' : user.isPro ? 'Pro' : status}</span><div class="activation-label">${escapeHtml(activation)}</div></td><td><strong>${paid}</strong><div class="activation-label">${Number(user.paymentCount) || 0} payment(s)</div></td><td>${user.validUntil ? new Date(user.validUntil).toLocaleString() : '—'}</td><td><div class="row-actions">${user.isPro ? `<button class="mini-button danger" data-action="cancel" data-timing="immediate" data-uid="${escapeHtml(user.uid)}">Cancel now</button>${user.subscriptionId && !user.cancelAtCycleEnd ? `<button class="mini-button" data-action="cancel" data-timing="period-end" data-uid="${escapeHtml(user.uid)}">Cancel at next renewal</button>` : user.cancelAtCycleEnd ? '<span class="activation-label">Renewal cancelled</span>' : ''}` : `<button class="mini-button" data-action="grant" data-plan="monthly" data-uid="${escapeHtml(user.uid)}">Monthly Pro</button><button class="mini-button" data-action="grant" data-plan="yearly" data-uid="${escapeHtml(user.uid)}">Yearly Pro</button>`}${user.disabled ? `<button class="mini-button" data-action="unban" data-uid="${escapeHtml(user.uid)}">Unban</button>` : `<button class="mini-button" data-action="ban" data-uid="${escapeHtml(user.uid)}">Ban</button>`}<button class="mini-button danger" data-action="delete" data-uid="${escapeHtml(user.uid)}">Delete</button></div></td></tr>`;
   }).join('');
 }
 
@@ -796,7 +796,7 @@ $('#generated-code').addEventListener('click', async event => {
   if (!button) return;
   try { await navigator.clipboard.writeText(button.dataset.code); button.textContent = 'Copied'; } catch { button.textContent = 'Copy failed'; }
 });
-$('#user-list').addEventListener('click', async event => {
+document.addEventListener('click', async event => {
   const userButton = event.target.closest('[data-user]');
   if (userButton) { await openUserDetail(userButton.dataset.user); return; }
   const button = event.target.closest('[data-action]'); if (!button) return;
@@ -805,14 +805,41 @@ $('#user-list').addEventListener('click', async event => {
       openProGrant(button.dataset.uid, button.dataset.plan);
       return;
     }
-    openProCancel(button.dataset.uid);
-    return;
+    if (button.dataset.action === 'cancel') {
+      openProCancel(button.dataset.uid, button.dataset.timing);
+      return;
+    }
+    if (button.dataset.action === 'ban') {
+      const reason = await promptModern({ title: 'Reason for banning account', message: 'Enter the reason to include in the account history.', confirmText: 'Continue', placeholder: 'Reason for ban' });
+      if (!reason) return;
+      if (!await confirmModern({ title: 'Ban this account?', message: 'The user will be blocked from signing in, Pro will be removed immediately, and any active Razorpay subscription will be cancelled now.', confirmText: 'Ban account', variant: 'danger' })) return;
+      await api(`/api/admin/users/${encodeURIComponent(button.dataset.uid)}/ban`, { method: 'POST', body: JSON.stringify({ reason }) });
+      if ($('#user-detail').open) $('#user-detail').close();
+      await load();
+      return;
+    }
+    if (button.dataset.action === 'unban') {
+      if (!await confirmModern({ title: 'Unban this account?', message: 'The user will be able to sign in again. Pro access will not be restored automatically.', confirmText: 'Unban account' })) return;
+      await api(`/api/admin/users/${encodeURIComponent(button.dataset.uid)}/unban`, { method: 'POST', body: JSON.stringify({}) });
+      if ($('#user-detail').open) $('#user-detail').close();
+      await load();
+      return;
+    }
+    if (button.dataset.action === 'delete') {
+      if (!await confirmModern({ title: 'Permanently delete this account?', message: 'This permanently deletes the Firebase login and the user’s Firestore account data. Payment records are retained for financial history. This cannot be undone.', confirmText: 'Delete account', variant: 'danger' })) return;
+      await api(`/api/admin/users/${encodeURIComponent(button.dataset.uid)}`, { method: 'DELETE' });
+      if ($('#user-detail').open) $('#user-detail').close();
+      await load();
+      return;
+    }
+    await alertModern({ title: 'Unknown account action', message: 'Refresh the dashboard and try again.', variant: 'error' });
   } catch (error) { await alertModern({ title: 'Could not open account action', message: error.message, variant: 'error' }); }
 });
 
 let cancelUid;
-function openProCancel(uid) {
+function openProCancel(uid, timing = 'immediate') {
   cancelUid = uid;
+  $('#cancel-timing').value = timing;
   $('#cancel-reason').value = '';
   $('#pro-cancel-dialog').showModal();
 }
@@ -820,14 +847,16 @@ $('#close-cancel').addEventListener('click', () => $('#pro-cancel-dialog').close
 $('#pro-cancel-form').addEventListener('submit', async event => {
   event.preventDefault();
   const reason = $('#cancel-reason').value.trim();
+  const timing = $('#cancel-timing').value;
   if (!reason) {
     await alertModern({ title: 'Add a cancellation reason', message: 'Enter a reason for cancelling Pro access.', variant: 'error' });
     $('#cancel-reason').focus();
     return;
   }
   try {
-    await api(`/api/admin/users/${encodeURIComponent(cancelUid)}/cancel-pro`, { method: 'POST', body: JSON.stringify({ reason }) });
+    await api(`/api/admin/users/${encodeURIComponent(cancelUid)}/cancel-pro`, { method: 'POST', body: JSON.stringify({ reason, timing }) });
     $('#pro-cancel-dialog').close();
+    if ($('#user-detail').open) $('#user-detail').close();
     await load();
   } catch (error) { await alertModern({ title: 'Could not cancel Pro access', message: error.message, variant: 'error' }); }
 });
@@ -880,7 +909,7 @@ async function openUserDetail(uid) {
       return `<li><strong>${escapeHtml(plan)} · ${escapeHtml(record.paymentMode || record.source || 'unknown')} · ${escapeHtml(amount)}</strong><span>${escapeHtml(record.status || 'unknown')} · ${escapeHtml(validity)}</span><small>Subscription ${escapeHtml(record.subscriptionId || '—')}${escapeHtml(payment)}</small></li>`;
     }).join('');
     const activity = (details.activity || []).map(item => `<li><strong>${escapeHtml(item.title || item.type || 'Billing activity')}</strong><span>${escapeHtml(item.detail || item.message || '')}</span><small>${item.occurredAt || item.createdAt ? new Date(item.occurredAt || item.createdAt).toLocaleString() : 'Date unavailable'}</small></li>`).join('');
-    $('#detail-body').innerHTML = `<div class="detail-summary"><article><span>Account ID</span><strong>${escapeHtml(uid)}</strong></article><article><span>Email</span><strong>${escapeHtml(details.email || 'Not available')}</strong></article><article><span>Account created</span><strong>${details.createdAt ? new Date(details.createdAt).toLocaleString() : 'Not available'}</strong></article><article><span>Current activation</span><strong>${escapeHtml(activation)}</strong></article><article><span>Pro expires</span><strong>${entitlement.validUntil ? new Date(entitlement.validUntil).toLocaleString() : '—'}</strong></article><article><span>Total paid</span><strong>${formatMoneyByCurrency(details.paidAmountByCurrency || { INR: details.paidAmount })}</strong></article></div><div class="detail-columns"><section><h3>Subscription & voucher access history</h3><ul class="detail-list">${accessHistory || '<li class="empty">No access history recorded.</li>'}</ul></section><section><h3>Payment history</h3><ul class="detail-list">${payments || '<li class="empty">No payments recorded.</li>'}</ul></section><section><h3>Pro & billing activity</h3><ul class="detail-list">${activity || '<li class="empty">No activity recorded.</li>'}</ul></section></div>`;
+    $('#detail-body').innerHTML = `<div class="detail-summary"><article><span>Account ID</span><strong>${escapeHtml(uid)}</strong></article><article><span>Email</span><strong>${escapeHtml(details.email || 'Not available')}</strong></article><article><span>Account created</span><strong>${details.createdAt ? new Date(details.createdAt).toLocaleString() : 'Not available'}</strong></article><article><span>Account status</span><strong>${details.disabled ? 'Banned' : 'Active'}</strong></article><article><span>Current activation</span><strong>${escapeHtml(activation)}</strong></article><article><span>Pro expires</span><strong>${entitlement.validUntil ? new Date(entitlement.validUntil).toLocaleString() : '—'}</strong></article><article><span>Total paid</span><strong>${formatMoneyByCurrency(details.paidAmountByCurrency || { INR: details.paidAmount })}</strong></article></div><div class="row-actions">${entitlement.planId === 'pro' && entitlement.status === 'active' ? `<button class="mini-button danger" data-action="cancel" data-timing="immediate" data-uid="${escapeHtml(uid)}">Cancel Pro now</button>${details.subscriptionId && !entitlement.cancelAtCycleEnd ? `<button class="mini-button" data-action="cancel" data-timing="period-end" data-uid="${escapeHtml(uid)}">Cancel at next renewal</button>` : ''}` : ''}${details.disabled ? `<button class="mini-button" data-action="unban" data-uid="${escapeHtml(uid)}">Unban</button>` : `<button class="mini-button" data-action="ban" data-uid="${escapeHtml(uid)}">Ban</button>`}<button class="mini-button danger" data-action="delete" data-uid="${escapeHtml(uid)}">Delete account</button></div><div class="detail-columns"><section><h3>Subscription & voucher access history</h3><ul class="detail-list">${accessHistory || '<li class="empty">No access history recorded.</li>'}</ul></section><section><h3>Payment history</h3><ul class="detail-list">${payments || '<li class="empty">No payments recorded.</li>'}</ul></section><section><h3>Pro & billing activity</h3><ul class="detail-list">${activity || '<li class="empty">No activity recorded.</li>'}</ul></section></div>`;
   } catch (error) { $('#detail-body').innerHTML = `<p class="detail-error">${escapeHtml(error.message)}</p>`; }
 }
 $('#close-detail').addEventListener('click', () => $('#user-detail').close());

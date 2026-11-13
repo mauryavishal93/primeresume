@@ -31,6 +31,34 @@
       <a class="btn outline" href="/community.html">Community</a>
       <a class="btn outline" href="/pricing.html">Plans</a>
       <a class="btn soft about-editor" href="/editor.html">Open editor</a>
+      <details class="account-menu site-account-menu" data-account-menu-shell>
+        <summary class="account-menu-trigger" aria-label="Open account menu">
+          <span class="account-avatar" aria-hidden="true">U</span>
+        </summary>
+      </details>
+      <script>
+        try {
+          const cachedAvatar = JSON.parse(localStorage.getItem('resumeout:session-cache:v1:account-avatar-hint') || 'null');
+          const photo = cachedAvatar?.photoDataUrl;
+          if (typeof cachedAvatar?.uid === 'string' && cachedAvatar.uid
+            && Number.isFinite(cachedAvatar.savedAt) && Date.now() >= cachedAvatar.savedAt
+            && Date.now() - cachedAvatar.savedAt <= 30 * 24 * 60 * 60 * 1000
+            && typeof photo === 'string' && photo.length <= 350000
+            && /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$/.test(photo)) {
+            const menu = document.currentScript.previousElementSibling;
+            const avatar = menu.querySelector('.account-avatar');
+            const image = document.createElement('img');
+            image.alt = '';
+            image.draggable = false;
+            image.loading = 'eager';
+            image.src = photo;
+            avatar.replaceChildren(image);
+            menu.dataset.authShellVisible = 'true';
+          }
+        } catch (error) {
+          console.warn('Could not render the cached account icon.', error);
+        }
+      </script>
     </nav>
   </header>
 
@@ -60,11 +88,14 @@
             <input id="accountEmail" name="email" type="email" autocomplete="email" readonly aria-describedby="emailHelp">
             <small id="emailHelp">Your sign-in email cannot be changed here.</small>
           </label>
-          <label class="my-account-field" for="accountMobile">
+          <div class="my-account-field">
             <span>Mobile number <span class="my-account-optional">(optional)</span></span>
-            <input id="accountMobile" name="mobile" type="tel" maxlength="24" autocomplete="tel" inputmode="tel" placeholder="+1 555 123 4567">
-            <small>Include your country code if you want to.</small>
-          </label>
+            <div class="my-account-phone">
+              <select id="accountCountry" name="country" autocomplete="country" aria-label="Country and calling code"></select>
+              <input id="accountMobile" name="mobile" type="tel" maxlength="24" autocomplete="tel-national" inputmode="tel" aria-label="Mobile number" aria-describedby="mobileHelp" placeholder="555 123 4567">
+            </div>
+            <small id="mobileHelp">Choose your country, then enter your number. It will be saved with the international calling code.</small>
+          </div>
         </fieldset>
         <div class="my-account-actions">
           <button class="btn primary" id="saveAccount" type="submit" disabled>Save changes</button>
