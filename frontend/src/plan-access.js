@@ -73,11 +73,11 @@ export function canUseFeature(featureId, entitlement, now = Date.now()) {
   if (entitlement?.planId !== PLAN_CONFIG.pro.id
     || entitlement.status !== 'active'
     || entitlement.source !== 'server-verified'
-    || !Number.isFinite(entitlement.validUntil)) {
+    || (entitlement.lifetime !== true && !Number.isFinite(entitlement.validUntil))) {
     return false;
   }
 
-  return entitlement.validUntil > now;
+  return entitlement.lifetime === true || entitlement.validUntil > now;
 }
 
 export function shouldPromptForJobDescriptionAtsUpgrade(jobDescription, entitlement) {

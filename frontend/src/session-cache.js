@@ -46,11 +46,13 @@ export function getCachedProBadgeHint(now = Date.now()) {
     if (!serialized) return null;
     const hint = JSON.parse(serialized);
     if (typeof hint?.uid !== 'string' || !hint.uid
-      || !Number.isFinite(hint.validUntil) || hint.validUntil <= now) {
+      || (hint.lifetime !== true && (!Number.isFinite(hint.validUntil) || hint.validUntil <= now))) {
       removeCachedValue(storage, PRO_BADGE_HINT_KEY);
       return null;
     }
-    return { uid: hint.uid, validUntil: hint.validUntil };
+    return hint.lifetime === true
+      ? { uid: hint.uid, lifetime: true }
+      : { uid: hint.uid, validUntil: hint.validUntil };
   } catch (error) {
     console.warn('Could not read the Pro badge cache.', error);
     removeCachedValue(storage, PRO_BADGE_HINT_KEY);
@@ -63,13 +65,15 @@ export function cacheProBadgeHint(uid, entitlement) {
   if (!storage || !uid) return;
   if (entitlement?.source !== 'server-verified'
     || entitlement.status !== 'active'
-    || !Number.isFinite(entitlement.validUntil)
-    || entitlement.validUntil <= Date.now()) {
+    || (entitlement.lifetime !== true
+      && (!Number.isFinite(entitlement.validUntil) || entitlement.validUntil <= Date.now()))) {
     clearCachedProBadgeHint(uid);
     return;
   }
   try {
-    storage.setItem(PRO_BADGE_HINT_KEY, JSON.stringify({ uid, validUntil: entitlement.validUntil }));
+    storage.setItem(PRO_BADGE_HINT_KEY, JSON.stringify(entitlement.lifetime === true
+      ? { uid, lifetime: true }
+      : { uid, validUntil: entitlement.validUntil }));
   } catch (error) {
     console.warn('Could not write the Pro badge cache.', error);
   }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createFirebaseCloudClient, googleSignInErrorMessage, isGoogleSignInCancellation } from '../frontend/src/firebase-cloud.js';
+import { createFirebaseCloudClient, googleSignInErrorMessage, isDisabledAccountSignInError, isGoogleSignInCancellation } from '../frontend/src/firebase-cloud.js';
 import { chooseAuthenticatedResume } from '../frontend/src/resume-persistence.js';
 
 function createFakeFirebase({ popupError = null, popupDelay = null, signOutError = null } = {}) {
@@ -279,6 +279,25 @@ test('Google sign-in reports actionable Firebase configuration and domain errors
   assert.match(googleSignInErrorMessage({ code: 'auth/operation-not-allowed' }), /Enable Google/);
   assert.match(googleSignInErrorMessage({ code: 'auth/unauthorized-domain' }, 'example.com'), /example\.com/);
   assert.match(googleSignInErrorMessage({ code: 'auth/unauthorized-domain' }, '127.0.0.1'), /using localhost/);
+});
+
+test('disabled Google accounts receive a friendly message and do not reject into UI error handlers', async () => {
+  const firebase = createFakeFirebase({ popupError: { code: 'auth/user-disabled', message: 'Firebase: Error (auth/user-disabled).' } });
+  const originalDispatchEvent = globalThis.dispatchEvent;
+  const dispatchedEvents = [];
+  globalThis.dispatchEvent = event => dispatchedEvents.push(event.type);
+
+  try {
+    assert.equal(isDisabledAccountSignInError({ code: 'auth/user-disabled' }), true);
+    assert.equal(googleSignInErrorMessage({ code: 'auth/user-disabled' }), 'Please contact our support team for help.');
+    assert.doesNotMatch(googleSignInErrorMessage({ code: 'auth/user-disabled' }), /Firebase|auth\//);
+    assert.equal(await firebase.client.signInWithGoogle(), null);
+    assert.equal(firebase.redirectedWith, undefined);
+    assert.deepEqual(dispatchedEvents, ['firebase-account-sign-in-disabled']);
+  } finally {
+    if (originalDispatchEvent === undefined) delete globalThis.dispatchEvent;
+    else globalThis.dispatchEvent = originalDispatchEvent;
+  }
 });
 
 test('cloud resume create, list, revision update, conflict detection, and delete are scoped per user', async () => {

@@ -181,6 +181,18 @@ test('only recognized Pro features accept an active unexpired verified entitleme
   assert.equal(canUseFeature(FEATURE_IDS.JOB_DESCRIPTION_ATS, entitlement, 1_000), true);
 });
 
+test('lifetime voucher entitlement grants Pro access without an expiry timestamp', () => {
+  const entitlement = {
+    planId: 'pro',
+    status: 'active',
+    source: 'server-verified',
+    lifetime: true,
+    validUntil: null
+  };
+  assert.equal(canUseFeature(FEATURE_IDS.ALL_TEMPLATES, entitlement, 1_000), true);
+  assert.equal(canUseFeature(FEATURE_IDS.JOB_DESCRIPTION_ATS, entitlement, 1_000), true);
+});
+
 test('job-description ATS attempts prompt Free users to upgrade but not Pro users', () => {
   const activePro = {
     planId: 'pro',
@@ -408,6 +420,7 @@ test('experience content reflows to the next page while the user is typing', () 
 test('billing and Plans pages expose voucher entry and label sample codes as examples', () => {
   const html = readFileSync(new URL('../frontend/billing.html', import.meta.url), 'utf8');
   const pricingHtml = readFileSync(new URL('../frontend/pricing.html', import.meta.url), 'utf8');
+  const serverSource = readFileSync(new URL('../backend/server.js', import.meta.url), 'utf8');
   const source = readFileSync(new URL('../frontend/src/billing.js', import.meta.url), 'utf8');
   const pricingSource = readFileSync(new URL('../frontend/src/pricing.js', import.meta.url), 'utf8');
   assert.match(html, /id="voucherForm"/);
@@ -415,16 +428,26 @@ test('billing and Plans pages expose voucher entry and label sample codes as exa
   assert.match(html, /Example formats only — these are not valid codes/);
   assert.match(source, /redeemBillingVoucher\(currentUser, code\)/);
   assert.match(source, /const voucherUnavailable = billingConfig\?\.entitlementEnabled === false/);
-  assert.match(source, /const disabled = signInRequired \|\| voucherUnavailable/);
+  assert.match(source, /const disabled = signInRequired \|\| planCheckPending \|\| proActive \|\| voucherUnavailable/);
   assert.match(source, /Voucher availability could not be checked\. Enter a code and the server will verify it/);
-  assert.match(source, /a valid voucher will start after your current access ends/i);
-  assert.match(source, /result\.queued/);
+  assert.match(source, /Voucher redemption is disabled while Pro is active/);
+  assert.match(serverSource, /hasActiveProEntitlement\(currentEntitlement, now\)/);
   assert.match(source, /billingConfig\?\.entitlementEnabled === false/);
   assert.match(pricingHtml, /id="pricingVoucherForm"/);
   assert.match(pricingHtml, /id="pricingVoucherSection"[^>]*aria-labelledby="pricingVoucherTitle">/);
   assert.match(pricingHtml, /id="pricingVoucherCode"/);
+  assert.match(pricingSource, /voucherInput\.disabled = signInRequired \|\| verificationUnavailable \|\| planCheckPending \|\| proActive/);
+  assert.match(pricingSource, /Voucher redemption is disabled while Pro is active/);
   assert.match(pricingSource, /redeemBillingVoucher\(currentUser, code\)/);
-  assert.match(pricingSource, /result\.queued/);
+  const adminHtml = readFileSync(new URL('../frontend/admin.html', import.meta.url), 'utf8');
+  const adminSource = readFileSync(new URL('../frontend/src/admin.js', import.meta.url), 'utf8');
+  assert.match(adminHtml, /Assign to user <span>\(optional\)<\/span><input id="voucher-uid" type="text"[^>]*placeholder="Firebase UID or account email"/);
+  assert.match(adminSource, /JSON\.stringify\(\{ duration: \$\('#voucher-duration'\)\.value, user: \$\('#voucher-uid'\)\.value \}\)/);
+  assert.match(adminSource, /Assigned to \$\{voucher\.assignedEmail \|\| voucher\.assignedUid\}/);
+  assert.match(adminHtml, /id="voucher-duration"/);
+  for (const option of ['1-month', '3-months', '6-months', '1-year', 'lifetime']) {
+    assert.match(adminHtml, new RegExp(`value="${option}"`));
+  }
 });
 
 test('subscription checkout lets the Razorpay plan determine its payment currency', () => {
@@ -477,7 +500,11 @@ test('active subscribers see their plan and can manage billing even when checkou
   assert.match(purchaseControls, /'Switch to yearly'/);
   assert.match(purchaseControls, /monthlyButton\.disabled = false/);
   assert.match(purchaseControls, /yearlyButton\.disabled = entitlement\.scheduledPlan === 'yearly'/);
-  assert.match(purchaseControls, /Your active plan: Pro \$\{planLabel\}/);
+  assert.match(purchaseControls, /activePlan === 'voucher'\s*\?\s*entitlement\.lifetime \? 'Pro Lifetime Voucher' : 'Pro Voucher'/);
+  assert.match(purchaseControls, /entitlement\.source === 'admin'\s*\?\s*' \(Admin granted\)'/);
+  assert.match(purchaseControls, /\['monthly', 'yearly'\]\.includes\(activePlan\)\s*\?\s*' \(Subscription\)'/);
+  assert.match(purchaseControls, /Your active plan: \$\{planLabel\}\$\{activationSource\}/);
+  assert.doesNotMatch(purchaseControls, /Your active plan: Pro \$\{planLabel\}/);
   assert.match(purchaseControls, /monthlyBadge\.textContent = 'Active plan'/);
   assert.match(purchaseControls, /yearlyBadge\.textContent = activePlan === 'yearly' \? 'Active plan' : 'Scheduled'/);
   assert.match(pricingSource, /async function scheduleYearlySwitch\(\)/);

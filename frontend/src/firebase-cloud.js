@@ -14,8 +14,16 @@ export function isGoogleSignInCancellation(error) {
     || /\(auth\/(?:cancelled-popup-request|popup-closed-by-user|user-cancelled)\)/.test(error?.message || '');
 }
 
+export function isDisabledAccountSignInError(error) {
+  return error?.code === 'auth/user-disabled'
+    || /\(auth\/user-disabled\)/.test(error?.message || '');
+}
+
 export function googleSignInErrorMessage(error, hostname = globalThis.location?.hostname || 'this domain') {
   if (isGoogleSignInCancellation(error)) return '';
+  if (isDisabledAccountSignInError(error)) {
+    return 'Please contact our support team for help.';
+  }
   switch (error?.code) {
     case 'auth/configuration-not-found':
     case 'auth/operation-not-allowed':
@@ -31,7 +39,7 @@ export function googleSignInErrorMessage(error, hostname = globalThis.location?.
     case 'auth/network-request-failed':
       return 'Google sign-in could not reach Firebase. Check your internet connection and try again.';
     default:
-      return error?.message || 'Could not sign in with Google.';
+      return 'Could not sign in with Google. Please try again.';
   }
 }
 
@@ -167,6 +175,12 @@ export function createFirebaseCloudClient({ config = firebaseConfig, loadSdk = l
         return await authSdk.signInWithPopup(auth, provider);
       } catch (error) {
         if (isGoogleSignInCancellation(error)) return null;
+        if (isDisabledAccountSignInError(error)) {
+          if (typeof globalThis.dispatchEvent === 'function' && typeof globalThis.Event === 'function') {
+            globalThis.dispatchEvent(new globalThis.Event('firebase-account-sign-in-disabled'));
+          }
+          return null;
+        }
         if (!['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment'].includes(error?.code)) {
           throw error;
         }

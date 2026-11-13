@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 
 const html = readFileSync(new URL('../frontend/admin.html', import.meta.url), 'utf8');
 const styles = readFileSync(new URL('../frontend/src/admin.css', import.meta.url), 'utf8');
+const aboutStyles = readFileSync(new URL('../frontend/src/about.css', import.meta.url), 'utf8');
 const source = readFileSync(new URL('../frontend/src/admin.js', import.meta.url), 'utf8');
 
 test('admin dashboard groups management tools into left-nav categories', () => {
@@ -21,7 +22,10 @@ test('admin dashboard groups management tools into left-nav categories', () => {
 });
 
 test('voucher-based Pro accounts are labeled as Voucher in the plan and activation column', () => {
-  assert.match(source, /activationSource === 'voucher' \? 'Voucher'/);
+  assert.match(source, /user\.isPro \? 'Pro · Voucher' : 'Voucher'/);
+  assert.match(source, /user\.isPro \? 'Pro · Admin granted' : 'Admin granted'/);
+  assert.match(source, /user\.isPro \? 'Pro' : status/);
+  assert.match(source, /const accessAction = user\.isPro[\s\S]*?Cancel Pro access/);
 });
 
 test('admin typography uses consistent 12px, 14px, and 15px text categories', () => {
@@ -44,6 +48,29 @@ test('admin can cancel subscriptions immediately or at period end and manage acc
   assert.match(adminPage, /id="cancel-timing"[\s\S]*?value="immediate"[\s\S]*?value="period-end"/);
 });
 
+test('user table groups secondary account actions in compact, accessible menus', () => {
+  assert.match(source, /<details class="action-menu"><summary class="mini-button">Grant Pro/);
+  assert.match(source, /<details class="action-menu"><summary class="mini-button secondary-filter">Manage/);
+  assert.match(source, /action-menu-item danger" data-action="delete"/);
+  assert.match(styles, /\.row-actions\s*\{[\s\S]*?display:\s*grid/);
+  assert.match(styles, /\.action-menu-panel\s*\{[\s\S]*?position:\s*static/);
+});
+
+test('mobile site headers keep the main links on one row and place Google sign-in below Community', () => {
+  const pages = ['about', 'admin', 'billing', 'community', 'home', 'index', 'my-account', 'my-posts', 'pricing', 'support'];
+  for (const page of pages) {
+    const html = readFileSync(new URL(`../frontend/${page}.html`, import.meta.url), 'utf8');
+    assert.match(html, /<body[^>]*\bsite-mobile-header\b/, `${page} should use the mobile header layout`);
+  }
+  const authNav = readFileSync(new URL('../frontend/src/auth-nav.js', import.meta.url), 'utf8');
+  assert.match(authNav, /classList\.toggle\('auth-user-signed-in', Boolean\(user\) && !error\)/);
+  assert.match(aboutStyles, /grid-template-areas:"community plans editor" "auth theme \."/);
+  assert.match(aboutStyles, /body\.site-mobile-header\.auth-user-signed-in:not\(\.admin-page\) \.about-nav\{grid-template-areas:"community plans editor"\}/);
+  assert.match(aboutStyles, /body\.site-mobile-header\.admin-page \.about-nav\{display:grid;grid-template-columns:repeat\(3,minmax\(0,1fr\)\);grid-template-areas:"community plans editor" "auth \. \."/);
+  assert.match(aboutStyles, /body\.site-mobile-header\.admin-page\.auth-user-signed-in \.about-nav\{grid-template-areas:"community plans editor"\}/);
+  assert.match(html, /<nav class="about-nav">[\s\S]*?data-auth-sign-in[\s\S]*?href="\/community\.html"/);
+});
+
 test('billing, pricing, editor, and navigation refresh entitlement after admin changes', () => {
   const sources = [
     'auth-nav.js',
@@ -62,6 +89,14 @@ test('admin category navigation switches panels and adapts to narrow screens', (
   assert.match(source, /button\.addEventListener\('click', \(\) => selectAdminCategory/);
   assert.match(styles, /#admin-content:not\(\[hidden\]\)\s*\{[\s\S]*?grid-template-columns:\s*220px minmax\(0,\s*1fr\)/);
   assert.match(styles, /@media \(max-width: 720px\)[\s\S]*?\.admin-category-nav \{[\s\S]*?overflow-x: auto/);
+});
+
+test('admin overview summary and metric cards use a compact two-column mobile layout', () => {
+  const mobileStyles = styles.slice(styles.indexOf('@media (max-width: 720px)'));
+  assert.match(mobileStyles, /\.admin-summary-bar\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
+  assert.match(mobileStyles, /\.admin-stats\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
+  assert.match(mobileStyles, /\.stat-header\s*\{[\s\S]*?display:\s*grid/);
+  assert.match(mobileStyles, /\.admin-stats article\s*\{[\s\S]*?min-width:\s*0/);
 });
 
 test('hidden protected-area login panel stays hidden despite its grid layout', () => {

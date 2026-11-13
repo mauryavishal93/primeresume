@@ -163,6 +163,13 @@ test('shared pages and editor render cached account photos before fetching profi
   assert.match(editorSource, /const cachedPhoto=getCachedAccountPhoto\(accountUid\);[\s\S]*?const photos=getAccountPhotoUrls\(user,cachedPhoto\?\?'\'\);[\s\S]*?if\(cachedPhoto===null\)/);
 });
 
+test('auth refresh updates profile labels without clearing the existing profile image', () => {
+  const editorSource = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(authNavigation, /accountMenu\.(?:avatar|largeAvatar)\.textContent = initial/);
+  assert.doesNotMatch(editorSource, /\$\('(?:accountAvatar|accountAvatarLarge)'\)\.textContent=initial/);
+  assert.match(editorSource, /const cachedPhoto=getCachedAccountPhoto\(user\.uid\);\s*const photos=getAccountPhotoUrls\(user,cachedPhoto\?\?'\'\);\s*setAccountAvatar\(\$\('accountAvatar'\),initial,photos\)/);
+});
+
 test('account page exposes editable name and mobile fields with a read-only email', () => {
   assert.match(page, /id="accountName"[^>]*type="text"[^>]*required/);
   assert.match(page, /id="accountEmail"[^>]*type="email"[^>]*readonly/);

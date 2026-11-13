@@ -58,6 +58,14 @@ test('PDF export captures the rendered resume and keeps its text layer searchabl
   assert.match(pdfSource, /addSelectableText\(doc, sheet, \{ renderingMode: 'invisible' \}\)/);
 });
 
+test('PDF preview status summarizes the selectable page and free-download info concisely', () => {
+  const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
+  assert.match(source, /Selectable, searchable text · \$\{pageCount\} A4 page/);
+  assert.match(source, /Sign in for 2 free Pro PDFs/);
+  assert.match(source, /\$\{proTemplateDownloadsRemaining\} free Pro PDF\$\{proTemplateDownloadsRemaining===1\?'':'s'\} left/);
+  assert.doesNotMatch(source, /Review before downloading — the button is ready when you are/);
+});
+
 test('mobile editor provides view tabs and shows one full-width panel above the canvas', () => {
   const html = readFileSync(new URL('../frontend/editor.html', import.meta.url), 'utf8');
   const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');

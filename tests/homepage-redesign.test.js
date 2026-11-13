@@ -10,6 +10,7 @@ test('homepage redesign sections and existing walkthrough stay consistent on bot
   for (const page of ['home.html', 'index.html']) {
     const html = readFileSync(new URL(`../frontend/${page}`, import.meta.url), 'utf8');
 
+    assert.match(html, /<body class="about-page landing-page site-mobile-header">/);
     assert.match(html, /href="\/src\/homepage\.css"/);
     assert.match(html, /src="\/images\/homepage-demo\.svg"/);
     assert.match(html, /<script type="module" src="\/src\/homepage-templates\.js"><\/script>/);
@@ -54,6 +55,9 @@ test('homepage redesign sections and existing walkthrough stay consistent on bot
   assert.match(aboutStyles, /\.about-page:not\(\.landing-page\):not\(\.admin-page\) \.about-nav>a\[href="\/community\.html"\]\{grid-area:community/);
   assert.match(aboutStyles, /\.about-page:not\(\.landing-page\):not\(\.admin-page\) \.about-nav>a\[href="\/pricing\.html"\]\{grid-area:plans/);
   assert.match(aboutStyles, /\.about-page:not\(\.landing-page\):not\(\.admin-page\) \.about-nav>\.about-editor\{grid-area:editor/);
+  assert.match(aboutStyles, /body\.site-mobile-header:not\(\.admin-page\) \.about-nav\{display:grid;grid-template-columns:repeat\(3,minmax\(0,1fr\)\);grid-template-areas:"community plans editor" "auth theme \."/);
+  assert.match(aboutStyles, /body\.site-mobile-header\.auth-user-signed-in:not\(\.admin-page\) \.about-nav\{grid-template-areas:"community plans editor"\}/);
+  assert.match(aboutStyles, /body\.site-mobile-header:not\(\.admin-page\) \.about-nav \.google-signin::after\{content:"Google"/);
   for (const page of ['about', 'admin', 'billing', 'community', 'home', 'index', 'my-account', 'my-posts', 'pricing', 'privacy', 'refunds', 'resume-wizard', 'support', 'terms']) {
     const html = readFileSync(new URL(`../frontend/${page}.html`, import.meta.url), 'utf8');
     assert.match(html, /<header class="about-header"/, `${page} should use the shared responsive header`);

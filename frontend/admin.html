@@ -6,8 +6,8 @@
   <link rel="icon" type="image/svg+xml" href="/images/resumeout-mark.svg">
   <link rel="stylesheet" href="/src/about.css"><link rel="stylesheet" href="/src/admin.css">
 </head>
-<body class="about-page admin-page">
-  <header class="about-header"><a class="about-brand" href="/home.html" aria-label="ResumeOut.com home"><img class="about-logo" src="/images/resumeout-mark.svg" alt="" aria-hidden="true"><span class="about-brand-name"><span class="brand-resume">Resume</span><span class="brand-out">Out</span><span class="brand-domain">.com</span></span></a><nav class="about-nav"><button class="theme-switch" data-theme-toggle type="button"><span class="theme-switch-track"><span class="theme-switch-thumb"></span></span></button><a href="/community.html" class="nav-link">Community</a><a href="/pricing.html" class="nav-link">Plans</a><a href="/editor.html" class="nav-link">Open editor</a></nav></header>
+<body class="about-page admin-page site-mobile-header">
+  <header class="about-header"><a class="about-brand" href="/home.html" aria-label="ResumeOut.com home"><img class="about-logo" src="/images/resumeout-mark.svg" alt="" aria-hidden="true"><span class="about-brand-name"><span class="brand-resume">Resume</span><span class="brand-out">Out</span><span class="brand-domain">.com</span></span></a><nav class="about-nav"><button class="theme-switch" data-theme-toggle type="button"><span class="theme-switch-track"><span class="theme-switch-thumb"></span></span></button><div class="auth-actions"><button class="btn google-signin" type="button" data-auth-sign-in aria-label="Sign in with Google"><span class="google-signin-mark" aria-hidden="true">G</span><span data-auth-sign-in-label>Sign in with Google</span></button></div><a href="/community.html" class="nav-link">Community</a><a href="/pricing.html" class="nav-link">Plans</a><a href="/editor.html" class="nav-link">Open editor</a></nav></header>
   <main class="admin-shell">
     <section class="admin-hero">
       <div class="admin-hero-copy">
@@ -216,6 +216,28 @@
       </div>
 
       <div class="admin-grid">
+        <section id="pending-cancellation-card" class="admin-card user-card" hidden>
+          <div class="admin-card-title">
+            <div>
+              <p class="eyebrow">Billing follow-up</p>
+              <h2>Pending Razorpay cancellations</h2>
+            </div>
+          </div>
+          <p>Retry cancellation for subscriptions that could not be cancelled during a previous account ban or deletion.</p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>User ID</th>
+                  <th>Email</th>
+                  <th>Subscription</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="pending-cancellation-list"></tbody>
+            </table>
+          </div>
+        </section>
         <section class="admin-card user-card">
           <div class="admin-card-title">
             <div>
@@ -260,8 +282,8 @@
               <span class="collapse-label">Collapse</span>
             </summary>
             <div class="voucher-form">
-              <label>Plan<select id="voucher-plan"><option value="monthly">Monthly Pro</option><option value="yearly">Yearly Pro</option></select></label>
-              <label>Assign to user UID <span>(optional)</span><input id="voucher-uid" placeholder="Firebase UID"></label>
+              <label>Access duration<select id="voucher-duration"><option value="1-month">1 month</option><option value="3-months">3 months</option><option value="6-months">6 months</option><option value="1-year">1 year</option><option value="lifetime">Lifetime</option></select></label>
+              <label>Assign to user <span>(optional)</span><input id="voucher-uid" type="text" autocomplete="off" placeholder="Firebase UID or account email"></label>
               <button id="generate-voucher" class="admin-button">Generate voucher</button>
             </div>
             <div id="generated-code" class="generated-code" hidden></div>

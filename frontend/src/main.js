@@ -28,6 +28,14 @@ import { getAccountPhotoUrls, setAccountAvatar } from './account-avatar.js';
 import { cacheAccountPhoto, cacheAccountPhotoFromUrls, cacheProBadgeHint, clearCachedProBadgeHint, clearUserSessionCache, getCachedAccountAvatarHint, getCachedAccountPhoto, getCachedProBadgeHint } from './session-cache.js';
 import { zoomFromPinch } from './zoom.js';
 
+window.addEventListener('firebase-account-sign-in-disabled', () => {
+ void alertModern({
+  title:'Your account is banned!',
+  message:googleSignInErrorMessage({code:'auth/user-disabled'}),
+  variant:'default'
+ });
+});
+
 (()=>{'use strict';
 const $=id=>document.getElementById(id),deep=x=>JSON.parse(JSON.stringify(x)),uid=()=>Math.random().toString(36).slice(2,10);
 const baseDocumentTitle=document.title;
@@ -181,7 +189,7 @@ function insertPointerLine(sectionId,afterLine){
  requestAnimationFrame(()=>$('inspector').querySelector(`[data-section-pointer-line][data-section-id="${sectionId}"][data-line="${lineIndex}"]`)?.focus());
 }
 function toast(msg){$('toast').textContent=msg;$('toast').classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('toast').classList.remove('show'),2300)}
-function updateProLabel(){const cachedBadgeIsCurrent=proBadgeHint?.validUntil>Date.now()&&(!authStateResolved||cloudUser?.uid===proBadgeHint.uid);const isPro=canUseFeature(FEATURE_IDS.ALL_TEMPLATES,verifiedEntitlement)||cachedBadgeIsCurrent;const badge=$('proBrandBadge');if(badge)badge.hidden=!isPro;document.title=isPro?`${baseDocumentTitle} | Pro`:baseDocumentTitle}
+function updateProLabel(){const cachedBadgeIsCurrent=(proBadgeHint?.lifetime===true||proBadgeHint?.validUntil>Date.now())&&(!authStateResolved||cloudUser?.uid===proBadgeHint.uid);const isPro=canUseFeature(FEATURE_IDS.ALL_TEMPLATES,verifiedEntitlement)||cachedBadgeIsCurrent;const badge=$('proBrandBadge');if(badge)badge.hidden=!isPro;document.title=isPro?`${baseDocumentTitle} | Pro`:baseDocumentTitle}
 updateProLabel();
 async function refreshEditorBillingStatus(user,generation){
  try{
@@ -666,16 +674,10 @@ function updateSharedCopyAuth(user){
   const initial=Array.from(accountName)[0]?.toLocaleUpperCase()||'U';
   $('accountUserName').textContent=accountName;
   $('accountUserEmail').textContent=user.email||'';
-  $('accountAvatar').textContent=initial;
-  $('accountAvatarLarge').textContent=initial;
-  setAccountAvatar($('accountAvatar'),initial,getAccountPhotoUrls(user));
-  setAccountAvatar($('accountAvatarLarge'),initial,getAccountPhotoUrls(user));
   const cachedPhoto=getCachedAccountPhoto(user.uid);
-  if(cachedPhoto){
-   const photos=getAccountPhotoUrls(user,cachedPhoto);
-   setAccountAvatar($('accountAvatar'),initial,photos);
-   setAccountAvatar($('accountAvatarLarge'),initial,photos);
-  }
+  const photos=getAccountPhotoUrls(user,cachedPhoto??'');
+  setAccountAvatar($('accountAvatar'),initial,photos);
+  setAccountAvatar($('accountAvatarLarge'),initial,photos);
   void cacheAccountPhotoFromUrls(user.uid,getAccountPhotoUrls(user));
   $('accountMenu').querySelector('summary').setAttribute('aria-label',`Account menu for ${accountName}`);
  }else{
@@ -704,7 +706,7 @@ async function updateCloudAccount(user,error){
   updateProLabel();
   $('googleSignInBtn').disabled=true;
   $('googleSignInLabel').textContent='Cloud setup needed';
-  $('googleSignInBtn').title=error.message;
+  $('googleSignInBtn').title=authErrorMessage(error);
   $('cloudActions').hidden=false;
   $('accountMenu').hidden=false;
   $('accountMenuProfile').hidden=true;
@@ -723,7 +725,7 @@ async function updateCloudAccount(user,error){
   setAccountAvatar($('accountAvatar'),'G');
   setAccountAvatar($('accountAvatarLarge'),'G');
   $('accountMenu').querySelector('summary').setAttribute('aria-label','Account menu');
-  $('cloudAccount').textContent=error.message;
+  $('cloudAccount').textContent=authErrorMessage(error);
   renderCloudResumes();
   renderTemplates();
   updateBrowserPersistenceUI();
@@ -807,8 +809,6 @@ async function updateCloudAccount(user,error){
   $('accountMenu').querySelector('summary').setAttribute('aria-label',`Account menu for ${accountName}`);
   $('accountUserName').textContent=accountName;
   $('accountUserEmail').textContent=user.email||'';
-  $('accountAvatar').textContent=initial;
-  $('accountAvatarLarge').textContent=initial;
   const accountUid=user.uid;
   const cachedPhoto=getCachedAccountPhoto(accountUid);
   const photos=getAccountPhotoUrls(user,cachedPhoto??'');
@@ -2199,12 +2199,12 @@ function showPdfPreview(blob,filename,pageCount,title,previewPages=[]){
  $('pdfPreviewFrame').hidden=false;
  const trialText=pdfPreviewUsesProTemplate&&!canUseFeature(FEATURE_IDS.ALL_TEMPLATES,verifiedEntitlement)
   ? !cloudUser
-   ? ' · Sign in with Google for two free Pro-template PDF downloads'
+   ? ' · Sign in for 2 free Pro PDFs'
    : proTemplateDownloadsRemaining===null
-    ? ' · Free Pro-template allowance will be checked when downloading'
-    : ` · ${proTemplateDownloadsRemaining} free Pro-template PDF download${proTemplateDownloadsRemaining===1?'':'s'} remaining`
+    ? ' · Free Pro PDFs checked at download'
+    : ` · ${proTemplateDownloadsRemaining} free Pro PDF${proTemplateDownloadsRemaining===1?'':'s'} left`
   : '';
- $('pdfPreviewStatus').textContent=`Text is selectable and searchable. ${pageCount} A4 page${pageCount===1?'':'s'}${trialText}. Review before downloading — the button is ready when you are.`;
+ $('pdfPreviewStatus').textContent=`Selectable, searchable text · ${pageCount} A4 page${pageCount===1?'':'s'}${trialText}.`;
  $('downloadPdfPreview').disabled=false;
  $('downloadPdfPreview').textContent='Download PDF';
 }

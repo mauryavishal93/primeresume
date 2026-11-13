@@ -1,7 +1,7 @@
 import { cloudConfigured, getAccountProfile, googleSignInErrorMessage, isGoogleSignInCancellation, observeAuth, signInWithGoogle, signOutUser } from './firebase-cloud.js';
 import { clearBillingEntitlementCache, loadBillingConfig, loadBillingEntitlement } from './billing-client.js';
 import { canUseFeature, FEATURE_IDS } from './plan-access.js';
-import { confirmModern } from './modern-modal.js';
+import { alertModern, confirmModern } from './modern-modal.js';
 import { getAccountPhotoUrls, setAccountAvatar } from './account-avatar.js';
 import { cacheAccountPhoto, cacheAccountPhotoFromUrls, cacheProBadgeHint, clearCachedProBadgeHint, clearUserSessionCache, getCachedAccountAvatarHint, getCachedAccountPhoto, getCachedProBadgeHint } from './session-cache.js';
 
@@ -178,7 +178,7 @@ function updateProBadge(entitlement) {
     || currentUser?.uid === hint.uid
   );
   const hasPro = hasVerifiedPro || Boolean(
-    hintMatchesUser && hint.validUntil > Date.now()
+    hintMatchesUser && (hint.lifetime === true || hint.validUntil > Date.now())
   );
   if (proBadge) proBadge.hidden = !hasPro;
   document.title = hasPro ? `${originalTitle} | Pro` : originalTitle;
@@ -217,6 +217,8 @@ async function refreshProBadge(user) {
 
 function updateAuthControls(user, error) {
   document.body.classList.add('auth-state-ready');
+  document.body.classList.toggle('auth-user-signed-in', Boolean(user) && !error);
+  document.body.classList.toggle('auth-user-signed-out', !user || Boolean(error));
   document.body.classList.remove('account-avatar-cached');
   accountMenu?.menu.removeAttribute('data-auth-shell-visible');
   const previousUser = currentUser;
@@ -231,11 +233,11 @@ function updateAuthControls(user, error) {
       signInButton.hidden = false;
       signInButton.disabled = true;
       signInButton.querySelector('[data-auth-sign-in-label]').textContent = 'Cloud setup needed';
-      signInButton.title = error.message;
+      signInButton.title = googleSignInErrorMessage(error);
     }
     if (signOutButton) signOutButton.hidden = true;
     if (status) {
-      status.textContent = error.message;
+      status.textContent = googleSignInErrorMessage(error);
       status.classList.add('auth-error');
     }
     if (accountMenu) {
@@ -282,8 +284,6 @@ function updateAuthControls(user, error) {
       accountMenu.menu.open = false;
       const accountName = user.displayName?.trim() || user.email?.split('@')[0] || 'Google user';
       const initial = Array.from(accountName)[0]?.toLocaleUpperCase() || 'U';
-      accountMenu.avatar.textContent = initial;
-      accountMenu.largeAvatar.textContent = initial;
       accountMenu.name.textContent = accountName;
       accountMenu.email.textContent = user.email || '';
       accountMenu.summary.setAttribute('aria-label', `Account menu for ${accountName}`);
@@ -340,6 +340,14 @@ async function handleGoogleSignIn() {
   }
 }
 
+window.addEventListener('firebase-account-sign-in-disabled', () => {
+  void alertModern({
+    title: 'Your account is banned!',
+    message: googleSignInErrorMessage({ code: 'auth/user-disabled' }),
+    variant: 'default'
+  });
+});
+
 signInButton?.addEventListener('click', handleGoogleSignIn);
 accountMenu?.menuSignInButton.addEventListener('click', handleGoogleSignIn);
 
@@ -368,7 +376,7 @@ signOutButton?.addEventListener('click', async () => {
     document.body.classList.remove('auth-signout-pending');
     console.error('Could not sign out.', error);
     if (status) {
-      status.textContent = error.message || 'Could not sign out.';
+      status.textContent = 'Could not sign out. Please try again.';
       status.classList.add('auth-error');
     }
   } finally {

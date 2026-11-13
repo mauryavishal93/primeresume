@@ -13,14 +13,16 @@ function validServerEntitlement(entitlement) {
     && entitlement.source === 'server-verified'
     && ['active', 'inactive'].includes(entitlement.status)
     && typeof entitlement.planId === 'string'
-    && Number.isFinite(entitlement.validUntil)
+    && (entitlement.lifetime === true
+      ? entitlement.validUntil === null
+      : Number.isFinite(entitlement.validUntil))
   );
 }
 
 export function getCachedBillingEntitlement(user) {
   if (!user?.uid) return null;
   const cached = readSessionCache('billing-entitlement', user.uid, BILLING_ENTITLEMENT_CACHE_TTL_MS);
-  if (cached?.status === 'active' && cached.validUntil <= Date.now()) {
+  if (cached?.status === 'active' && cached.lifetime !== true && cached.validUntil <= Date.now()) {
     clearBillingEntitlementCache(user);
     return null;
   }

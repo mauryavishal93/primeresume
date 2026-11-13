@@ -283,6 +283,35 @@ body.auth-signout-pending .auth-actions [data-auth-sign-in],body.auth-signout-pe
  .about-page:not(.landing-page):not(.admin-page) .about-nav>a[href="/pricing.html"]{grid-area:plans;min-height:40px;min-width:0;padding:6px 4px;font-size:11px}
  .about-page:not(.landing-page):not(.admin-page) .about-nav>.about-editor{grid-area:editor;min-height:40px;min-width:0;padding:6px 4px;font-size:11px}
  .about-page:not(.landing-page):not(.admin-page) .about-nav>.site-account-menu{position:absolute;top:8px;right:12px;margin:0}
+ body.about-page.site-mobile-header:not(.landing-page):not(.admin-page) .about-nav{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-template-areas:"community plans editor" "auth theme .";align-items:center;justify-content:stretch;gap:6px;margin:0}
+ body.site-mobile-header.landing-page .about-nav{grid-template-columns:repeat(3,minmax(0,1fr));grid-template-areas:"community plans editor" "auth theme ."}
+ body.site-mobile-header:not(.admin-page) .about-nav>a[href="/community.html"]{grid-area:community;min-width:0;min-height:40px;padding:6px 4px;font-size:11px}
+ body.site-mobile-header:not(.admin-page) .about-nav>a[href="/pricing.html"],body.site-mobile-header:not(.admin-page) .about-nav>.about-editor{min-width:0;min-height:40px;padding:6px 4px;font-size:11px}
+ body.site-mobile-header:not(.admin-page) .about-nav>a[href="/pricing.html"]{grid-area:plans}
+ body.site-mobile-header:not(.admin-page) .about-nav>.about-editor{grid-area:editor}
+ body.site-mobile-header:not(.admin-page) .about-nav>.auth-actions{grid-area:auth;justify-self:start;min-width:0}
+ body.site-mobile-header:not(.admin-page) .about-nav .google-signin{display:inline-flex;width:76px;min-width:76px;max-width:100%;height:34px;min-height:34px;justify-content:center;gap:5px;padding:0 7px;border-radius:8px}
+ body.site-mobile-header:not(.admin-page) .about-nav .google-signin [data-auth-sign-in-label]{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+ body.site-mobile-header:not(.admin-page) .about-nav .google-signin::after{content:"Google";font-size:11px;font-weight:650}
+ body.site-mobile-header:not(.admin-page) .about-nav .google-signin-logo{width:16px;height:16px;flex-basis:16px}
+ body.site-mobile-header:not(.admin-page) .about-nav>.theme-switch{grid-area:theme;justify-self:center;min-height:34px}
+ body.site-mobile-header.auth-user-signed-in:not(.admin-page) .about-nav{grid-template-areas:"community plans editor"}
+ body.site-mobile-header.auth-user-signed-in:not(.admin-page) .about-nav>.auth-actions{display:none}
+ body.site-mobile-header.landing-page .about-nav>.landing-header-actions{display:contents}
+ body.site-mobile-header.landing-page .about-nav>.landing-header-actions>a[href="/pricing.html"]{grid-area:plans}
+ body.site-mobile-header.landing-page .about-nav>.landing-header-actions>.about-editor{grid-area:editor}
+ body.site-mobile-header.admin-page .about-nav{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-template-areas:"community plans editor" "auth . .";align-items:center;justify-content:stretch;gap:6px;width:100%;margin:0}
+ body.site-mobile-header.admin-page .about-nav>.auth-actions{display:flex;grid-area:auth;min-width:0}
+ body.site-mobile-header.admin-page .about-nav .google-signin{display:inline-flex;width:76px;min-width:76px;max-width:100%;height:34px;min-height:34px;justify-content:center;gap:5px;padding:0 7px;border-radius:8px}
+ body.site-mobile-header.admin-page .about-nav .google-signin [data-auth-sign-in-label]{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+ body.site-mobile-header.admin-page .about-nav .google-signin-mark{display:grid;place-items:center;width:16px;height:16px;border:1px solid #dadce0;border-radius:50%;color:#4285f4;background:#fff;font-size:12px;font-weight:800;line-height:1}
+ body.site-mobile-header.admin-page .about-nav .google-signin::after{content:"Google";font-size:11px;font-weight:650}
+ body.site-mobile-header.admin-page.auth-user-signed-in .about-nav{grid-template-areas:"community plans editor"}
+ body.site-mobile-header.admin-page.auth-user-signed-in .about-nav>.auth-actions{display:none}
+ body.site-mobile-header.admin-page .about-nav .nav-link{min-width:0;min-height:40px;padding:6px 4px;font-size:11px;white-space:nowrap}
+ body.site-mobile-header.admin-page .about-nav .nav-link[href="/community.html"]{grid-area:community}
+ body.site-mobile-header.admin-page .about-nav .nav-link[href="/pricing.html"]{grid-area:plans}
+ body.site-mobile-header.admin-page .about-nav .nav-link[href="/editor.html"]{grid-area:editor}
 }
 :root[data-theme=light] body.about-page{background:radial-gradient(ellipse at 50% -18%,#fffefa 0,#f4f0e7 48%,#ebe7df 100%)}
 :root[data-theme=light] .about-pro-brand-badge{border-color:#c9b487;background:#f7f0df;color:#765b2e}

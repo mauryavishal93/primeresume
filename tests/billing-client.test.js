@@ -82,6 +82,22 @@ test('Pro badge hint renders from verified cache before auth and expires with th
   assert.equal(getCachedProBadgeHint(), null);
 }));
 
+test('lifetime Pro access remains valid in entitlement and badge caches without an expiry date', async () => withSessionStorage(() => {
+  const user = { uid: 'user-lifetime' };
+  const entitlement = {
+    planId: 'pro',
+    billingPlan: 'voucher',
+    status: 'active',
+    source: 'server-verified',
+    lifetime: true,
+    validUntil: null
+  };
+  writeSessionCache('billing-entitlement', user.uid, entitlement);
+  cacheProBadgeHint(user.uid, entitlement);
+  assert.deepEqual(getCachedBillingEntitlement(user), entitlement);
+  assert.deepEqual(getCachedProBadgeHint(), { uid: user.uid, lifetime: true });
+}));
+
 test('billing entitlement cache is server-originated, short lived, and reused across pages', async () => withSessionStorage(async () => {
   const user = { uid: 'user-1' };
   const entitlement = {
