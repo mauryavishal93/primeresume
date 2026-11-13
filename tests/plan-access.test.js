@@ -377,9 +377,9 @@ test('photo templates show an accessible avatar placeholder when no photo is upl
 
 test('flow pagination continues entry bullets without repeating the role header', () => {
   const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
-  assert.match(source, /if\(!a\.continuation\)el\.innerHTML=/);
-  assert.match(source, /const first=cont&&a\.k==='li'\?\{k:'entry',e:a\.e,continuation:true\}:a;/);
-  assert.match(source, /if\(cont&&a\.k==='li'\)appendAtom\(placed\.shell,a,placed\.st,s\);/);
+  assert.match(source, /if\(!a\.continuation\)\{const role=.*?el\.innerHTML=/);
+  assert.match(source, /const first=cont&&\(a\.k==='li'\|\|a\.k==='detail-paragraph'\)\?\{k:'entry',e:a\.e,continuation:true\}:a;/);
+  assert.match(source, /if\(cont&&\(a\.k==='li'\|\|a\.k==='detail-paragraph'\)\)appendAtom\(placed\.shell,a,placed\.st,s\);/);
   assert.match(source, /addEventListener\('focusout',e=>\{[\s\S]*?recordHistory\(before\);saveLocal\(\);renderSheets\(\);/);
 });
 
@@ -398,7 +398,7 @@ test('experience bullet Backspace and Delete merge adjacent points at line bound
   assert.match(source, /const rows=Array\.from\(document\.querySelectorAll\('#sheets \[data-entry-field="detail"\]'\)\)\.filter\(item=>item\.dataset\.sectionId===sectionId&&item\.dataset\.entry===entryIndex\)/);
   assert.match(source, /details\.splice\(priorIndex,count,joined\)/);
   assert.match(source, /itemIndex-count\+joinedCount/);
-  assert.match(source, /if\(backward\)\{[\s\S]*?prior\.focus\(\)/);
+  assert.match(source, /if\(backward\)\{[\s\S]*?focusDetailEditor\(prior\)/);
 });
 
 test('experience deletion never selects an entire neighboring line or document', () => {
@@ -410,7 +410,7 @@ test('experience deletion never selects an entire neighboring line or document',
 
 test('experience content reflows to the next page while the user is typing', () => {
   const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
-  assert.match(source, /function reflowOverflowingDetail\(el,force=false\)/);
+  assert.match(source, /function reflowOverflowingDetail\(el,force=false,immediate=false\)/);
   assert.match(source, /if\(!force&&el\.getBoundingClientRect\(\)\.bottom<=limit\+\.5\)return/);
   assert.match(source, /try\{renderSheets\(\)\}finally\{reflowingDetail=false\}/);
   assert.match(source, /const moved=Array\.from\(document\.querySelectorAll\('#sheets \[data-entry-field="detail"\]'\)\)/);

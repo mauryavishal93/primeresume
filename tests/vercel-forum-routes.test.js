@@ -6,11 +6,17 @@ import { app } from '../backend/server.js';
 
 test('Vercel rewrites nested API requests through one Express function', async () => {
   const configuration = JSON.parse(await readFile(new URL('../vercel.json', import.meta.url), 'utf8'));
-  assert.deepEqual(configuration.rewrites, [{
-    source: '/api/:path*',
-    missing: [{ type: 'query', key: '__api_path' }],
-    destination: '/api/handler?__api_path=:path*'
-  }]);
+  assert.deepEqual(configuration.rewrites, [
+    {
+      source: '/file/d/:shareId/view',
+      destination: '/editor.html?share=:shareId&pdf=1'
+    },
+    {
+      source: '/api/:path*',
+      missing: [{ type: 'query', key: '__api_path' }],
+      destination: '/api/handler?__api_path=:path*'
+    }
+  ]);
 
   const { default: handler } = await import('../api/handler.js');
   const server = createServer(handler);

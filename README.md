@@ -22,7 +22,7 @@ The admin page is available at `http://localhost:3000/admin.html` when using `np
 
 ## Deploy on Vercel
 
-Import this repository into Vercel with the repository root as the project root. `vercel.json` runs `npm run build` and publishes Vite's `dist/` output. The catch-all function in `api/[...path].js` runs the Express API directly on Vercel; no Render backend is required. Use Node.js 22.x.
+Import this repository into Vercel with the repository root as the project root. `vercel.json` runs `npm run build` and publishes Vite's `dist/` output. The `api/handler.js` function forwards API requests to the Express application in `backend/server.js`; no Render backend is required. Use Node.js 22.x.
 
 Add `FIREBASE_SERVICE_ACCOUNT_JSON` and `ADMIN_EMAILS` under **Project Settings → Environment Variables** in Vercel, then redeploy. Add the Razorpay and billing release variables there only when enabling paid checkout. Do not copy `.env` into the repository or expose server credentials as `VITE_*` variables.
 
@@ -41,11 +41,12 @@ The production build is generated in `dist/`. `npm start` serves the site and bi
 
 The root `render.yaml` configures a Render Node web service that serves the built site and trusted billing API. Push it to the `main` branch, then in Render choose **New > Blueprint** and connect `mauryavishal93/primeresume`. Render runs `npm install && npm run build`, then `npm start`. Approve the `buildmyportfolio` service to start the deploy. Because the GitHub repository is private, authorize Render to access it when prompted. Configure the secret environment variables described below before enabling billing.
 
-The site is multi-page: `/` opens the editor; `/editor.html` is the editor page; `/about.html` is the About page; `/privacy.html` is the privacy policy; `/pricing.html` is the plan and purchase page; `/terms.html` describes service terms; and `/refunds.html` describes refund status.
+The site is multi-page. Vercel serves `frontend/index.html` at `/`; the Express server redirects `/` to `/home.html`. `/editor.html` is the editor; `/about.html` is the About page; `/privacy.html` is the privacy policy; `/pricing.html` is the plan and purchase page; `/terms.html` describes service terms; and `/refunds.html` describes refund status.
 
 ## Project structure
 
-- `frontend/index.html`, `frontend/editor.html`, `frontend/about.html`, and `frontend/privacy.html` are the main HTML entry points.
+- `frontend/` contains the multi-page HTML entry points, browser assets, styles, and client-side modules.
+- `api/handler.js` adapts Vercel API requests to the Express app; `backend/server.js` defines API and static-site routes.
 - `frontend/pricing.html`, `frontend/src/pricing.js`, and `frontend/src/billing-client.js` provide the signed-in monthly/yearly purchase experience and call the same-origin billing API.
 - `frontend/src/main.js` owns editor state, resume rendering, editing controls, local autosave, JSON import/export, and PDF workflows.
 - `Templates/` contains the resume template registry and each template's metadata and styles; the six Free templates and 19 Pro templates share the editor renderer.
@@ -56,7 +57,18 @@ The site is multi-page: `/` opens the editor; `/editor.html` is the editor page;
 - `firestore.rules` restricts resume documents to their authenticated owner and explicitly blocks all client access to billing documents. `firebase.json` maps the rules for Firebase CLI rules-only deployments; it does not configure Firebase Hosting.
 - `frontend/src/ats-scoring.js`, `frontend/src/cover-letter.js`, `frontend/src/cover-letter-pdf.js`, and `frontend/src/zoom.js` contain focused editor helpers.
 - `frontend/src/style.css` and `frontend/src/about.css` contain editor and informational-page styles.
-- `vite.config.js` configures the frontend build and local API proxy. `tests/` contains the Node.js test suite.
+- `vite.config.js` configures the frontend build and local API proxy. `vercel.json` and `render.yaml` describe the two deployment targets. `tests/` contains the Node.js regression suite.
+
+## Checks
+
+Run the automated regression suite and production build before submitting changes:
+
+```sh
+npm test
+npm run build
+```
+
+GitHub Actions runs both checks on Node.js 22 for pushes and pull requests.
 
 ## Data flow
 

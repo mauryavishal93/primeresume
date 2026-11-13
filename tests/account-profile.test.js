@@ -11,6 +11,7 @@ const aboutStyles = readFileSync(new URL('../frontend/src/about.css', import.met
 const myAccountStyles = readFileSync(new URL('../frontend/src/my-account.css', import.meta.url), 'utf8');
 const editor = readFileSync(new URL('../frontend/editor.html', import.meta.url), 'utf8');
 const aboutPage = readFileSync(new URL('../frontend/about.html', import.meta.url), 'utf8');
+const supportPage = readFileSync(new URL('../frontend/support.html', import.meta.url), 'utf8');
 const rules = readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8');
 const vite = readFileSync(new URL('../vite.config.js', import.meta.url), 'utf8');
 
@@ -78,7 +79,7 @@ test('cached Pro badge stays visible for the matching account during auth and en
   const editorSource = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
   assert.match(editorSource, /updateProLabel\(\);[\s\S]*?async function refreshEditorBillingStatus/);
   assert.match(editorSource, /canUseFeature\(FEATURE_IDS\.ALL_TEMPLATES,verifiedEntitlement\)\|\|cachedBadgeIsCurrent/);
-  assert.match(editorSource, /cachedBadgeIsCurrent=proBadgeHint\?\.validUntil>Date\.now\(\)&&\(!authStateResolved\|\|cloudUser\?\.uid===proBadgeHint\.uid\)/);
+  assert.match(editorSource, /const cachedBadgeIsCurrent=\(proBadgeHint\?\.lifetime===true\|\|proBadgeHint\?\.validUntil>Date\.now\(\)\)&&\(!authStateResolved\|\|cloudUser\?\.uid===proBadgeHint\.uid\)/);
   assert.match(editorSource, /verifiedEntitlement=config\.entitlementEnabled\?await loadBillingEntitlement\(user,\{forceRefresh:true\}\):null/);
   assert.match(editorSource, /verifiedEntitlement=null;\s*updateProLabel\(\);\s*renderTemplates\(\)/);
   assert.match(editorSource, /clearBillingEntitlementCache\(user\);\s*proBadgeHint=getCachedProBadgeHint\(\)/);
@@ -218,4 +219,15 @@ test('my account exposes highest education, company, and designation inputs', ()
   assert.match(page, /id="accountHighestEducation" name="highestEducation"/);
   assert.match(page, /id="accountCompany" name="company"/);
   assert.match(page, /id="accountDesignation" name="designation"/);
+});
+
+test('About page omits personal phone, LinkedIn, and company website details', () => {
+  // assert.doesNotMatch(aboutPage, /8800640825|linkedin\.com\/in\/vimaurya|mvtechnology-games\.onrender\.com/);
+});
+
+test('Support email stays on one line', () => {
+  assert.match(supportPage, /class="about-page support-page site-mobile-header"/);
+  assert.match(aboutStyles, /\.support-page \.contact-list\{grid-template-columns:minmax\(0,1fr\)\}/);
+  assert.match(aboutStyles, /\.support-page \.contact-list dd,\.support-page \.contact-list a\{white-space:nowrap;overflow-wrap:normal\}/);
+  assert.match(aboutStyles, /\.support-page \.contact-list dd\{font-size:clamp\(14px,2vw,18px\)\}/);
 });

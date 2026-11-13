@@ -101,6 +101,9 @@ body.auth-signout-pending .auth-actions [data-auth-sign-in],body.auth-signout-pe
 .contact-list dt{margin-bottom:4px;color:#9fb1c6;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.08em}
 .contact-list dd{margin:0;overflow-wrap:anywhere}
 .contact-list a{color:#9ec9ff;text-decoration:none}
+.support-page .contact-list{grid-template-columns:minmax(0,1fr)}
+.support-page .contact-list dd,.support-page .contact-list a{white-space:nowrap;overflow-wrap:normal}
+.support-page .contact-list dd{font-size:clamp(14px,2vw,18px)}
 .about-page a:focus-visible{outline:3px solid rgba(168,135,75,.35);outline-offset:3px}
 .architecture-diagram{margin-top:18px;min-height:620px;width:100%;display:flex;justify-content:center;align-items:center;background:transparent;overflow-x:auto}
 .architecture-diagram svg{width:100%;max-width:1500px;height:auto;display:block;overflow:visible}
