@@ -159,6 +159,16 @@ function forumAuthorName(user) {
     || 'Google user';
 }
 
+function forumAuthorCompany(value) {
+  return validForumText(value, 1, 100) || '';
+}
+
+function accountProfileText(value) {
+  if (typeof value !== 'string') return '';
+  const text = value.trim();
+  return text.toLowerCase() === 'undefined' ? '' : text;
+}
+
 function forumSnapshotExists(snapshot) {
   return Boolean(snapshot?.exists);
 }
@@ -172,6 +182,7 @@ function publicForumPost(document, viewerUid = null, includeDeleted = false) {
     id: document.id,
     ...post,
     authorName: forumAuthorName({ name: data.authorName }),
+    authorCompany: forumAuthorCompany(data.authorCompany),
     isOwner: Boolean(viewerUid && viewerUid === data.authorUid),
     createdAt: Number.isFinite(data.createdAt) ? data.createdAt : 0,
     updatedAt: Number.isFinite(data.updatedAt) ? data.updatedAt : 0,
@@ -450,6 +461,7 @@ async function loadForumContent(db, kind, cursor, userUid = null, postFilters = 
         id: document.id,
         ...post,
         authorName: forumAuthorName({ name: data.authorName }),
+        authorCompany: forumAuthorCompany(data.authorCompany),
         ...(!userUid ? { authorUid: data.authorUid || '' } : {}),
         createdAt: Number.isFinite(data.createdAt) ? data.createdAt : 0,
         updatedAt: Number.isFinite(data.updatedAt) ? data.updatedAt : 0,
@@ -1075,17 +1087,30 @@ app.get('/api/account/profile', requireFirebaseUser, async (request, response) =
     const { db } = await getFirebaseAdmin();
     const snapshot = await db.doc(`users/${request.user.uid}/profile/account`).get();
     if (!snapshot.exists) {
-      response.json({ mobileNumber: '', photoDataUrl: '' });
+      response.json({
+        mobileNumber: '',
+        photoDataUrl: '',
+        highestEducation: '',
+        company: '',
+        designation: ''
+      });
       return;
     }
-    const { mobileNumber, photoDataUrl = '' } = snapshot.data();
+    const savedProfile = snapshot.data();
+    const { mobileNumber, photoDataUrl = '' } = savedProfile;
+    const highestEducation = accountProfileText(savedProfile.highestEducation);
+    const company = accountProfileText(savedProfile.company);
+    const designation = accountProfileText(savedProfile.designation);
     if (typeof mobileNumber !== 'string' || typeof photoDataUrl !== 'string'
+      || typeof highestEducation !== 'string' || highestEducation.length > 100
+      || typeof company !== 'string' || company.length > 100
+      || typeof designation !== 'string' || designation.length > 100
       || photoDataUrl.length > 140000
       || (photoDataUrl && !/^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(photoDataUrl))) {
       response.status(500).json({ error: 'Your saved account details are invalid. Contact support for help.' });
       return;
     }
-    response.json({ mobileNumber, photoDataUrl });
+    response.json({ mobileNumber, photoDataUrl, highestEducation, company, designation });
   } catch (error) {
     console.error('Could not load the account profile.', error);
     response.status(500).json({ error: 'Could not load your account details. Please try again.' });
@@ -1097,6 +1122,15 @@ app.put('/api/account/profile', requireFirebaseUser, async (request, response) =
   const displayName = typeof request.body?.displayName === 'string' ? request.body.displayName.trim() : '';
   const mobileNumber = typeof request.body?.mobileNumber === 'string' ? request.body.mobileNumber.trim() : null;
   const photoDataUrl = typeof request.body?.photoDataUrl === 'string' ? request.body.photoDataUrl : null;
+  const highestEducation = request.body?.highestEducation === undefined
+    ? undefined
+    : typeof request.body.highestEducation === 'string' ? accountProfileText(request.body.highestEducation) : null;
+  const company = request.body?.company === undefined
+    ? undefined
+    : typeof request.body.company === 'string' ? accountProfileText(request.body.company) : null;
+  const designation = request.body?.designation === undefined
+    ? undefined
+    : typeof request.body.designation === 'string' ? accountProfileText(request.body.designation) : null;
   if (!displayName || displayName.length > 80) {
     response.status(400).json({ error: 'Enter a name between 1 and 80 characters.' });
     return;
@@ -1112,17 +1146,37 @@ app.put('/api/account/profile', requireFirebaseUser, async (request, response) =
     response.status(400).json({ error: 'Choose a valid profile image smaller than 100 KB.' });
     return;
   }
+  if ([highestEducation, company, designation].some(value => value !== undefined && (value === null || value.length > 100))) {
+    response.status(400).json({ error: 'Education, company, and designation must each be 100 characters or fewer.' });
+    return;
+  }
   try {
     const { auth, db } = await getFirebaseAdmin();
+    const profileReference = db.doc(`users/${request.user.uid}/profile/account`);
+    const existingProfile = await profileReference.get();
+    const existingFields = existingProfile.exists ? existingProfile.data() : {};
+    const savedHighestEducation = highestEducation ?? accountProfileText(existingFields.highestEducation);
+    const savedCompany = company ?? accountProfileText(existingFields.company);
+    const savedDesignation = designation ?? accountProfileText(existingFields.designation);
     await Promise.all([
       auth.updateUser(request.user.uid, { displayName }),
-      db.doc(`users/${request.user.uid}/profile/account`).set({
+      profileReference.set({
         mobileNumber,
         photoDataUrl,
+        highestEducation: savedHighestEducation,
+        company: savedCompany,
+        designation: savedDesignation,
         updatedAt: new Date()
-      })
+      }, { merge: true })
     ]);
-    response.json({ displayName, mobileNumber, photoDataUrl });
+    response.json({
+      displayName,
+      mobileNumber,
+      photoDataUrl,
+      highestEducation: savedHighestEducation,
+      company: savedCompany,
+      designation: savedDesignation
+    });
   } catch (error) {
     console.error('Could not save the account profile.', error);
     response.status(500).json({ error: 'Could not save your account details. Please try again.' });
@@ -1504,6 +1558,7 @@ app.post('/api/forum/posts', requireFirebaseUser, async (request, response) => {
       ...post,
       authorUid: request.user.uid,
       authorName: forumAuthorName(request.user),
+      authorCompany: forumAuthorCompany((await db.doc(`users/${request.user.uid}/profile/account`).get()).data()?.company),
       createdAt: Date.now(),
       updatedAt: Date.now()
     };
@@ -1529,6 +1584,7 @@ app.post('/api/forum/posts', requireFirebaseUser, async (request, response) => {
         id: reference.id,
         ...post,
         authorName: record.authorName,
+        authorCompany: record.authorCompany,
         isOwner: true,
         createdAt: record.createdAt,
         updatedAt: record.updatedAt
@@ -1595,6 +1651,7 @@ app.patch('/api/forum/posts/:postId', requireFirebaseUser, async (request, respo
         id: postId,
         ...post,
         authorName: forumAuthorName(request.user),
+        authorCompany: forumAuthorCompany(current.authorCompany),
         isOwner: true,
         createdAt: current.createdAt,
         updatedAt: updated.updatedAt

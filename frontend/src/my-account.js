@@ -6,6 +6,9 @@ import { formatNationalPhoneNumber, formatPhoneInput, getDefaultPhoneCountry, ge
 const form = document.querySelector('#accountForm');
 const fields = document.querySelector('#accountFields');
 const nameInput = document.querySelector('#accountName');
+const highestEducationInput = document.querySelector('#accountHighestEducation');
+const companyInput = document.querySelector('#accountCompany');
+const designationInput = document.querySelector('#accountDesignation');
 const emailInput = document.querySelector('#accountEmail');
 const mobileInput = document.querySelector('#accountMobile');
 const countrySelect = document.querySelector('#accountCountry');
@@ -123,6 +126,9 @@ async function updateAccountPage(user, error) {
     countrySelect.value = savedPhone.country;
     sizeCountrySelect();
     mobileInput.value = savedPhone.nationalNumber;
+    highestEducationInput.value = profile.highestEducation ?? '';
+    companyInput.value = profile.company ?? '';
+    designationInput.value = profile.designation ?? '';
     photoDataUrl = profile.photoDataUrl;
     if (photoDataUrl) cacheAccountPhoto(user.uid, photoDataUrl);
     updatePhotoPreview();
@@ -198,9 +204,16 @@ form.addEventListener('submit', async event => {
   showStatus('Saving your account details…');
   try {
     const phone = parseAccountPhoneNumber(mobileInput.value, countrySelect.value);
-    const profile = await saveAccountProfile(user, nameInput.value, phone?.number || '', photoDataUrl);
+    const profile = await saveAccountProfile(user, nameInput.value, phone?.number || '', photoDataUrl, {
+      highestEducation: highestEducationInput.value,
+      company: companyInput.value,
+      designation: designationInput.value
+    });
     if (currentUser?.uid !== user.uid) return;
     nameInput.value = profile.name;
+    highestEducationInput.value = profile.highestEducation ?? '';
+    companyInput.value = profile.company ?? '';
+    designationInput.value = profile.designation ?? '';
     const savedPhone = splitAccountPhoneNumber(profile.mobile, defaultPhoneCountry);
     countrySelect.value = savedPhone.country;
     sizeCountrySelect();

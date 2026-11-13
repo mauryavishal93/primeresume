@@ -99,6 +99,11 @@ const previousAdmin = app.locals.firebaseAdmin;
 
 before(async () => {
   database = createFakeDatabase();
+  database.records.set('users/author-1/profile/account', {
+    highestEducation: 'Bachelor of Science',
+    company: 'Example Inc.',
+    designation: 'Product Designer'
+  });
   app.locals.firebaseAdmin = {
     auth: {
       verifyIdToken: async token => {
@@ -165,6 +170,7 @@ test('public community feed and authenticated post, rating, and comment ownershi
   });
   assert.equal(review.response.status, 201);
   assert.equal(review.data.post.authorName, 'Alex Author');
+  assert.equal(review.data.post.authorCompany, 'Example Inc.');
   assert.equal(review.data.post.rating, 5);
   const reviewId = review.data.post.id;
 
@@ -183,6 +189,7 @@ test('public community feed and authenticated post, rating, and comment ownershi
   assert.equal(feed.data.ratingSummary.count, 1);
   assert.equal(feed.data.ratingSummary.average, 5);
   assert.equal(feed.data.posts.every(post => !Object.hasOwn(post, 'authorUid')), true);
+  assert.equal(feed.data.posts.find(post => post.id === reviewId).authorCompany, 'Example Inc.');
   assert.equal(feed.data.posts.some(post => post.isOwner), false);
   const authorFeed = await request('/api/forum/posts', { token: 'author-token' });
   assert.equal(authorFeed.data.posts.find(post => post.id === reviewId).isOwner, true);

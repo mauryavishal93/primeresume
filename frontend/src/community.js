@@ -152,8 +152,11 @@ function createPostCard(post) {
   article.id = `community-post-${post.id}`;
 
   const metadata = createElement('div', 'community-post-meta');
+  const author = post.authorCompany
+    ? `${post.authorName || 'Google user'} · ${post.authorCompany}`
+    : post.authorName || 'Google user';
   metadata.append(
-    createElement('span', 'community-post-author', post.authorName || 'Google user'),
+    createElement('span', 'community-post-author', author),
     createElement('span', 'community-post-type', post.type === 'review' ? 'App review' : 'Discussion'),
     createElement('time', '', formatDate(post.createdAt))
   );

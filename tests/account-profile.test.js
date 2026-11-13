@@ -206,7 +206,16 @@ test('account phone selection formats and saves country-aware international numb
 test('account profile rules scope mobile data to its owner and reject extra fields', () => {
   assert.match(rules, /match \/users\/\{userId\}\/profile\/account/);
   assert.match(rules, /allow get: if request\.auth != null && request\.auth\.uid == userId/);
-  assert.match(rules, /keys\(\)\.hasOnly\(\['mobileNumber', 'photoDataUrl', 'updatedAt'\]\)/);
+  assert.match(rules, /keys\(\)\.hasOnly\(\['mobileNumber', 'photoDataUrl', 'highestEducation', 'company', 'designation', 'updatedAt'\]\)/);
+  assert.match(rules, /highestEducation\.size\(\) <= 100/);
+  assert.match(rules, /company\.size\(\) <= 100/);
+  assert.match(rules, /designation\.size\(\) <= 100/);
   assert.match(rules, /photoDataUrl\.size\(\) <= 140000/);
   assert.match(rules, /allow delete: if false/);
+});
+
+test('my account exposes highest education, company, and designation inputs', () => {
+  assert.match(page, /id="accountHighestEducation" name="highestEducation"/);
+  assert.match(page, /id="accountCompany" name="company"/);
+  assert.match(page, /id="accountDesignation" name="designation"/);
 });

@@ -83,10 +83,19 @@ export function createFirebaseCloudClient({ config = firebaseConfig, loadSdk = l
     }
   }
 
-  function validateAccountProfile(displayName, mobileNumber, photoDataUrl = '') {
+  function validateAccountProfile(displayName, mobileNumber, photoDataUrl = '', profileDetails = {}) {
     const name = typeof displayName === 'string' ? displayName.trim() : '';
     const mobile = typeof mobileNumber === 'string' ? mobileNumber.trim() : null;
     const photo = typeof photoDataUrl === 'string' ? photoDataUrl : null;
+    const highestEducation = profileDetails.highestEducation === undefined
+      ? ''
+      : typeof profileDetails.highestEducation === 'string' ? profileDetails.highestEducation.trim() : null;
+    const company = profileDetails.company === undefined
+      ? ''
+      : typeof profileDetails.company === 'string' ? profileDetails.company.trim() : null;
+    const designation = profileDetails.designation === undefined
+      ? ''
+      : typeof profileDetails.designation === 'string' ? profileDetails.designation.trim() : null;
     if (!name || name.length > 80) throw new Error('Enter a name between 1 and 80 characters.');
     if (mobile === null || mobile.length > 24 || !/^[+0-9() .-]*$/.test(mobile)
       || (mobile && (mobile.match(/\d/g) || []).length < 7)
@@ -97,7 +106,16 @@ export function createFirebaseCloudClient({ config = firebaseConfig, loadSdk = l
       || (photo && !/^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(photo))) {
       throw new Error('Choose a valid profile image smaller than 100 KB.');
     }
-    return { name, mobile, photo };
+    if ([highestEducation, company, designation].some(value => value === null || value.length > 100)) {
+      throw new Error('Education, company, and designation must each be 100 characters or fewer.');
+    }
+    return { name, mobile, photo, highestEducation, company, designation };
+  }
+
+  function accountProfileField(value) {
+    if (typeof value !== 'string') return '';
+    const text = value.trim();
+    return text.toLowerCase() === 'undefined' ? '' : text;
   }
 
   async function getAccountProfile(user) {
@@ -112,17 +130,23 @@ export function createFirebaseCloudClient({ config = firebaseConfig, loadSdk = l
     const profile = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(profile.error || 'Could not load your account details. Please try again.');
     const { mobileNumber, photoDataUrl = '' } = profile;
+    const highestEducation = accountProfileField(profile.highestEducation);
+    const company = accountProfileField(profile.company);
+    const designation = accountProfileField(profile.designation);
     if (typeof mobileNumber !== 'string' || typeof photoDataUrl !== 'string'
+      || typeof highestEducation !== 'string' || highestEducation.length > 100
+      || typeof company !== 'string' || company.length > 100
+      || typeof designation !== 'string' || designation.length > 100
       || photoDataUrl.length > 140000
       || (photoDataUrl && !/^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(photoDataUrl))) {
       throw new Error('Your saved account details are invalid. Contact support for help.');
     }
-    return { mobileNumber, photoDataUrl };
+    return { mobileNumber, photoDataUrl, highestEducation, company, designation };
   }
 
-  async function saveAccountProfile(user, displayName, mobileNumber, photoDataUrl = '') {
+  async function saveAccountProfile(user, displayName, mobileNumber, photoDataUrl = '', profileDetails = {}) {
     if (!user?.uid) throw new Error('Sign in to update your account details.');
-    const profile = validateAccountProfile(displayName, mobileNumber, photoDataUrl);
+    const profile = validateAccountProfile(displayName, mobileNumber, photoDataUrl, profileDetails);
     const { auth } = await getServices();
     requireCurrentAccount(auth, user.uid);
     const token = await getFirebaseIdToken(user);
@@ -135,16 +159,29 @@ export function createFirebaseCloudClient({ config = firebaseConfig, loadSdk = l
       body: JSON.stringify({
         displayName: profile.name,
         mobileNumber: profile.mobile,
-        photoDataUrl: profile.photo
+        photoDataUrl: profile.photo,
+        highestEducation: profile.highestEducation,
+        company: profile.company,
+        designation: profile.designation
       })
     });
     const savedProfile = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(savedProfile.error || 'Could not save your account details. Please try again.');
+    if (typeof savedProfile.displayName !== 'string' || typeof savedProfile.mobileNumber !== 'string'
+      || typeof savedProfile.photoDataUrl !== 'string'
+      || typeof savedProfile.highestEducation !== 'string'
+      || typeof savedProfile.company !== 'string'
+      || typeof savedProfile.designation !== 'string') {
+      throw new Error('Your account details could not be confirmed as saved. Reload the page and try again.');
+    }
     await auth.currentUser.reload();
     return {
       name: savedProfile.displayName,
       mobile: savedProfile.mobileNumber,
-      photo: savedProfile.photoDataUrl
+      photo: savedProfile.photoDataUrl,
+      highestEducation: savedProfile.highestEducation,
+      company: savedProfile.company,
+      designation: savedProfile.designation
     };
   }
 

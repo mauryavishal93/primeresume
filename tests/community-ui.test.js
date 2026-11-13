@@ -67,6 +67,10 @@ test('Community typography uses compact forum-style heading and post text sizes'
   assert.match(styles, /\.community-hero h1\s*\{[\s\S]*?font-size:\s*clamp\(1\.65rem, 7vw, 2rem\)/);
 });
 
+test('Community post byline includes the author company when provided', () => {
+  assert.match(source, /post\.authorCompany\s*\?\s*`\$\{post\.authorName \|\| 'Google user'\} · \$\{post\.authorCompany\}`/);
+});
+
 test('expanded comments use a compact inline composer and a minimal empty state', () => {
   assert.match(source, /textarea\.rows = 1/);
   assert.match(source, /textarea\.setAttribute\('aria-label', 'Add a comment'\)/);

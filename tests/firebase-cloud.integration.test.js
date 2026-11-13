@@ -150,11 +150,23 @@ function createFakeFirebase({ popupError = null, popupDelay = null, signOutError
       return respond(false, { error: 'Not found.' }, 404);
     }
     const key = 'users/user-1/profile/account';
-    const record = records.get(key) || { mobileNumber: '', photoDataUrl: '' };
+    const record = records.get(key) || {
+      mobileNumber: '',
+      photoDataUrl: '',
+      highestEducation: '',
+      company: '',
+      designation: ''
+    };
     if (options.method === 'PUT') {
       const body = JSON.parse(options.body);
       Object.assign(auth.currentUser, { displayName: body.displayName });
-      records.set(key, { mobileNumber: body.mobileNumber, photoDataUrl: body.photoDataUrl });
+      records.set(key, {
+        mobileNumber: body.mobileNumber,
+        photoDataUrl: body.photoDataUrl,
+        highestEducation: body.highestEducation,
+        company: body.company,
+        designation: body.designation
+      });
       return { ok: true, json: async () => body };
     }
     return { ok: true, json: async () => record };
@@ -249,25 +261,42 @@ test('Firebase sign-out errors are surfaced and the same client can retry', asyn
   assert.equal(firebase.signedOut, true);
 });
 
-test('account profile reads and writes mobile privately and updates only the signed-in display name', async () => {
+test('account profile reads and writes personal details and updates only the signed-in display name', async () => {
   const firebase = createFakeFirebase();
   const user = firebase.auth.currentUser;
 
-  assert.deepEqual(await firebase.client.getAccountProfile(user), { mobileNumber: '', photoDataUrl: '' });
+  assert.deepEqual(await firebase.client.getAccountProfile(user), {
+    mobileNumber: '',
+    photoDataUrl: '',
+    highestEducation: '',
+    company: '',
+    designation: ''
+  });
   const photoDataUrl = 'data:image/jpeg;base64,/9j/2Q==';
-  assert.deepEqual(await firebase.client.saveAccountProfile(user, 'Updated Name', '+1 (415) 555-0134', photoDataUrl), {
+  assert.deepEqual(await firebase.client.saveAccountProfile(user, 'Updated Name', '+1 (415) 555-0134', photoDataUrl, {
+    highestEducation: 'Bachelor of Science',
+    company: 'Example Inc.',
+    designation: 'Product Designer'
+  }), {
     name: 'Updated Name',
     mobile: '+1 (415) 555-0134',
-    photo: photoDataUrl
+    photo: photoDataUrl,
+    highestEducation: 'Bachelor of Science',
+    company: 'Example Inc.',
+    designation: 'Product Designer'
   });
   assert.equal(user.displayName, 'Updated Name');
   assert.deepEqual(await firebase.client.getAccountProfile(user), {
     mobileNumber: '+1 (415) 555-0134',
-    photoDataUrl
+    photoDataUrl,
+    highestEducation: 'Bachelor of Science',
+    company: 'Example Inc.',
+    designation: 'Product Designer'
   });
   assert.ok(firebase.records.has('users/user-1/profile/account'));
   assert.equal(firebase.records.get('users/user-1/profile/account').mobileNumber, '+1 (415) 555-0134');
   assert.equal(firebase.records.get('users/user-1/profile/account').photoDataUrl, photoDataUrl);
+  assert.equal(firebase.records.get('users/user-1/profile/account').company, 'Example Inc.');
 
   await assert.rejects(firebase.client.getAccountProfile({ uid: 'someone-else' }), /Sign in to the account/);
   await assert.rejects(firebase.client.saveAccountProfile(user, '  ', '1234567'), /Enter a name/);
