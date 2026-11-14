@@ -228,6 +228,17 @@ test('Google auth, token ownership, and auth observer lifecycle use the signed-i
   stopObserving();
 });
 
+test('Google popup opens synchronously after auth services are ready', async () => {
+  const firebase = createFakeFirebase();
+  firebase.client.observeAuth(() => {});
+  await new Promise(resolve => setImmediate(resolve));
+
+  const signInRequest = firebase.client.signInWithGoogle();
+
+  assert.equal(firebase.popupCalls, 1);
+  await signInRequest;
+});
+
 test('Google sign-in falls back to redirect when the browser blocks a popup', async () => {
   const firebase = createFakeFirebase({ popupError: { code: 'auth/popup-blocked' } });
 

@@ -73,6 +73,37 @@ test('referral sign-in buttons use the shared Google mark and stay visible in th
   assert.match(styles, /white-space:nowrap/);
 });
 
+test('referral page uses the mobile-safe shared sign-out confirmation dialog', () => {
+  const modalStyles = readFileSync(new URL('../frontend/src/modern-modal.css', import.meta.url), 'utf8');
+  const referralStyles = readFileSync(new URL('../frontend/src/referrals.css', import.meta.url), 'utf8');
+  const modalSource = readFileSync(new URL('../frontend/src/modern-modal.js', import.meta.url), 'utf8');
+  assert.match(page, /src="\/src\/auth-nav\.js"/);
+  assert.match(modalStyles, /@media \(max-width: 480px\) \{[\s\S]*?width: calc\(100vw - 24px\);[\s\S]*?max-height: calc\(100dvh - 24px\);[\s\S]*?flex-direction: column;[\s\S]*?min-height: 46px;/);
+  assert.match(referralStyles, /\.referrals-page \.modern-modal-dialog\{[\s\S]*?position:fixed;[\s\S]*?top:var\(--modal-viewport-center-y,50dvh\);[\s\S]*?left:var\(--modal-viewport-center-x,50vw\);[\s\S]*?width:min\(440px,calc\(var\(--modal-viewport-width,100dvw\) - 24px\)\);[\s\S]*?transform:translate\(-50%,-50%\);/);
+  assert.match(referralStyles, /\.referrals-page \.modern-modal-message\{max-width:100%;min-width:0;white-space:normal;overflow-wrap:anywhere\}/);
+  assert.match(referralStyles, /\.referrals-page \.modern-modal-dialog\.is-mobile-viewport \.modern-modal-actions\{flex-direction:column;align-items:stretch\}/);
+  assert.match(referralStyles, /@media\(max-width:980px\)\{[\s\S]*?\.referrals-page \.modern-modal-actions\{flex-direction:column;align-items:stretch\}/);
+  assert.match(modalSource, /window\.visualViewport/);
+  assert.match(modalSource, /--modal-viewport-center-x/);
+  assert.match(modalSource, /visualViewport\?\.addEventListener\('resize', syncReferralDialogViewport\)/);
+});
+
+test('referral navigation buttons keep visible borders in dark mode', () => {
+  const styles = readFileSync(new URL('../frontend/src/referrals.css', import.meta.url), 'utf8');
+  assert.match(styles, /:root\[data-theme=dark\] \.referrals-page \.about-nav>\.btn:not\(\.primary\):not\(\.google-signin\)\{[\s\S]*?border:1px solid #51445f;[\s\S]*?background:#211a2b/);
+  assert.match(styles, /:root\[data-theme=dark\] \.referrals-page \.about-nav>\.btn:not\(\.primary\):not\(\.google-signin\):hover,[\s\S]*?border-color:#8065a0/);
+  assert.match(styles, /:root\[data-theme=dark\] \.referrals-page \.about-nav \.google-signin\{border-color:#dadce0;background:#fff;color:#3c4043\}/);
+});
+
+test('signed-in referral content remains within mobile viewport and tables scroll inside their cards', () => {
+  const styles = readFileSync(new URL('../frontend/src/referrals.css', import.meta.url), 'utf8');
+  assert.match(styles, /\.referrals-content\{display:grid;min-width:0;grid-template-columns:minmax\(0,1fr\);gap:18px\}/);
+  assert.match(styles, /\.referrals-content>\*{min-width:0\}/);
+  assert.match(styles, /\.referral-table-wrap\{max-width:100%;min-width:0;overflow-x:auto;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch\}/);
+  assert.match(styles, /@media\(max-width:520px\)\{[\s\S]*?\.referral-url-row input\{flex:1 1 100%;width:100%\}[\s\S]*?\.referral-url-row \.referral-action\{flex:1 1 calc\(50% - 4px\);min-width:0/);
+  assert.doesNotMatch(page, /<\/div>s\s*<div class="hero-laptop"/);
+});
+
 test('referral message has one link after Get started and is reused by every sharing option', () => {
   const url = 'https://www.resumeout.com/?ref=INVITECODE12';
   const message = buildReferralShareMessage(url, 'INVITECODE12');

@@ -172,16 +172,19 @@
 
 @media (max-width: 480px) {
   .modern-modal-dialog {
+    width: calc(100vw - 24px);
+    max-height: calc(100dvh - 24px);
     padding: 22px;
     border-radius: 16px;
   }
 
   .modern-modal-actions {
-    flex-direction: column-reverse;
+    flex-direction: column;
   }
 
   .modern-modal-button {
     width: 100%;
+    min-height: 46px;
   }
 }
 

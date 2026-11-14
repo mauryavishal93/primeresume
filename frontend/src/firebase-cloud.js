@@ -107,6 +107,7 @@ export function createFirebaseCloudClient({
 } = {}) {
   const isConfigured = Object.values(config).every(value => typeof value === 'string' && value.length > 0);
   let servicesPromise;
+  let services;
   let redirectResultPromise;
 
   function routeNewGoogleAccount(authSdk, credential) {
@@ -147,9 +148,12 @@ export function createFirebaseCloudClient({
           db: firestoreSdk.getFirestore(app),
           firestoreSdk
         };
+      }).then(initializedServices => {
+        services = initializedServices;
+        return services;
       });
     }
-    return servicesPromise;
+    return services ? Promise.resolve(services) : servicesPromise;
   }
 
   function resumeCollection(firestoreSdk, db, uid) {
@@ -288,30 +292,39 @@ export function createFirebaseCloudClient({
     };
   }
 
-  function signInWithGoogle() {
-    return (async () => {
-      try {
-        const { auth, authSdk } = await getServices();
-        const provider = new authSdk.GoogleAuthProvider();
-        const credential = await authSdk.signInWithPopup(auth, provider);
+  async function handleGoogleSignInError(error) {
+    if (isGoogleSignInCancellation(error)) return null;
+    if (isDisabledAccountSignInError(error)) {
+      if (typeof globalThis.dispatchEvent === 'function' && typeof globalThis.Event === 'function') {
+        globalThis.dispatchEvent(new globalThis.Event('firebase-account-sign-in-disabled'));
+      }
+      return null;
+    }
+    if (!['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment'].includes(error?.code)) {
+      throw error;
+    }
+    const { auth, authSdk } = await getServices();
+    await authSdk.signInWithRedirect(auth, new authSdk.GoogleAuthProvider());
+  }
+
+  function openGoogleSignInPopup({ auth, authSdk }) {
+    let popupRequest;
+    try {
+      popupRequest = authSdk.signInWithPopup(auth, new authSdk.GoogleAuthProvider());
+    } catch (error) {
+      return handleGoogleSignInError(error);
+    }
+    return Promise.resolve(popupRequest)
+      .then(credential => {
         routeNewGoogleAccount(authSdk, credential);
         return credential;
-      } catch (error) {
-        if (isGoogleSignInCancellation(error)) return null;
-        if (isDisabledAccountSignInError(error)) {
-          if (typeof globalThis.dispatchEvent === 'function' && typeof globalThis.Event === 'function') {
-            globalThis.dispatchEvent(new globalThis.Event('firebase-account-sign-in-disabled'));
-          }
-          return null;
-        }
-        if (!['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment'].includes(error?.code)) {
-          throw error;
-        }
-        const { auth, authSdk } = await getServices();
-        const provider = new authSdk.GoogleAuthProvider();
-        await authSdk.signInWithRedirect(auth, provider);
-      }
-    })();
+      })
+      .catch(handleGoogleSignInError);
+  }
+
+  function signInWithGoogle() {
+    if (services) return openGoogleSignInPopup(services);
+    return getServices().then(openGoogleSignInPopup);
   }
 
   async function signOutUser() {

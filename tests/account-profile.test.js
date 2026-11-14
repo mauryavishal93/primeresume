@@ -8,6 +8,7 @@ import viteConfigDefault from '../vite.config.js';
 const page = readFileSync(new URL('../frontend/my-account.html', import.meta.url), 'utf8');
 const authNavigation = readFileSync(new URL('../frontend/src/auth-nav.js', import.meta.url), 'utf8');
 const aboutStyles = readFileSync(new URL('../frontend/src/about.css', import.meta.url), 'utf8');
+const vibrantThemeStyles = readFileSync(new URL('../frontend/src/vibrant-theme.css', import.meta.url), 'utf8');
 const myAccountStyles = readFileSync(new URL('../frontend/src/my-account.css', import.meta.url), 'utf8');
 const editor = readFileSync(new URL('../frontend/editor.html', import.meta.url), 'utf8');
 const aboutPage = readFileSync(new URL('../frontend/about.html', import.meta.url), 'utf8');
@@ -39,10 +40,23 @@ test('guest account menu offers Google sign-in instead of a Guest profile', () =
   assert.match(authNavigation, /accountMenu\.profile\.hidden = !user/);
   assert.match(authNavigation, /accountMenu\.menuSignInButton\.hidden = Boolean\(user\)/);
   assert.match(authNavigation, /accountMenu\?\.menuSignInButton\.addEventListener\('click', handleGoogleSignIn\)/);
+  assert.match(authNavigation, /const signInButtons = \[\.\.\.document\.querySelectorAll\('\[data-auth-sign-in\]'\)\]/);
+  assert.match(authNavigation, /signInButtons\.forEach\(button => button\.addEventListener\('click', handleGoogleSignIn\)\)/);
 });
 
-test('shared auth controls stay hidden until Firebase restores the account state', () => {
-  assert.match(aboutStyles, /body:not\(\.auth-state-ready\) \.auth-actions \[data-auth-sign-in\],body:not\(\.auth-state-ready\) \.site-account-menu:not\(\[data-auth-shell-visible\]\)\{visibility:hidden\}/);
+test('Google sign-in starts immediately without waiting for referral attribution', () => {
+  const handler = authNavigation.match(/async function handleGoogleSignIn\(\) \{([\s\S]*?)\n\}/)?.[1];
+  assert.ok(handler, 'shared Google sign-in handler should exist');
+  assert.match(handler, /try \{\s*const signInRequest = signInWithGoogle\(\);/);
+  assert.match(handler, /await signInRequest/);
+  assert.doesNotMatch(handler, /await referralAttributionRequest/);
+});
+
+test('Google sign-in is immediate for guests and hidden during cached signed-in restoration', () => {
+  assert.match(aboutStyles, /body:not\(\.auth-state-ready\) \.site-account-menu:not\(\[data-auth-shell-visible\]\)\{visibility:hidden\}/);
+  assert.match(aboutStyles, /:root\.auth-user-cached body:not\(\.auth-state-ready\) \.auth-actions \[data-auth-sign-in\]\{visibility:hidden\}/);
+  assert.match(authNavigation, /signInButtons\.forEach\(button => \{\s*button\.disabled = true;\s*button\.setAttribute\('aria-busy', 'true'\)/);
+  assert.match(authNavigation, /if \(user\) cacheAuthUserHint\(user\.uid\);\s*else clearCachedAuthUserHint\(\)/);
   assert.match(authNavigation, /function updateAuthControls\(user, error\)\s*\{\s*document\.body\.classList\.add\('auth-state-ready'\)/);
 });
 
@@ -63,6 +77,8 @@ test('all pages hydrate the account icon from cache before auth modules execute'
   const transformedAccountPage = transform(page);
   const transformedEditor = transform(editor);
   assert.match(transformedPage, /data-account-menu-shell/);
+  assert.match(transformedPage, /auth-user-hint/);
+  assert.match(transformedPage, /document\.documentElement\.classList\.add\('auth-user-cached'\)/);
   assert.match(transformedPage, /menu\.dataset\.authShellVisible = 'true'/);
   assert.ok(transformedPage.indexOf('data-account-menu-shell') < transformedPage.indexOf('src="/src/auth-nav.js"'));
   assert.match(transformedAccountPage, /data-account-menu-shell/);
@@ -247,4 +263,14 @@ test('Support email stays on one line', () => {
   assert.match(aboutStyles, /\.support-page \.contact-list\{grid-template-columns:minmax\(0,1fr\)\}/);
   assert.match(aboutStyles, /\.support-page \.contact-list dd,\.support-page \.contact-list a\{white-space:nowrap;overflow-wrap:normal\}/);
   assert.match(aboutStyles, /\.support-page \.contact-list dd\{font-size:clamp\(14px,2vw,18px\)\}/);
+});
+
+test('dark headers keep nav buttons and Google sign-in legible', () => {
+  assert.match(vibrantThemeStyles, /:root\[data-theme="dark"\] body\.about-page:not\(\.referrals-page\) \.about-nav > \.btn:not\(\.google-signin\):not\(\.primary\)[\s\S]*?border-color: #51445f;[\s\S]*?background-color: rgba\(255, 255, 255, \.055\)/);
+  assert.match(vibrantThemeStyles, /:root\[data-theme="dark"\] body\.about-page \.about-nav \.google-signin \{[\s\S]*?background: #fff;[\s\S]*?color: #3c4043;/);
+  assert.match(vibrantThemeStyles, /:root\[data-theme="dark"\] body\.admin-page \.about-nav \.nav-link,[\s\S]*?border-color: rgba\(193, 204, 224, \.38\)/);
+  assert.match(vibrantThemeStyles, /:root\[data-theme="dark"\] body\.editor-page \.topbar \{[\s\S]*?border-color: rgba\(208, 185, 244, \.36\)/);
+  assert.match(vibrantThemeStyles, /:root\[data-theme="dark"\] body\.editor-page \.topbar \.btn\.outline:not\(#importResumeBtn\)[\s\S]*?border-color: #665579/);
+  const editorStyles = readFileSync(new URL('../frontend/src/style.css', import.meta.url), 'utf8');
+  assert.match(editorStyles, /:root\[data-theme=dark\] #importResumeBtn\{background:#142b38;border-color:#4b91ad/);
 });

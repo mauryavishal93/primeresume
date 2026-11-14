@@ -245,7 +245,9 @@ test('site alerts and confirmations use the shared modern modal instead of brows
     assert.match(readFileSync(new URL(script, sourceDirectory), 'utf8'), /from '\.\/modern-modal\.js'/, script);
   }
   assert.match(readFileSync(new URL('modern-modal.js', sourceDirectory), 'utf8'), /import '\.\/modern-modal\.css'/);
-  assert.match(readFileSync(new URL('modern-modal.css', sourceDirectory), 'utf8'), /\.modern-modal-dialog\.is-danger/);
+  const modalStyles = readFileSync(new URL('modern-modal.css', sourceDirectory), 'utf8');
+  assert.match(modalStyles, /\.modern-modal-dialog\.is-danger/);
+  assert.match(modalStyles, /@media \(max-width: 480px\) \{[\s\S]*?width: calc\(100vw - 24px\);[\s\S]*?max-height: calc\(100dvh - 24px\);[\s\S]*?flex-direction: column;[\s\S]*?min-height: 46px;/);
 });
 
 test('subscription management buttons are hidden unless the user is signed in', () => {

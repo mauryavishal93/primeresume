@@ -308,6 +308,59 @@ body.landing-page {
     #100c19 !important;
 }
 
+:root[data-theme="dark"] body.about-page:not(.referrals-page) .about-header {
+  border-bottom-color: rgba(208, 185, 244, .36);
+}
+
+:root[data-theme="dark"] body.about-page:not(.referrals-page) .about-nav > .btn:not(.google-signin):not(.primary),
+:root[data-theme="dark"] body.about-page:not(.referrals-page) .about-nav > .theme-switch,
+:root[data-theme="dark"] body.about-page:not(.referrals-page) .about-nav .account-menu-trigger {
+  border-color: #51445f;
+  background-color: rgba(255, 255, 255, .055);
+  color: var(--about-ink);
+}
+
+:root[data-theme="dark"] body.about-page:not(.referrals-page) .about-nav > .btn:not(.google-signin):not(.primary):hover,
+:root[data-theme="dark"] body.about-page:not(.referrals-page) .about-nav > .btn:not(.google-signin):not(.primary):focus-visible {
+  border-color: #8065a0;
+  background-color: #2b2038;
+}
+
+:root[data-theme="dark"] body.about-page .about-nav .google-signin {
+  border-color: #dadce0;
+  background: #fff;
+  color: #3c4043;
+}
+
+:root[data-theme="dark"] body.admin-page .about-header {
+  border-bottom-color: rgba(193, 204, 224, .36);
+}
+
+:root[data-theme="dark"] body.admin-page .about-nav .nav-link,
+:root[data-theme="dark"] body.admin-page .about-nav .theme-switch,
+:root[data-theme="dark"] body.admin-page .about-nav .account-menu-trigger {
+  border-color: rgba(193, 204, 224, .38);
+  background-color: rgba(255, 255, 255, .055);
+}
+
+:root[data-theme="dark"] body.admin-page .about-nav .nav-link[aria-current="page"] {
+  border-color: #a78bfa;
+}
+
+:root[data-theme="dark"] body.editor-page .topbar .btn.outline:not(#importResumeBtn),
+:root[data-theme="dark"] body.editor-page .topbar .account-menu-trigger {
+  border-color: #665579;
+  background-color: #211a2b;
+  color: #f3efff;
+}
+
+:root[data-theme="dark"] body.editor-page .topbar .btn.outline:not(#importResumeBtn):hover,
+:root[data-theme="dark"] body.editor-page .topbar .account-menu-trigger:hover,
+:root[data-theme="dark"] body.editor-page .topbar .account-menu[open] > .account-menu-trigger {
+  border-color: #9071ab;
+  background-color: #2b2038;
+}
+
 body.landing-page .landing-hero {
   border-color: rgba(112, 33, 212, .2);
   background:
@@ -395,11 +448,16 @@ body.editor-page .btn.primary {
   box-shadow: 0 8px 18px rgba(112, 33, 212, .18);
 }
 
-:root[data-theme="dark"] body.editor-page .topbar,
 :root[data-theme="dark"] body.editor-page .left,
 :root[data-theme="dark"] body.editor-page .right {
   background: #171326;
   border-color: rgba(208, 185, 244, .18);
+}
+
+:root[data-theme="dark"] body.editor-page .topbar {
+  background: #171326;
+  border-color: rgba(208, 185, 244, .36);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, .24);
 }
 
 :root[data-theme="dark"] body.editor-page .layout {

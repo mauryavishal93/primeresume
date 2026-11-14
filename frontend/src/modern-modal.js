@@ -18,6 +18,25 @@ export function showModernDialog({
     const id = `modern-modal-title-${++modalSequence}`;
     dialog.className = `modern-modal-dialog${variant === 'danger' ? ' is-danger' : ''}${variant === 'error' ? ' is-error' : ''}`;
     dialog.setAttribute('aria-labelledby', id);
+    const referralPage = document.body.classList.contains('referrals-page');
+    const visualViewport = referralPage ? window.visualViewport : null;
+    const syncReferralDialogViewport = () => {
+      if (!referralPage) return;
+      const width = visualViewport?.width ?? window.innerWidth;
+      const height = visualViewport?.height ?? window.innerHeight;
+      const offsetLeft = visualViewport?.offsetLeft ?? 0;
+      const offsetTop = visualViewport?.offsetTop ?? 0;
+      dialog.classList.toggle('is-mobile-viewport', width <= 980);
+      dialog.style.setProperty('--modal-viewport-width', `${width}px`);
+      dialog.style.setProperty('--modal-viewport-height', `${height}px`);
+      dialog.style.setProperty('--modal-viewport-center-x', `${offsetLeft + width / 2}px`);
+      dialog.style.setProperty('--modal-viewport-center-y', `${offsetTop + height / 2}px`);
+    };
+    const removeViewportListeners = () => {
+      window.removeEventListener('resize', syncReferralDialogViewport);
+      visualViewport?.removeEventListener('resize', syncReferralDialogViewport);
+      visualViewport?.removeEventListener('scroll', syncReferralDialogViewport);
+    };
 
     const form = document.createElement('form');
     form.className = 'modern-modal-form';
@@ -58,6 +77,7 @@ export function showModernDialog({
     const finish = result => {
       if (settled) return;
       settled = true;
+      removeViewportListeners();
       if (dialog.open) dialog.close();
       dialog.remove();
       if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus();
@@ -102,6 +122,10 @@ export function showModernDialog({
     form.append(actions);
     dialog.append(form);
     document.body.append(dialog);
+    syncReferralDialogViewport();
+    window.addEventListener('resize', syncReferralDialogViewport);
+    visualViewport?.addEventListener('resize', syncReferralDialogViewport);
+    visualViewport?.addEventListener('scroll', syncReferralDialogViewport);
     dialog.showModal();
     if (type === 'prompt') {
       input.focus();

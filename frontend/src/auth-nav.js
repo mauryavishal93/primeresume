@@ -3,10 +3,14 @@ import { clearBillingEntitlementCache, loadBillingConfig, loadBillingEntitlement
 import { canUseFeature, FEATURE_IDS } from './plan-access.js';
 import { alertModern, confirmModern } from './modern-modal.js';
 import { getAccountPhotoUrls, setAccountAvatar } from './account-avatar.js';
-import { cacheAccountPhoto, cacheAccountPhotoFromUrls, cacheProBadgeHint, clearCachedProBadgeHint, clearUserSessionCache, getCachedAccountAvatarHint, getCachedAccountPhoto, getCachedProBadgeHint } from './session-cache.js';
+import { cacheAccountPhoto, cacheAccountPhotoFromUrls, cacheAuthUserHint, cacheProBadgeHint, clearCachedAuthUserHint, clearCachedProBadgeHint, clearUserSessionCache, getCachedAccountAvatarHint, getCachedAccountPhoto, getCachedProBadgeHint } from './session-cache.js';
 
 const nav = document.querySelector('.about-nav');
-const signInButton = document.querySelector('[data-auth-sign-in]');
+const signInButtons = [...document.querySelectorAll('[data-auth-sign-in]')];
+signInButtons.forEach(button => {
+  button.disabled = true;
+  button.setAttribute('aria-busy', 'true');
+});
 let signOutButton = document.querySelector('[data-auth-sign-out]');
 const status = document.querySelector('[data-auth-status]');
 const brand = document.querySelector('.about-brand');
@@ -287,15 +291,21 @@ function updateAuthControls(user, error) {
     clearUserSessionCache(previousUser.uid);
     clearBillingEntitlementCache(previousUser);
   }
+  if (!error) {
+    if (user) cacheAuthUserHint(user.uid);
+    else clearCachedAuthUserHint();
+    document.documentElement.classList.remove('auth-user-cached');
+  }
   if (error) {
     void refreshProBadge(null);
     console.error('Could not initialize account controls.', error);
-    if (signInButton) {
-      signInButton.hidden = false;
-      signInButton.disabled = true;
-      signInButton.querySelector('[data-auth-sign-in-label]').textContent = 'Cloud setup needed';
-      signInButton.title = googleSignInErrorMessage(error);
-    }
+    signInButtons.forEach(button => {
+      button.hidden = false;
+      button.disabled = true;
+      button.removeAttribute('aria-busy');
+      button.querySelector('[data-auth-sign-in-label]').textContent = 'Cloud setup needed';
+      button.title = googleSignInErrorMessage(error);
+    });
     if (signOutButton) signOutButton.hidden = true;
     if (status) {
       status.textContent = googleSignInErrorMessage(error);
@@ -321,12 +331,13 @@ function updateAuthControls(user, error) {
 
   if (status) status.classList.remove('auth-error');
   void refreshProBadge(user);
-  if (signInButton) {
-    signInButton.hidden = Boolean(user);
-    signInButton.disabled = false;
-    signInButton.querySelector('[data-auth-sign-in-label]').textContent = 'Sign in with Google';
-    signInButton.title = '';
-  }
+  signInButtons.forEach(button => {
+    button.hidden = Boolean(user);
+    button.disabled = false;
+    button.removeAttribute('aria-busy');
+    button.querySelector('[data-auth-sign-in-label]').textContent = 'Sign in with Google';
+    button.title = '';
+  });
   if (signOutButton) {
     signOutButton.hidden = !user;
     signOutButton.disabled = false;
@@ -392,8 +403,8 @@ function updateAuthControls(user, error) {
 
 async function handleGoogleSignIn() {
   try {
-    await referralAttributionRequest;
-    await signInWithGoogle();
+    const signInRequest = signInWithGoogle();
+    await signInRequest;
   } catch (error) {
     if (isGoogleSignInCancellation(error)) return;
     console.error('Google sign-in failed.', error);
@@ -412,7 +423,7 @@ window.addEventListener('firebase-account-sign-in-disabled', () => {
   });
 });
 
-signInButton?.addEventListener('click', handleGoogleSignIn);
+signInButtons.forEach(button => button.addEventListener('click', handleGoogleSignIn));
 accountMenu?.menuSignInButton.addEventListener('click', handleGoogleSignIn);
 
 signOutButton?.addEventListener('click', async () => {

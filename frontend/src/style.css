@@ -689,7 +689,7 @@ body.public-resume-pdf #incomingShareModalBg.show{z-index:101}
 .panel-toggle{position:absolute;top:12px;transform:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;width:18px;height:42px;padding:0;border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--muted);box-shadow:0 8px 16px rgba(15,23,42,.12);z-index:12}.panel-toggle span{display:block;width:10px;height:2px;border-radius:2px;background:currentColor}.left-toggle{right:-11px}.right-toggle{left:-11px}.panel-toggle:hover{border-color:#8793a8;color:var(--ink)}.panel-toggle.is-collapsed{transform:rotate(180deg)}
 #importResumeBtn{background:#eaf6ff;border-color:#a9d8f5;color:#145b83}
 #importResumeBtn:hover:not(:disabled){background:#d9efff;border-color:#78bee9}
-:root[data-theme=dark] #importResumeBtn{background:#142b38;border-color:#2d6177;color:#b9e8ff}
+:root[data-theme=dark] #importResumeBtn{background:#142b38;border-color:#4b91ad;color:#b9e8ff}
 :root[data-theme=dark] #importResumeBtn:hover:not(:disabled){background:#1b3a4a;border-color:#4b91ad}
 .browser-persistence{display:flex;align-items:center;gap:10px;flex:0 1 auto;min-width:0}
 .browser-save-toggle{display:inline-flex;align-items:center;gap:6px;color:var(--ink);font-size:11px;font-weight:700;white-space:nowrap;cursor:pointer}

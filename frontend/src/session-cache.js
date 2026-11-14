@@ -1,6 +1,7 @@
 const SESSION_CACHE_PREFIX = 'resumeout:session-cache:v1:';
 const PRO_BADGE_HINT_KEY = `${SESSION_CACHE_PREFIX}pro-badge-hint`;
 const ACCOUNT_AVATAR_HINT_KEY = `${SESSION_CACHE_PREFIX}account-avatar-hint`;
+const AUTH_USER_HINT_KEY = `${SESSION_CACHE_PREFIX}auth-user-hint`;
 const ACCOUNT_AVATAR_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const accountAvatarRequests = new Map();
 
@@ -115,6 +116,50 @@ export function getCachedAccountAvatarHint(now = Date.now()) {
   }
 }
 
+export function getCachedAuthUserHint(now = Date.now()) {
+  const storage = getLocalStorage();
+  if (!storage) return null;
+  try {
+    const serialized = storage.getItem(AUTH_USER_HINT_KEY);
+    if (!serialized) return null;
+    const hint = JSON.parse(serialized);
+    if (typeof hint?.uid !== 'string' || !hint.uid
+      || !Number.isFinite(hint.savedAt) || now < hint.savedAt
+      || now - hint.savedAt > ACCOUNT_AVATAR_CACHE_TTL_MS) {
+      removeCachedValue(storage, AUTH_USER_HINT_KEY);
+      return null;
+    }
+    return { uid: hint.uid };
+  } catch (error) {
+    console.warn('Could not read the cached account sign-in state.', error);
+    removeCachedValue(storage, AUTH_USER_HINT_KEY);
+    return null;
+  }
+}
+
+export function cacheAuthUserHint(uid) {
+  const storage = getLocalStorage();
+  if (!storage || !uid) return;
+  try {
+    storage.setItem(AUTH_USER_HINT_KEY, JSON.stringify({ uid, savedAt: Date.now() }));
+  } catch (error) {
+    console.warn('Could not cache the account sign-in state.', error);
+  }
+}
+
+export function clearCachedAuthUserHint(uid) {
+  const storage = getLocalStorage();
+  if (!storage) return;
+  try {
+    const serialized = storage.getItem(AUTH_USER_HINT_KEY);
+    if (!serialized || (uid && JSON.parse(serialized)?.uid !== uid)) return;
+    removeCachedValue(storage, AUTH_USER_HINT_KEY);
+  } catch (error) {
+    console.warn('Could not clear the cached account sign-in state.', error);
+    removeCachedValue(storage, AUTH_USER_HINT_KEY);
+  }
+}
+
 function saveAccountAvatarHint(uid, photoDataUrl) {
   const storage = getLocalStorage();
   if (!storage || !uid || !photoDataUrl) return;
@@ -209,6 +254,7 @@ export function clearUserSessionCache(uid) {
   clearSessionCache('billing-entitlement', uid);
   clearSessionCache('account-photo', uid);
   clearCachedProBadgeHint(uid);
+  clearCachedAuthUserHint(uid);
   const storage = getLocalStorage();
   if (!storage) return;
   try {

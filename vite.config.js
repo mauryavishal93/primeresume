@@ -3,6 +3,21 @@ import { defineConfig } from 'vite';
 
 const frontendRoot = fileURLToPath(new URL('./frontend', import.meta.url));
 
+const cachedAuthUserScript = `<script>
+try {
+  const cachedUser = JSON.parse(localStorage.getItem('resumeout:session-cache:v1:auth-user-hint') || 'null');
+  const cachedAvatar = JSON.parse(localStorage.getItem('resumeout:session-cache:v1:account-avatar-hint') || 'null');
+  const hasCachedUser = hint => typeof hint?.uid === 'string' && hint.uid
+    && Number.isFinite(hint.savedAt) && Date.now() >= hint.savedAt
+    && Date.now() - hint.savedAt <= 30 * 24 * 60 * 60 * 1000;
+  if (hasCachedUser(cachedUser) || hasCachedUser(cachedAvatar)) {
+    document.documentElement.classList.add('auth-user-cached');
+  }
+} catch (error) {
+  console.warn('Could not read the cached account sign-in state.', error);
+}
+</script>`;
+
 const cachedAccountAvatarScript = `<script>
 try {
   const cachedAvatar = JSON.parse(localStorage.getItem('resumeout:session-cache:v1:account-avatar-hint') || 'null');
@@ -33,20 +48,21 @@ function cachedAccountAvatarPlugin() {
   return {
     name: 'cached-account-avatar',
     transformIndexHtml(html) {
-      if (html.includes('data-account-menu-shell')) {
-        return html;
-      }
+      const hasSharedAuthUi = html.includes('class="about-nav"') || html.includes('id="accountMenu"');
+      if (!hasSharedAuthUi) return html;
+      let transformed = html.replace('</head>', `${cachedAuthUserScript}</head>`);
+      if (html.includes('data-account-menu-shell')) return transformed;
       if (html.includes('class="about-nav"')) {
         const shell = `<details class="account-menu site-account-menu" data-account-menu-shell>
   <summary class="account-menu-trigger" aria-label="Open account menu"><span class="account-avatar" aria-hidden="true">U</span></summary>
 </details>
 ${cachedAccountAvatarScript}`;
-        return html.replace(/(<nav\b[^>]*class="[^"]*\babout-nav\b[^"]*"[^>]*>[\s\S]*?)(<\/nav>)/, `$1${shell}$2`);
+        return transformed.replace(/(<nav\b[^>]*class="[^"]*\babout-nav\b[^"]*"[^>]*>[\s\S]*?)(<\/nav>)/, `$1${shell}$2`);
       }
       if (html.includes('id="accountMenu"')) {
-        return html.replace(/(<details\b[^>]*id="accountMenu"[^>]*>[\s\S]*?<\/details>)/, `$1${cachedAccountAvatarScript}`);
+        return transformed.replace(/(<details\b[^>]*id="accountMenu"[^>]*>[\s\S]*?<\/details>)/, `$1${cachedAccountAvatarScript}`);
       }
-      return html;
+      return transformed;
     }
   };
 }
