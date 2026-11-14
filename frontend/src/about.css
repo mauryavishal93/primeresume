@@ -104,7 +104,9 @@ body.auth-signout-pending .auth-actions [data-auth-sign-in],body.auth-signout-pe
 .contact-list a{color:#9ec9ff;text-decoration:none}
 .support-page .contact-list{grid-template-columns:minmax(0,1fr)}
 .support-page .contact-list dd,.support-page .contact-list a{white-space:nowrap;overflow-wrap:normal}
-.support-page .contact-list dd{font-size:clamp(14px,2vw,18px)}
+.support-page .contact-list dd{font-size:14px;line-height:1.5}
+.support-page .contact-list a,.support-page .contact-list .support-contact-value{display:inline-flex;align-items:center;gap:7px}
+.support-contact-icon,.support-whatsapp-icon{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .about-page a:focus-visible{outline:3px solid rgba(168,135,75,.35);outline-offset:3px}
 .architecture-diagram{margin-top:18px;min-height:620px;width:100%;display:flex;justify-content:center;align-items:center;background:transparent;overflow-x:auto}
 .architecture-diagram svg{width:100%;max-width:1500px;height:auto;display:block;overflow:visible}

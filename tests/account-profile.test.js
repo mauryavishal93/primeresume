@@ -260,9 +260,14 @@ test('About page omits personal phone, LinkedIn, and company website details', (
 
 test('Support email stays on one line', () => {
   assert.match(supportPage, /class="about-page support-page site-mobile-header"/);
+  assert.match(supportPage, /<svg class="support-whatsapp-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">/);
+  assert.match(supportPage, /<svg class="support-contact-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">[\s\S]*?resumeout@gmail\.com/);
+  assert.match(supportPage, /class="support-contact-value"[\s\S]*?<svg class="support-contact-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">[\s\S]*?Bengaluru, India 560087/);
   assert.match(aboutStyles, /\.support-page \.contact-list\{grid-template-columns:minmax\(0,1fr\)\}/);
   assert.match(aboutStyles, /\.support-page \.contact-list dd,\.support-page \.contact-list a\{white-space:nowrap;overflow-wrap:normal\}/);
-  assert.match(aboutStyles, /\.support-page \.contact-list dd\{font-size:clamp\(14px,2vw,18px\)\}/);
+  assert.match(aboutStyles, /\.support-page \.contact-list dd\{font-size:14px;line-height:1\.5\}/);
+  assert.match(aboutStyles, /\.support-page \.contact-list a,\.support-page \.contact-list \.support-contact-value\{display:inline-flex;align-items:center;gap:7px\}/);
+  assert.match(aboutStyles, /\.support-contact-icon,\.support-whatsapp-icon\{width:18px;height:18px;flex:none;fill:none;stroke:currentColor/);
 });
 
 test('dark headers keep nav buttons and Google sign-in legible', () => {
