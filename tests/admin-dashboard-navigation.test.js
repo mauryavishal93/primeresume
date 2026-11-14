@@ -56,7 +56,7 @@ test('user table groups secondary account actions in compact, accessible menus',
   assert.match(styles, /\.action-menu-panel\s*\{[\s\S]*?position:\s*static/);
 });
 
-test('mobile site headers keep the main links on one row and place Google sign-in below Community', () => {
+test('mobile site headers keep compact Google sign-in and main links on one row', () => {
   const pages = ['about', 'admin', 'billing', 'community', 'home', 'index', 'my-account', 'my-posts', 'pricing', 'support'];
   for (const page of pages) {
     const html = readFileSync(new URL(`../frontend/${page}.html`, import.meta.url), 'utf8');
@@ -64,10 +64,21 @@ test('mobile site headers keep the main links on one row and place Google sign-i
   }
   const authNav = readFileSync(new URL('../frontend/src/auth-nav.js', import.meta.url), 'utf8');
   assert.match(authNav, /classList\.toggle\('auth-user-signed-in', Boolean\(user\) && !error\)/);
-  assert.match(aboutStyles, /grid-template-areas:"community plans editor" "auth theme \."/);
-  assert.match(aboutStyles, /body\.site-mobile-header\.auth-user-signed-in:not\(\.admin-page\) \.about-nav\{grid-template-areas:"community plans editor"\}/);
-  assert.match(aboutStyles, /body\.site-mobile-header\.admin-page \.about-nav\{display:grid;grid-template-columns:repeat\(3,minmax\(0,1fr\)\);grid-template-areas:"community plans editor" "auth \. \."/);
-  assert.match(aboutStyles, /body\.site-mobile-header\.admin-page\.auth-user-signed-in \.about-nav\{grid-template-areas:"community plans editor"\}/);
+  assert.match(aboutStyles, /grid-template-columns:36px repeat\(3,minmax\(0,1fr\)\);grid-template-areas:"auth community plans editor" "theme theme theme theme"/);
+  assert.match(aboutStyles, /body\.about-page\.site-mobile-header\.auth-user-signed-in:not\(\.admin-page\) \.about-nav\{grid-template-columns:repeat\(3,minmax\(0,1fr\)\);grid-template-areas:"community plans editor" "theme theme theme"\}/);
+  assert.match(aboutStyles, /body\.site-mobile-header\.admin-page \.about-nav\{display:grid;grid-template-columns:36px repeat\(3,minmax\(0,1fr\)\);grid-template-areas:"auth community plans editor" "theme theme theme theme"/);
+  assert.match(aboutStyles, /body\.site-mobile-header\.admin-page\.auth-user-signed-in \.about-nav\{grid-template-columns:repeat\(3,minmax\(0,1fr\)\);grid-template-areas:"community plans editor" "theme theme theme"\}/);
+  assert.match(aboutStyles, /body\.site-mobile-header\.admin-page \.about-nav \.google-signin\{display:inline-flex;width:34px;min-width:34px;max-width:34px/);
+  assert.doesNotMatch(aboutStyles, /body\.site-mobile-header\.admin-page \.about-nav \.google-signin::after\{content:"Google"/);
+  const adminPage = readFileSync(new URL('../frontend/admin.html', import.meta.url), 'utf8');
+  const aboutPage = readFileSync(new URL('../frontend/about.html', import.meta.url), 'utf8');
+  assert.match(adminPage, /data-auth-sign-in[^>]*>[\s\S]*?<svg class="google-signin-logo"/);
+  const googleIcon = page => page.match(/<svg class="google-signin-logo" viewBox="0 0 24 24" aria-hidden="true">[\s\S]*?<\/svg>/)?.[0]
+    .replace(/>\s+</g, '><');
+  assert.ok(googleIcon(adminPage));
+  assert.equal(googleIcon(adminPage), googleIcon(aboutPage));
+  assert.doesNotMatch(adminPage, /google-signin-mark/);
+  assert.match(aboutStyles, /body\.site-mobile-header\.admin-page \.about-nav \.google-signin-logo\{width:18px;height:18px;flex-basis:18px\}/);
   assert.match(html, /<nav class="about-nav">[\s\S]*?data-auth-sign-in[\s\S]*?href="\/community\.html"/);
 });
 

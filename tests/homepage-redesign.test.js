@@ -62,10 +62,11 @@ test('homepage redesign sections and existing walkthrough stay consistent on bot
   assert.match(aboutStyles, /\.about-page:not\(\.landing-page\):not\(\.admin-page\) \.about-nav>a\[href="\/community\.html"\]\{grid-area:community/);
   assert.match(aboutStyles, /\.about-page:not\(\.landing-page\):not\(\.admin-page\) \.about-nav>a\[href="\/pricing\.html"\]\{grid-area:plans/);
   assert.match(aboutStyles, /\.about-page:not\(\.landing-page\):not\(\.admin-page\) \.about-nav>\.about-editor\{grid-area:editor/);
-  assert.match(aboutStyles, /body\.about-page\.site-mobile-header:not\(\.landing-page\):not\(\.admin-page\) \.about-nav\{display:grid;grid-template-columns:repeat\(3,minmax\(0,1fr\)\);grid-template-areas:"community plans editor" "auth theme \."/);
-  assert.match(aboutStyles, /body\.site-mobile-header\.landing-page \.about-nav\{grid-template-columns:repeat\(3,minmax\(0,1fr\)\);grid-template-areas:"community plans editor" "auth theme \."/);
-  assert.match(aboutStyles, /body\.site-mobile-header\.auth-user-signed-in:not\(\.admin-page\) \.about-nav\{grid-template-areas:"community plans editor"\}/);
-  assert.match(aboutStyles, /body\.site-mobile-header:not\(\.admin-page\) \.about-nav \.google-signin::after\{content:"Google"/);
+  assert.match(aboutStyles, /body\.about-page\.site-mobile-header:not\(\.landing-page\):not\(\.admin-page\) \.about-nav\{display:grid;grid-template-columns:36px repeat\(3,minmax\(0,1fr\)\);grid-template-areas:"auth community plans editor" "theme theme theme theme"/);
+  assert.match(aboutStyles, /body\.site-mobile-header\.landing-page \.about-nav\{grid-template-columns:36px repeat\(3,minmax\(0,1fr\)\);grid-template-areas:"auth community plans editor" "theme theme theme theme"/);
+  assert.match(aboutStyles, /body\.about-page\.site-mobile-header\.auth-user-signed-in:not\(\.admin-page\) \.about-nav\{grid-template-columns:repeat\(3,minmax\(0,1fr\)\);grid-template-areas:"community plans editor" "theme theme theme"\}/);
+  assert.match(aboutStyles, /body\.site-mobile-header:not\(\.admin-page\) \.about-nav \.google-signin\{display:inline-flex;width:34px;min-width:34px;max-width:34px/);
+  assert.doesNotMatch(aboutStyles, /body\.site-mobile-header:not\(\.admin-page\) \.about-nav \.google-signin::after\{content:"Google"/);
   for (const page of ['about', 'admin', 'billing', 'community', 'home', 'index', 'my-account', 'my-posts', 'pricing', 'privacy', 'refunds', 'resume-wizard', 'support', 'terms']) {
     const html = readFileSync(new URL(`../frontend/${page}.html`, import.meta.url), 'utf8');
     assert.match(html, /<header class="about-header"/, `${page} should use the shared responsive header`);
