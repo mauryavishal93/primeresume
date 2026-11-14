@@ -152,6 +152,23 @@ export function currencyForRazorpayPlanId(planId, env = process.env) {
   )) || null;
 }
 
+export function billingPeriodEnd(timestamp, period) {
+  if (!Number.isFinite(timestamp) || !['monthly', 'yearly'].includes(period)) return null;
+  const date = new Date(timestamp);
+  if (!Number.isFinite(date.getTime())) return null;
+  const day = date.getUTCDate();
+  if (period === 'monthly') {
+    date.setUTCDate(1);
+    date.setUTCMonth(date.getUTCMonth() + 1);
+  } else {
+    date.setUTCDate(1);
+    date.setUTCFullYear(date.getUTCFullYear() + 1);
+  }
+  const monthEnd = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate();
+  date.setUTCDate(Math.min(day, monthEnd));
+  return Number.isFinite(date.getTime()) ? date.getTime() : null;
+}
+
 export function entitlementFromSubscription(subscription, fallbackPlan = 'monthly', now = Date.now()) {
   const validUntil = Number(subscription?.current_end) * 1000;
   const planId = subscription?.notes?.plan_key || fallbackPlan;

@@ -1,4 +1,6 @@
 import {
+  cancelBillingSubscription,
+  cancelBillingCheckout,
   createBillingSubscription,
   loadBillingConfig,
   loadBillingEntitlement,
@@ -229,18 +231,41 @@ function updatePurchaseControls() {
   yearlyButton.disabled = true;
 
   if (active) {
-    monthlyButton.textContent = 'Manage billing';
+    const canScheduleAfterPromotional = entitlement.canScheduleSubscriptionAfterPromotional === true;
+    const pendingStartAt = Number(entitlement.pendingSubscriptionStartAt);
+    const prepaidStartsAt = Number(entitlement.pendingSubscriptionPrepaidStartsAt);
+    const hasPendingStart = Number.isFinite(pendingStartAt) && pendingStartAt > Date.now();
+    const canResumePendingSetup = hasPendingStart && entitlement.pendingSubscriptionStatus === 'created';
+    const pendingPlan = entitlement.pendingSubscriptionPlan;
+    monthlyButton.textContent = canScheduleAfterPromotional
+      ? hasPendingStart
+        ? pendingPlan === 'monthly'
+          ? canResumePendingSetup ? 'Complete monthly setup' : 'Monthly scheduled'
+          : 'Start monthly after Pro expires'
+        : 'Start monthly after Pro expires'
+      : 'Manage billing';
     const canSwitchToYearly = activePlan === 'monthly'
       && (!entitlement.currency || entitlement.currency === 'INR')
+      && entitlement.cancelAtCycleEnd !== true
       && entitlement.scheduledPlan !== 'yearly'
       && checkoutReady;
-    yearlyButton.textContent = entitlement.scheduledPlan === 'yearly'
-      ? 'Yearly scheduled'
-      : canSwitchToYearly
-        ? 'Switch to yearly'
-        : 'Manage billing';
-    monthlyButton.disabled = false;
-    yearlyButton.disabled = entitlement.scheduledPlan === 'yearly';
+    yearlyButton.textContent = canScheduleAfterPromotional
+      ? hasPendingStart && pendingPlan === 'yearly'
+        ? canResumePendingSetup ? 'Complete yearly setup' : 'Yearly scheduled'
+        : 'Start yearly after Pro expires'
+      : activePlan === 'monthly' && entitlement.cancelAtCycleEnd === true
+        ? 'Yearly after expiry'
+      : entitlement.scheduledPlan === 'yearly'
+        ? 'Yearly scheduled'
+        : canSwitchToYearly
+          ? 'Switch to yearly'
+          : 'Manage billing';
+    monthlyButton.disabled = canScheduleAfterPromotional
+      ? !checkoutReady || (hasPendingStart && (!canResumePendingSetup || pendingPlan !== 'monthly'))
+      : false;
+    yearlyButton.disabled = canScheduleAfterPromotional
+      ? !checkoutReady || (hasPendingStart && (!canResumePendingSetup || pendingPlan !== 'yearly'))
+      : entitlement.cancelAtCycleEnd === true || entitlement.scheduledPlan === 'yearly';
     const validUntil = Number(entitlement.validUntil);
     const validity = entitlement.lifetime
       ? ''
@@ -261,8 +286,29 @@ function updatePurchaseControls() {
         : '';
     const scheduledChange = entitlement.scheduledPlan === 'yearly'
       ? ` Yearly billing is scheduled${entitlement.scheduledAt ? ` for ${new Date(entitlement.scheduledAt).toLocaleDateString('en-IN')}` : ''}.`
+      : entitlement.cancelAtCycleEnd === true && activePlan === 'monthly'
+        ? ' Monthly renewal is stopped. You can purchase yearly after this access expires.'
       : '';
-    checkoutStatus.textContent = `Your active plan: ${planLabel}${activationSource}${validity}.${scheduledChange}`;
+    if (canScheduleAfterPromotional) {
+      const startDate = new Date(
+        hasPendingStart && prepaidStartsAt > 0
+          ? prepaidStartsAt
+          : hasPendingStart
+            ? pendingStartAt
+            : validUntil
+      );
+      const dateText = Number.isFinite(startDate.getTime())
+        ? ` on ${startDate.toLocaleDateString('en-IN')}`
+        : '';
+      const pendingLabel = pendingPlan === 'yearly' ? 'Yearly' : 'Monthly';
+      checkoutStatus.textContent = hasPendingStart && !canResumePendingSetup
+        ? prepaidStartsAt > 0
+          ? `Your active plan: ${planLabel}${validity}. Your prepaid ${pendingLabel.toLowerCase()} period starts after your current Pro access ends${dateText}; recurring billing begins after that period.`
+          : `Your active plan: ${planLabel}${validity}. ${pendingLabel} billing is scheduled to begin after your current Pro access ends${dateText}.`
+        : `Your active plan: ${planLabel}${validity}. You can start a monthly or yearly subscription that begins after your current Pro access ends${dateText}.`;
+    } else {
+      checkoutStatus.textContent = `Your active plan: ${planLabel}${activationSource}${validity}.${scheduledChange}`;
+    }
   } else if (!checkoutReady) {
     monthlyButton.textContent = 'Coming soon';
     yearlyButton.textContent = 'Coming soon';
@@ -363,6 +409,50 @@ async function scheduleYearlySwitch() {
     });
   } catch (error) {
     console.error('Could not schedule the yearly plan switch.', error);
+    if (error.code === 'YEARLY_SWITCH_REQUIRES_CANCELLATION') {
+      const expiry = entitlement.validUntil
+        ? new Date(entitlement.validUntil).toLocaleDateString('en-IN')
+        : 'the end of your current monthly period';
+      const stopRenewal = await confirmModern({
+        title: 'Stop monthly renewal?',
+        message: `Razorpay cannot switch this card subscription directly. If you stop renewal, your monthly Pro access remains active through ${expiry}, and you can purchase yearly after it expires. The yearly plan will not be charged now.`,
+        confirmText: 'Stop monthly renewal',
+        cancelText: 'Keep monthly plan'
+      });
+      if (!stopRenewal) {
+        checkoutStatus.textContent = 'Your monthly plan is unchanged.';
+        return;
+      }
+      try {
+        yearlyButton.disabled = true;
+        checkoutStatus.textContent = 'Stopping monthly renewal…';
+        await cancelBillingSubscription(
+          currentUser,
+          entitlement.subscriptionId,
+          'Monthly renewal stopped before purchasing yearly after the current period.'
+        );
+        await refreshPricingState(currentUser);
+        const message = `Monthly renewal is stopped. Your Pro access continues through ${expiry}. You can purchase the yearly plan after that date; it will not be charged now.`;
+        checkoutStatus.textContent = message;
+        await alertModern({
+          title: 'Monthly renewal stopped',
+          message,
+          confirmText: 'OK'
+        });
+        return;
+      } catch (cancelError) {
+        console.error('Could not stop monthly renewal for a yearly plan change.', cancelError);
+        checkoutStatus.textContent = cancelError.message || 'Could not stop monthly renewal. Your current plan remains unchanged.';
+        updatePurchaseControls();
+        await alertModern({
+          title: 'Could not stop monthly renewal',
+          message: cancelError.message || 'Your current monthly plan remains unchanged. Please try again or contact support.',
+          confirmText: 'OK',
+          variant: 'error'
+        });
+        return;
+      }
+    }
     checkoutStatus.textContent = error.message || 'Could not schedule the yearly plan.';
     yearlyButton.disabled = false;
     await alertModern({
@@ -430,9 +520,28 @@ async function startCheckout(planKey) {
   checkoutStatus.textContent = 'Preparing secure Razorpay checkout…';
   try {
     const checkoutUser = currentUser;
-    await loadRazorpayCheckout();
     const planConfig = PLAN_CONFIG.pro.currencies[selectedCurrency];
     const expectedAmount = Math.round(getConfiguredPrice(planKey, planConfig[planKey].price, selectedCurrency) * 100);
+    const planPrice = formatPrice(expectedAmount / 100, selectedCurrency);
+    const billingInterval = planKey === 'yearly' ? 'year' : 'month';
+    const startDate = Number(entitlement?.validUntil);
+    const prepaidStart = entitlement?.canScheduleSubscriptionAfterPromotional === true
+      && Number.isFinite(startDate)
+      && startDate > Date.now()
+      ? ` Your prepaid ${billingInterval} starts after your current Pro access ends on ${new Date(startDate).toLocaleDateString('en-IN')}; recurring billing begins after that prepaid period.`
+      : '';
+    const confirmed = await confirmModern({
+      title: 'Review subscription payment',
+      message: `Razorpay will charge ${planPrice} now for your first ${billingInterval}. Your subscription renews at ${planPrice} per ${billingInterval}.${prepaidStart}`,
+      confirmText: 'Continue to payment',
+      cancelText: 'Not now'
+    });
+    if (!confirmed) {
+      checkoutStatus.textContent = 'Checkout not opened.';
+      updatePurchaseControls();
+      return;
+    }
+    await loadRazorpayCheckout();
     const created = await createBillingSubscription(checkoutUser, planKey, selectedCurrency, expectedAmount);
     let paymentOutcomeReceived = false;
     const checkout = new window.Razorpay({
@@ -450,6 +559,27 @@ async function startCheckout(planKey) {
         checkoutStatus.textContent = 'Verifying your payment with Razorpay…';
         try {
           const result = await verifyBillingCheckout(checkoutUser, checkoutResponse);
+          if (created.scheduledAt) {
+            await refreshPricingState(checkoutUser);
+            const scheduledPlanLabel = created.plan.label || (planKey === 'yearly' ? 'Yearly' : 'Monthly');
+            const prepaidPrice = formatPrice(created.plan.amount / 100, created.plan.currency || selectedCurrency);
+            const prepaidStartAt = Number(created.scheduledAt);
+            const validity = Number.isFinite(prepaidStartAt) && prepaidStartAt > 0
+              ? ` Your prepaid period starts after your current Pro access ends on ${new Date(prepaidStartAt).toLocaleDateString('en-IN')}.`
+              : '';
+            const recurringAt = Number(created.recurringAt);
+            const recurring = Number.isFinite(recurringAt) && recurringAt > 0
+              ? ` Recurring billing begins on ${new Date(recurringAt).toLocaleDateString('en-IN')}.`
+              : '';
+            const message = `${prepaidPrice} was charged now for your first ${planKey === 'yearly' ? 'year' : 'month'}.${validity}${recurring}`;
+            checkoutStatus.textContent = message;
+            await alertModern({
+              title: `${scheduledPlanLabel} subscription scheduled`,
+              message,
+              confirmText: 'Continue'
+            });
+            return;
+          }
           let confirmedEntitlement = result.entitlement?.status === 'active'
             ? result.entitlement
             : null;
@@ -536,20 +666,35 @@ async function startCheckout(planKey) {
         }
       },
       modal: {
-        ondismiss: () => {
+        ondismiss: async () => {
           if (paymentOutcomeReceived) return;
-          checkoutStatus.textContent = 'Checkout closed. No purchase was confirmed by this page.';
+          checkoutStatus.textContent = 'Confirming checkout cancellation with Razorpay…';
+          let cancelled = false;
+          let cancellationError = null;
+          try {
+            const result = await cancelBillingCheckout(checkoutUser, created.subscriptionId);
+            cancelled = result.cancelled === true;
+            await refreshPricingState(checkoutUser);
+          } catch (error) {
+            cancellationError = error;
+            console.error('Could not clean up the dismissed Razorpay checkout.', error);
+          }
+          const message = cancelled
+            ? 'The unpaid checkout was cancelled and cleared. You can start a monthly or yearly subscription whenever you are ready.'
+            : cancellationError?.message
+              || 'Razorpay could not confirm cancellation. Refresh your plan status before starting another subscription.';
+          checkoutStatus.textContent = message;
           updatePurchaseControls();
           void alertModern({
-            title: 'Payment cancelled',
-            message: 'You closed Razorpay checkout before completing the payment. No payment was confirmed, and no Pro access was activated.',
-            confirmText: 'OK'
+            title: cancelled ? 'Checkout cancelled' : 'Cancellation not confirmed',
+            message,
+            confirmText: 'OK',
+            ...(cancelled ? {} : { variant: 'error' })
           });
         }
       }
     });
     checkout.on('payment.failed', event => {
-      paymentOutcomeReceived = true;
       const failure = event.error || {};
       console.error('Razorpay reported a failed payment.', {
         code: failure.code,
@@ -581,9 +726,14 @@ async function startCheckout(planKey) {
 }
 
 monthlyButton.addEventListener('click', () => entitlement?.status === 'active'
+  && entitlement.canScheduleSubscriptionAfterPromotional !== true
   ? window.location.assign('/billing.html')
   : startCheckout('monthly'));
 yearlyButton.addEventListener('click', () => {
+  if (entitlement?.status === 'active'
+    && entitlement.canScheduleSubscriptionAfterPromotional === true) {
+    return startCheckout('yearly');
+  }
   if (entitlement?.status === 'active' && entitlement.billingPlan === 'monthly') {
     return scheduleYearlySwitch();
   }

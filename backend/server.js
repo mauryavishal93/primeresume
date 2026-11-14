@@ -8,6 +8,7 @@ import {
   billingPlanEnvKey,
   BILLING_CURRENCY_PLANS,
   BILLING_PLANS,
+  billingPeriodEnd,
   billingCheckoutConfigured,
   configuredVouchers,
   currencyForRazorpayPlanId,
@@ -1015,6 +1016,37 @@ function publicEntitlement(data) {
     pendingVoucherStartAt: pendingVouchers.length
       ? Number(pendingVouchers[0].startsAt) || validUntil || null
       : null
+  };
+}
+
+async function referralPromotionalAccess(db, uid, now = Date.now()) {
+  if (!referralsEnabled()) {
+    return { activeRewards: [], unexpiredRewards: [], promotionalValidUntil: 0 };
+  }
+  const rewardSnapshot = await db.collection('referralRewards')
+    .where('beneficiaryUid', '==', uid)
+    .get();
+  const rewardRecords = (rewardSnapshot.docs || []).map(document => ({
+    id: document.id,
+    ...(document.data() || {})
+  }));
+  const revokedRewardIds = new Set(rewardRecords
+    .filter(reward => reward.rewardType === 'reversal')
+    .map(reward => reward.originalRewardId)
+    .filter(Boolean));
+  const unexpiredRewards = rewardRecords
+    .filter(reward => reward.rewardType !== 'reversal'
+      && !revokedRewardIds.has(reward.id)
+      && reward.status !== 'revoked'
+      && Number.isFinite(Number(reward.startsAt))
+      && Number.isFinite(Number(reward.expiresAt))
+      && Number(reward.expiresAt) > now
+      && Number(reward.expiresAt) > Number(reward.startsAt));
+  return {
+    activeRewards: unexpiredRewards.filter(reward => Number(reward.startsAt) <= now),
+    unexpiredRewards,
+    promotionalValidUntil: unexpiredRewards
+      .reduce((latest, reward) => Math.max(latest, Number(reward.expiresAt)), 0)
   };
 }
 
@@ -3380,11 +3412,13 @@ app.post('/api/billing/webhook', async (request, response) => {
           && (!Number(entitlementData.adminRevokedAt)
             || Number(currentMapping.createdAt) <= Number(entitlementData.adminRevokedAt));
         const subscriptionRevoked = currentMapping.adminRevoked === true || revokedBeforeThisSubscription;
+        const deferredStartPending = Number(currentMapping.scheduledStartAt) > Date.now();
         const validUntil = Number(subscription?.current_end) * 1000
-          || Number(entitlementData.validUntil)
+          || (deferredStartPending ? 0 : Number(entitlementData.validUntil))
           || 0;
         const isPaidThrough = validUntil > Date.now();
-        const activated = ['subscription.activated', 'subscription.charged'].includes(event.event);
+        const activated = !deferredStartPending
+          && ['subscription.activated', 'subscription.charged'].includes(event.event);
         const pendingPlanMatches = subscription?.plan_id === currentMapping.pendingPlanId;
         const currentPlanMatches = subscription?.plan_id === currentMapping.planId;
         const providerPlanKey = pendingPlanMatches
@@ -3465,7 +3499,9 @@ app.post('/api/billing/webhook', async (request, response) => {
             };
           }
         }
-        const entitlement = subscriptionRevoked
+        const entitlement = deferredStartPending
+          ? null
+          : subscriptionRevoked
           ? {
               planId: 'free',
               billingPlan: 'free',
@@ -3594,24 +3630,26 @@ app.post('/api/billing/webhook', async (request, response) => {
           } : {}),
           updatedAt: Date.now()
         }, { merge: true });
-        const nextEntitlement = {
-          ...(entitlement || {
-            planId: 'free',
-            billingPlan: currentMapping.planKey,
-            status: 'inactive',
-            source: 'server-verified',
-            validUntil: 0
-          }),
-          pendingVouchers: subscriptionRevoked
-            ? []
-            : schedulePendingVouchers(
-                Array.isArray(currentEntitlement.data()?.pendingVouchers)
-                  ? currentEntitlement.data().pendingVouchers
-                  : [],
-                Number(entitlement?.validUntil) || 0
-              )
-        };
-        if (subscriptionRevoked) {
+        const nextEntitlement = deferredStartPending
+          ? entitlementData
+          : {
+              ...(entitlement || {
+                planId: 'free',
+                billingPlan: currentMapping.planKey,
+                status: 'inactive',
+                source: 'server-verified',
+                validUntil: 0
+              }),
+              pendingVouchers: subscriptionRevoked
+                ? []
+                : schedulePendingVouchers(
+                    Array.isArray(currentEntitlement.data()?.pendingVouchers)
+                      ? currentEntitlement.data().pendingVouchers
+                      : [],
+                    Number(entitlement?.validUntil) || 0
+                  )
+            };
+        if (subscriptionRevoked && !deferredStartPending) {
           nextEntitlement.adminRevoked = true;
           nextEntitlement.adminRevokedAt = entitlementData.adminRevokedAt || Date.now();
           nextEntitlement.planId = 'free';
@@ -3622,7 +3660,7 @@ app.post('/api/billing/webhook', async (request, response) => {
           nextEntitlement.cancelAtCycleEnd = false;
           nextEntitlement.scheduledPlan = null;
           nextEntitlement.scheduledAt = null;
-        } else {
+        } else if (!deferredStartPending) {
           nextEntitlement.adminRevoked = false;
         }
         transaction.set(entitlementRef, activatePendingVouchers(nextEntitlement) || nextEntitlement);
@@ -4041,54 +4079,48 @@ app.get('/api/billing/entitlement', requireEntitlementConfig, requireFirebaseUse
       }
     }
     const entitlement = publicEntitlement(data);
+    const now = Date.now();
+    const checkoutSnapshot = await userCheckoutDocument(db, request.user.uid).get();
+    const checkoutData = checkoutSnapshot.data() || {};
     if (!entitlement.subscriptionId && entitlement.billingPlan !== 'voucher') {
-      const checkoutSnapshot = await userCheckoutDocument(db, request.user.uid).get();
-      const checkoutSubscriptionId = typeof checkoutSnapshot.data()?.subscriptionId === 'string'
-        ? checkoutSnapshot.data().subscriptionId.trim()
+      const checkoutSubscriptionId = typeof checkoutData.subscriptionId === 'string'
+        ? checkoutData.subscriptionId.trim()
         : '';
       if (checkoutSubscriptionId) entitlement.subscriptionId = checkoutSubscriptionId;
     }
-    if (referralsEnabled()) {
-      const rewardSnapshot = await db.collection('referralRewards')
-        .where('beneficiaryUid', '==', request.user.uid)
-        .get();
-      const now = Date.now();
-      const rewardRecords = (rewardSnapshot.docs || []).map(document => ({
-        id: document.id,
-        ...(document.data() || {})
-      }));
-      const revokedRewardIds = new Set(rewardRecords
-        .filter(reward => reward.rewardType === 'reversal')
-        .map(reward => reward.originalRewardId)
-        .filter(Boolean));
-      const unexpiredRewards = rewardRecords
-        .filter(reward => reward.rewardType !== 'reversal'
-          && !revokedRewardIds.has(reward.id)
-          && reward.status !== 'revoked'
-          && Number.isFinite(Number(reward.startsAt))
-          && Number.isFinite(Number(reward.expiresAt))
-          && Number(reward.expiresAt) > now
-          && Number(reward.expiresAt) > Number(reward.startsAt));
-      const activeRewards = unexpiredRewards
-        .filter(reward => Number(reward.startsAt) <= now);
-      const promotionalValidUntil = unexpiredRewards
-        .reduce((latest, reward) => Math.max(latest, Number(reward.expiresAt)), 0);
-      if (promotionalValidUntil > 0) {
-        const existingValidUntil = entitlement.lifetime ? 0 : Number(entitlement.validUntil) || 0;
-        entitlement.promotionalValidUntil = promotionalValidUntil;
-        entitlement.promotionalRewardCount = unexpiredRewards.length;
-        const proIsCurrentlyActive = entitlement.planId === 'pro'
-          && entitlement.status === 'active'
-          && (entitlement.lifetime || existingValidUntil > now);
-        if (activeRewards.length || proIsCurrentlyActive) {
-          entitlement.planId = 'pro';
-          entitlement.status = 'active';
-          entitlement.validUntil = entitlement.lifetime
-            ? null
-            : Math.max(existingValidUntil, promotionalValidUntil);
-        }
+    const scheduledStartAt = Number(checkoutData.scheduledStartAt) || 0;
+    if (scheduledStartAt > now
+      && !['cancelled', 'completed', 'expired'].includes(checkoutData.status)) {
+      entitlement.pendingSubscriptionStartAt = scheduledStartAt;
+      entitlement.pendingSubscriptionPrepaidStartsAt = Number(checkoutData.prepaidAccessStartsAt) || null;
+      entitlement.pendingSubscriptionStatus = checkoutData.status || 'created';
+      entitlement.pendingSubscriptionPlan = checkoutData.planKey || null;
+    }
+    const referralAccess = await referralPromotionalAccess(db, request.user.uid, now);
+    if (referralAccess.promotionalValidUntil > 0) {
+      const existingValidUntil = entitlement.lifetime ? 0 : Number(entitlement.validUntil) || 0;
+      entitlement.promotionalValidUntil = referralAccess.promotionalValidUntil;
+      entitlement.promotionalRewardCount = referralAccess.unexpiredRewards.length;
+      const proIsCurrentlyActive = entitlement.planId === 'pro'
+        && entitlement.status === 'active'
+        && (entitlement.lifetime || existingValidUntil > now);
+      if (referralAccess.activeRewards.length || proIsCurrentlyActive) {
+        entitlement.planId = 'pro';
+        entitlement.status = 'active';
+        entitlement.validUntil = entitlement.lifetime
+          ? null
+          : Math.max(existingValidUntil, referralAccess.promotionalValidUntil);
       }
     }
+    const activeStoredPro = hasActiveProEntitlement(data, now);
+    const activePaidSubscription = activeStoredPro
+      && (['monthly', 'yearly'].includes(data.billingPlan) || Boolean(data.subscriptionId));
+    entitlement.canScheduleSubscriptionAfterPromotional = !activePaidSubscription
+      && data.lifetime !== true
+      && (activeStoredPro && data.billingPlan === 'voucher'
+        || referralAccess.activeRewards.length > 0
+          && data.source !== 'admin'
+          && data.billingPlan !== 'admin');
     response.json({ entitlement });
   } catch (error) {
     console.error('Could not load billing entitlement.', error);
@@ -5311,16 +5343,42 @@ app.post('/api/billing/subscriptions', requireBillingConfig, requireFirebaseUser
     const providerPlan = await verifiedProviderPlan(planKey, currency, pricing);
     const checkoutRef = userCheckoutDocument(db, request.user.uid);
     const requestId = randomUUID();
-    const checkout = await db.runTransaction(async transaction => {
+    const now = Date.now();
+    const referralAccess = await referralPromotionalAccess(db, request.user.uid, now);
+    let checkout = await db.runTransaction(async transaction => {
       const [entitlementSnapshot, checkoutSnapshot] = await Promise.all([
         transaction.get(userEntitlementDocument(db, request.user.uid)),
         transaction.get(checkoutRef)
       ]);
-      if (publicEntitlement(entitlementSnapshot.data()).status === 'active') {
+      const currentEntitlement = entitlementSnapshot.data() || {};
+      const activePro = hasActiveProEntitlement(currentEntitlement, now);
+      const activePaidSubscription = activePro
+        && (['monthly', 'yearly'].includes(currentEntitlement.billingPlan)
+          || Boolean(currentEntitlement.subscriptionId));
+      const activeVoucher = activePro
+        && currentEntitlement.billingPlan === 'voucher'
+        && currentEntitlement.lifetime !== true;
+      const activeReferral = referralAccess.activeRewards.length > 0
+        && !activePaidSubscription
+        && currentEntitlement.lifetime !== true
+        && currentEntitlement.source !== 'admin'
+        && currentEntitlement.billingPlan !== 'admin';
+      const canScheduleAfterPromotion = !activePaidSubscription && (activeVoucher || activeReferral);
+      if (activePro && !canScheduleAfterPromotion) {
         const error = new Error('This account already has active Pro access.');
         error.status = 409;
         throw error;
       }
+      const promotionalValidUntil = Math.max(
+        activeVoucher ? entitlementValidUntil(currentEntitlement) : 0,
+        activeReferral ? referralAccess.promotionalValidUntil : 0
+      );
+      const prepaidAccessStartsAt = canScheduleAfterPromotion && promotionalValidUntil > now
+        ? promotionalValidUntil
+        : null;
+      const scheduledStartAt = prepaidAccessStartsAt
+        ? billingPeriodEnd(prepaidAccessStartsAt, plan.period)
+        : null;
       if (checkoutSnapshot.exists) {
         const current = checkoutSnapshot.data();
         const subscriptionEnded = current.status === 'expired'
@@ -5332,28 +5390,54 @@ app.post('/api/billing/subscriptions', requireBillingConfig, requireFirebaseUser
             requestId,
             planKey,
             currency,
+            scheduledStartAt,
+            prepaidAccessStartsAt,
             status: 'creating',
             createdAt: Date.now(),
             updatedAt: Date.now(),
             subscriptionId: null,
             currentEnd: 0
           });
-          return { requestId, reused: false };
+          return { requestId, reused: false, scheduledStartAt, prepaidAccessStartsAt };
         }
         if (current.planKey === planKey && current.subscriptionId) {
-          if ((current.currency || 'INR') === currency) return { subscriptionId: current.subscriptionId, reused: true };
+          if ((current.currency || 'INR') === currency) {
+            const currentUpfrontAmount = Number(current.upfrontAmount) || 0;
+            const currentPrepaidStartsAt = Number(current.prepaidAccessStartsAt) || null;
+            const currentScheduledStartAt = Number(current.scheduledStartAt) || null;
+            if (currentUpfrontAmount === (prepaidAccessStartsAt ? plan.amount : 0)
+              && currentPrepaidStartsAt === prepaidAccessStartsAt
+              && currentScheduledStartAt === scheduledStartAt) {
+              return {
+                subscriptionId: current.subscriptionId,
+                reused: true,
+                scheduledStartAt: currentScheduledStartAt,
+                prepaidAccessStartsAt: currentPrepaidStartsAt
+              };
+            }
+          }
         }
         if (current.status === 'creating' && Date.now() - Number(current.createdAt) > 5 * 60 * 1000) {
           transaction.set(checkoutRef, {
             requestId,
             planKey,
             currency,
+            scheduledStartAt,
+            prepaidAccessStartsAt,
             status: 'creating',
             createdAt: Date.now(),
             updatedAt: Date.now(),
             subscriptionId: null
           });
-          return { requestId, reused: false };
+          return { requestId, reused: false, scheduledStartAt, prepaidAccessStartsAt };
+        }
+        if (current.subscriptionId) {
+          return {
+            replaceSubscriptionId: current.subscriptionId,
+            previousRequestId: current.requestId || null,
+            scheduledStartAt,
+            prepaidAccessStartsAt
+          };
         }
         const error = new Error('This account already has a pending subscription checkout. Finish or wait for it to expire before choosing another plan.');
         error.status = 409;
@@ -5363,12 +5447,73 @@ app.post('/api/billing/subscriptions', requireBillingConfig, requireFirebaseUser
         requestId,
         planKey,
         currency,
+        scheduledStartAt,
+        prepaidAccessStartsAt,
         status: 'creating',
         createdAt: Date.now(),
         updatedAt: Date.now()
       });
-      return { requestId, reused: false };
+      return { requestId, reused: false, scheduledStartAt, prepaidAccessStartsAt };
     });
+    if (checkout.replaceSubscriptionId) {
+      const previousSubscriptionId = checkout.replaceSubscriptionId;
+      const previousProviderSubscription = await razorpayRequest(
+        `/subscriptions/${encodeURIComponent(previousSubscriptionId)}`
+      );
+      if (previousProviderSubscription.status !== 'created') {
+        const error = new Error(
+          `The existing Razorpay subscription is ${previousProviderSubscription.status || 'not ready'} and cannot be replaced. Complete or cancel that checkout first.`
+        );
+        error.status = 409;
+        throw error;
+      }
+      await razorpayRequest(`/subscriptions/${encodeURIComponent(previousSubscriptionId)}/cancel`, {
+        method: 'POST',
+        body: { cancel_at_cycle_end: false }
+      });
+      const cancelledProviderSubscription = await razorpayRequest(
+        `/subscriptions/${encodeURIComponent(previousSubscriptionId)}`
+      );
+      if (!['cancelled', 'completed', 'expired'].includes(cancelledProviderSubscription.status)) {
+        const error = new Error('The previous Razorpay checkout could not be cancelled. Retry or finish that checkout before choosing another plan.');
+        error.status = 409;
+        throw error;
+      }
+      await db.runTransaction(async transaction => {
+        const currentCheckout = await transaction.get(checkoutRef);
+        const currentData = currentCheckout.data() || {};
+        if (!currentCheckout.exists
+          || currentData.subscriptionId !== previousSubscriptionId
+          || (currentData.requestId || null) !== checkout.previousRequestId) {
+          const error = new Error('The saved checkout changed. Refresh the Plans page and retry.');
+          error.status = 409;
+          throw error;
+        }
+        transaction.set(subscriptionDocument(db, previousSubscriptionId), {
+          status: cancelledProviderSubscription.status,
+          currentEnd: 0,
+          updatedAt: Date.now()
+        }, { merge: true });
+        transaction.set(checkoutRef, {
+          requestId,
+          planKey,
+          currency,
+          scheduledStartAt: checkout.scheduledStartAt,
+          prepaidAccessStartsAt: checkout.prepaidAccessStartsAt,
+          status: 'creating',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          subscriptionId: null,
+          currentEnd: 0
+        });
+      });
+      checkout = {
+        requestId,
+        reused: false,
+        scheduledStartAt: checkout.scheduledStartAt,
+        prepaidAccessStartsAt: checkout.prepaidAccessStartsAt
+      };
+    }
     if (checkout.reused) {
       const reusedProviderSubscription = await razorpayRequest(
         `/subscriptions/${encodeURIComponent(checkout.subscriptionId)}`
@@ -5412,6 +5557,8 @@ app.post('/api/billing/subscriptions', requireBillingConfig, requireFirebaseUser
         response.json({
           subscriptionId: checkout.subscriptionId,
           keyId: process.env.RAZORPAY_KEY_ID,
+          scheduledAt: checkout.prepaidAccessStartsAt,
+          recurringAt: checkout.scheduledStartAt,
           plan: {
             ...plan,
             amount: Number.isSafeInteger(reusedAmount) && reusedAmount > 0 ? reusedAmount : plan.amount
@@ -5429,6 +5576,20 @@ app.post('/api/billing/subscriptions', requireBillingConfig, requireFirebaseUser
         total_count: plan.totalCount,
         quantity: 1,
         customer_notify: 1,
+        ...(checkout.scheduledStartAt
+          ? { start_at: Math.ceil(checkout.scheduledStartAt / 1000) }
+          : {}),
+        ...(checkout.prepaidAccessStartsAt
+          ? {
+              addons: [{
+                item: {
+                  name: `${plan.label} first billing period`,
+                  amount: plan.amount,
+                  currency
+                }
+              }]
+            }
+          : {}),
         notes: { plan_key: planKey, currency }
       }
     });
@@ -5444,6 +5605,10 @@ app.post('/api/billing/subscriptions', requireBillingConfig, requireFirebaseUser
         amount: plan.amount,
         status: created.status || 'created',
         currentEnd: 0,
+        scheduledStartAt: checkout.scheduledStartAt,
+        prepaidAccessStartsAt: checkout.prepaidAccessStartsAt,
+        prepaidAccessUntil: checkout.scheduledStartAt,
+        upfrontAmount: checkout.prepaidAccessStartsAt ? plan.amount : 0,
         createdAt,
         updatedAt: createdAt
       });
@@ -5452,18 +5617,26 @@ app.post('/api/billing/subscriptions', requireBillingConfig, requireFirebaseUser
         planId: providerPlan.id,
         amount: plan.amount,
         status: created.status || 'created',
+        scheduledStartAt: checkout.scheduledStartAt,
+        prepaidAccessStartsAt: checkout.prepaidAccessStartsAt,
+        prepaidAccessUntil: checkout.scheduledStartAt,
+        upfrontAmount: checkout.prepaidAccessStartsAt ? plan.amount : 0,
         updatedAt: createdAt
       }, { merge: true });
     });
     await recordBillingActivity(db, request.user.uid, {
       type: 'subscription', status: 'pending', title: `${plan.label} checkout started`,
-      detail: 'Razorpay subscription checkout was created.', planKey,
+      detail: checkout.prepaidAccessStartsAt
+        ? `Checkout will charge the first ${plan.period === 'yearly' ? 'year' : 'month'} of ${plan.label.toLowerCase()} now. That prepaid period starts after promotional Pro access ends on ${new Date(checkout.prepaidAccessStartsAt).toLocaleDateString('en-IN')}; recurring billing begins after the prepaid period.`
+        : 'Razorpay subscription checkout was created.', planKey,
       currency, providerSubscriptionId: created.id,
       amount: plan.amount
     });
     response.status(201).json({
       subscriptionId: created.id,
       keyId: process.env.RAZORPAY_KEY_ID,
+      scheduledAt: checkout.prepaidAccessStartsAt,
+      recurringAt: checkout.scheduledStartAt,
       plan
     });
   } catch (error) {
@@ -5536,7 +5709,23 @@ app.post('/api/billing/verify', requireBillingConfig, requireFirebaseUser, async
       return;
     }
 
-    const entitlement = entitlementFromSubscription(subscription, mapping.planKey);
+    const deferredStartPending = Number(mapping.scheduledStartAt) > Date.now();
+    const prepaidAccessUntil = Number(mapping.prepaidAccessUntil);
+    const prepaidPeriodPending = deferredStartPending
+      && Number.isFinite(prepaidAccessUntil)
+      && prepaidAccessUntil > Date.now();
+    const entitlement = prepaidPeriodPending
+      ? {
+        planId: 'pro',
+        billingPlan: mapping.planKey,
+        status: 'active',
+        source: 'server-verified',
+        lifetime: false,
+        validUntil: prepaidAccessUntil
+      }
+      : deferredStartPending
+        ? null
+        : entitlementFromSubscription(subscription, mapping.planKey);
     if (payment.status === 'captured' && entitlement?.status === 'active') {
       entitlement.currency = currency;
       let accessRevoked = false;
@@ -5576,7 +5765,9 @@ app.post('/api/billing/verify', requireBillingConfig, requireFirebaseUser, async
           uid: request.user.uid,
           subscriptionId: razorpaySubscriptionId,
           planKey: mapping.planKey,
-          validFrom: Number(payment.created_at) > 0 ? Number(payment.created_at) * 1000 : Date.now(),
+          validFrom: prepaidPeriodPending && Number(mapping.prepaidAccessStartsAt) > 0
+            ? Number(mapping.prepaidAccessStartsAt)
+            : Number(payment.created_at) > 0 ? Number(payment.created_at) * 1000 : Date.now(),
           validUntil: entitlement.validUntil,
           paymentId: razorpayPaymentId,
           paymentMode: payment.method || subscription.payment_method || 'unknown',
@@ -5601,21 +5792,133 @@ app.post('/api/billing/verify', requireBillingConfig, requireFirebaseUser, async
       }, { merge: true });
       await recordBillingActivity(db, request.user.uid, {
         type: 'payment', status: 'success', title: 'Subscription payment verified',
-        detail: `${mapping.planKey === 'yearly' ? 'Yearly' : 'Monthly'} Pro access is active.`,
+        detail: prepaidPeriodPending
+          ? `The first ${mapping.planKey === 'yearly' ? 'year' : 'month'} of Pro is paid and will begin after promotional access ends.`
+          : `${mapping.planKey === 'yearly' ? 'Yearly' : 'Monthly'} Pro access is active.`,
         planKey: mapping.planKey, providerSubscriptionId: razorpaySubscriptionId,
         currency, amount: payment.amount
       });
       response.json({ verified: true, entitlement });
       return;
     }
+    if (deferredStartPending) {
+      await db.runTransaction(async transaction => {
+        const [currentMappingSnapshot, currentCheckoutSnapshot] = await Promise.all([
+          transaction.get(mappingRef),
+          transaction.get(userCheckoutDocument(db, request.user.uid))
+        ]);
+        if (currentMappingSnapshot.data()?.uid !== request.user.uid
+          || currentMappingSnapshot.data()?.adminRevoked === true) return;
+        transaction.set(mappingRef, {
+          status: subscription.status,
+          updatedAt: Date.now()
+        }, { merge: true });
+        if (currentCheckoutSnapshot.data()?.subscriptionId === razorpaySubscriptionId) {
+          transaction.set(userCheckoutDocument(db, request.user.uid), {
+            status: subscription.status,
+            updatedAt: Date.now()
+          }, { merge: true });
+        }
+      });
+    }
     response.json({
       verified: true,
       pending: true,
-      message: 'Payment was verified. Pro access will become available after Razorpay confirms subscription activation.'
+      message: deferredStartPending
+        ? 'Your monthly subscription is set up and will start after your current Pro access ends.'
+        : 'Payment was verified. Pro access will become available after Razorpay confirms subscription activation.'
     });
   } catch (error) {
     console.error('Could not verify Razorpay checkout.', error);
     response.status(502).json({ error: 'Could not verify payment status. Your payment will be reconciled by the Razorpay webhook.' });
+  }
+});
+
+app.post('/api/billing/checkout/cancel', requireBillingConfig, requireFirebaseUser, async (request, response) => {
+  const subscriptionId = typeof request.body?.subscriptionId === 'string'
+    ? request.body.subscriptionId.trim()
+    : '';
+  if (!/^sub_[A-Za-z0-9]+$/.test(subscriptionId)) {
+    response.status(400).json({ error: 'A valid checkout subscription ID is required.' });
+    return;
+  }
+
+  try {
+    const { db } = await getFirebaseAdmin();
+    const checkoutRef = userCheckoutDocument(db, request.user.uid);
+    const mappingRef = subscriptionDocument(db, subscriptionId);
+    const [checkoutSnapshot, mappingSnapshot] = await Promise.all([
+      checkoutRef.get(),
+      mappingRef.get()
+    ]);
+    if (checkoutSnapshot.data()?.subscriptionId !== subscriptionId
+      || !mappingSnapshot.exists
+      || mappingSnapshot.data()?.uid !== request.user.uid) {
+      response.status(404).json({ error: 'This pending checkout was not found for your account.' });
+      return;
+    }
+
+    let providerSubscription = await razorpayRequest(
+      `/subscriptions/${encodeURIComponent(subscriptionId)}`
+    );
+    if (providerSubscription.status === 'created') {
+      await razorpayRequest(`/subscriptions/${encodeURIComponent(subscriptionId)}/cancel`, {
+        method: 'POST',
+        body: { cancel_at_cycle_end: false }
+      });
+      providerSubscription = await razorpayRequest(
+        `/subscriptions/${encodeURIComponent(subscriptionId)}`
+      );
+    }
+    const paidCount = Number(providerSubscription.paid_count) || 0;
+    const currentEnd = Number(providerSubscription.current_end) * 1000;
+    const isUnpaidAndStopped = ['cancelled', 'expired'].includes(providerSubscription.status)
+      && paidCount === 0
+      && (!Number.isFinite(currentEnd) || currentEnd <= Date.now());
+    if (!isUnpaidAndStopped) {
+      response.status(409).json({
+        error: 'Razorpay could not confirm this checkout was cancelled before payment. Refresh your plan status before trying again.'
+      });
+      return;
+    }
+
+    await db.runTransaction(async transaction => {
+      const [currentCheckout, currentMapping] = await Promise.all([
+        transaction.get(checkoutRef),
+        transaction.get(mappingRef)
+      ]);
+      if (currentCheckout.data()?.subscriptionId !== subscriptionId
+        || currentMapping.data()?.uid !== request.user.uid) {
+        const error = new Error('The saved checkout changed. Refresh your Plans page before trying again.');
+        error.status = 409;
+        throw error;
+      }
+      transaction.set(mappingRef, {
+        status: providerSubscription.status,
+        currentEnd: 0,
+        checkoutCancelledAt: Date.now(),
+        updatedAt: Date.now()
+      }, { merge: true });
+      transaction.set(checkoutRef, {
+        subscriptionId: null,
+        planId: null,
+        planKey: null,
+        amount: null,
+        status: 'cancelled',
+        currentEnd: 0,
+        scheduledStartAt: null,
+        updatedAt: Date.now()
+      }, { merge: true });
+    });
+
+    response.json({ cancelled: true });
+  } catch (error) {
+    console.error('Could not cancel pending Razorpay checkout.', error);
+    response.status(error.status === 409 ? 409 : 502).json({
+      error: error.status === 409
+        ? error.message
+        : 'Could not confirm checkout cancellation with Razorpay. Refresh your plan status before trying again.'
+    });
   }
 });
 

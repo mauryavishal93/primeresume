@@ -1,7 +1,7 @@
 import test, { after, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
-import { voucherDocumentId } from '../backend/billing.js';
+import { billingPeriodEnd, voucherDocumentId } from '../backend/billing.js';
 import { adminEmails, app, normalizeAdminEmail } from '../backend/server.js';
 
 const environment = {
@@ -461,6 +461,276 @@ test('earned scheduled referral days extend active Pro expiry without extending 
     else fakeDatabase.records.set(rewardKey, originalReward);
     if (originalFreeReward === undefined) fakeDatabase.records.delete(freeRewardKey);
     else fakeDatabase.records.set(freeRewardKey, originalFreeReward);
+    if (originalReferralFlag === undefined) delete process.env.REFERRALS_ENABLED;
+    else process.env.REFERRALS_ENABLED = originalReferralFlag;
+  }
+});
+
+test('active voucher and referral Pro can prepay a plan period before recurring billing begins', async () => {
+  const originalReferralFlag = process.env.REFERRALS_ENABLED;
+  const originalRazorpayRequest = app.locals.razorpayRequest;
+  const uidKeys = [
+    'users/user-3/billing/entitlement',
+    'users/user-3/billing/checkout',
+    'users/user-4/billing/entitlement',
+    'users/user-4/billing/checkout',
+    'users/user-2/billing/entitlement',
+    'users/user-2/billing/checkout',
+    'users/user-1/billing/entitlement',
+    'users/user-1/billing/checkout'
+  ];
+  const rewardKey = 'referralRewards/test-deferred-subscription-reward';
+  const legacySubscriptionId = 'sub_legacyvoucher';
+  const deferredPaymentKeys = ['billingPayments/pay_deferredverify', 'billingAccessHistory/pay_deferredverify'];
+  const previousDeferredPaymentRecords = deferredPaymentKeys
+    .map(key => [key, fakeDatabase.records.get(key)]);
+  const previousActivityKeys = new Set([...fakeDatabase.records.keys()]
+    .filter(key => key.startsWith('users/user-3/billingActivity/')));
+  const keys = [...uidKeys, rewardKey];
+  const previousRecords = keys.map(key => [key, fakeDatabase.records.get(key)]);
+  const createdSubscriptionIds = [];
+  const subscriptionRequests = [];
+  const previousNextSubscriptionId = nextSubscriptionId;
+  const now = Date.now();
+  const voucherValidUntil = now + 5 * 86_400_000;
+  const referralValidUntil = now + 8 * 86_400_000;
+  process.env.REFERRALS_ENABLED = 'true';
+  fakeDatabase.records.set(uidKeys[0], {
+    planId: 'pro',
+    billingPlan: 'voucher',
+    status: 'active',
+    source: 'server-verified',
+    lifetime: false,
+    validUntil: voucherValidUntil
+  });
+  fakeDatabase.records.set(`billingSubscriptions/${legacySubscriptionId}`, {
+    uid: 'user-3',
+    planKey: 'monthly',
+    currency: 'INR',
+    planId: 'plan_monthly_test',
+    amount: 9900,
+    status: 'created'
+  });
+  providerSubscriptions.set(legacySubscriptionId, {
+    id: legacySubscriptionId,
+    plan_id: 'plan_monthly_test',
+    status: 'created',
+    paid_count: 0
+  });
+  fakeDatabase.records.set(uidKeys[2], {
+    planId: 'free',
+    billingPlan: 'free',
+    status: 'inactive',
+    source: 'server-verified',
+    lifetime: false,
+    validUntil: 0
+  });
+  fakeDatabase.records.set(rewardKey, {
+    beneficiaryUid: 'user-4',
+    rewardType: 'registration',
+    status: 'active',
+    startsAt: now - 1000,
+    expiresAt: referralValidUntil
+  });
+  for (const checkoutIndex of [1, 3, 5, 7]) {
+    fakeDatabase.records.delete(uidKeys[checkoutIndex]);
+  }
+  fakeDatabase.records.set(uidKeys[1], {
+    requestId: 'legacy_voucher_checkout',
+    planKey: 'monthly',
+    currency: 'INR',
+    scheduledStartAt: voucherValidUntil,
+    status: 'created',
+    subscriptionId: legacySubscriptionId
+  });
+  app.locals.razorpayRequest = async (endpoint, options = {}) => {
+    if (endpoint === '/subscriptions' && options.method === 'POST') {
+      subscriptionRequests.push(options.body);
+    }
+    const result = await originalRazorpayRequest(endpoint, options);
+    if (endpoint === '/subscriptions' && options.method === 'POST') createdSubscriptionIds.push(result.id);
+    return result;
+  };
+  const trackingRazorpayRequest = app.locals.razorpayRequest;
+  app.locals.razorpayRequest = async (endpoint, options = {}) => {
+    const result = await trackingRazorpayRequest(endpoint, options);
+    const cancellation = endpoint.match(/^\/subscriptions\/([^/]+)\/cancel$/);
+    if (cancellation && options.method === 'POST') {
+      const current = providerSubscriptions.get(cancellation[1]);
+      if (current) providerSubscriptions.set(cancellation[1], { ...current, status: 'cancelled' });
+    }
+    return result;
+  };
+
+  try {
+    const voucherCheckout = await request('/api/billing/subscriptions', {
+      method: 'POST',
+      token: 'third-test-token',
+      body: { planKey: 'monthly', currency: 'INR', expectedAmount: 9900 }
+    });
+    const voucherBody = await voucherCheckout.json();
+    assert.equal(voucherCheckout.status, 201, JSON.stringify(voucherBody));
+    assert.equal(voucherBody.scheduledAt, voucherValidUntil);
+    const voucherMonthlyEnd = billingPeriodEnd(voucherValidUntil, 'monthly');
+    assert.equal(subscriptionRequests[0].start_at, Math.ceil(voucherMonthlyEnd / 1000));
+    assert.equal(subscriptionRequests[0].addons[0].item.amount, 9900);
+    assert.equal(providerCancellations.some(item => item.subscriptionId === legacySubscriptionId), true);
+    assert.equal(voucherBody.scheduledAt, voucherValidUntil);
+    assert.equal(voucherBody.recurringAt, voucherMonthlyEnd);
+    assert.equal(
+      fakeDatabase.records.get(`billingSubscriptions/${voucherBody.subscriptionId}`).scheduledStartAt,
+      voucherMonthlyEnd
+    );
+    const earlyActivation = {
+      id: voucherBody.subscriptionId,
+      plan_id: 'plan_monthly_test',
+      status: 'active',
+      current_end: Math.floor((voucherValidUntil + 30 * 86_400_000) / 1000)
+    };
+    providerSubscriptions.set(voucherBody.subscriptionId, earlyActivation);
+    const earlyActivationResponse = await signedWebhook({
+      id: 'evt_deferred_subscription_early_activation',
+      event: 'subscription.activated',
+      payload: { subscription: { entity: earlyActivation } }
+    });
+    assert.equal(earlyActivationResponse.status, 200);
+    const voucherAfterWebhook = fakeDatabase.records.get(uidKeys[0]);
+    assert.equal(voucherAfterWebhook.billingPlan, 'voucher');
+    assert.equal(voucherAfterWebhook.validUntil, voucherValidUntil);
+
+    const referralCheckout = await request('/api/billing/subscriptions', {
+      method: 'POST',
+      token: 'fourth-test-token',
+      body: { planKey: 'monthly', currency: 'INR', expectedAmount: 9900 }
+    });
+    const referralBody = await referralCheckout.json();
+    assert.equal(referralCheckout.status, 201, JSON.stringify(referralBody));
+    assert.equal(referralBody.scheduledAt, referralValidUntil);
+    assert.equal(subscriptionRequests[1].start_at, Math.ceil(billingPeriodEnd(referralValidUntil, 'monthly') / 1000));
+    assert.equal(subscriptionRequests[1].addons[0].item.amount, 9900);
+
+    const replacedCheckout = await request('/api/billing/subscriptions', {
+      method: 'POST',
+      token: 'fourth-test-token',
+      body: { planKey: 'yearly', currency: 'INR', expectedAmount: 39900 }
+    });
+    const replacedBody = await replacedCheckout.json();
+    assert.equal(replacedCheckout.status, 201, JSON.stringify(replacedBody));
+    assert.equal(replacedBody.scheduledAt, referralValidUntil);
+    const referralYearlyEnd = billingPeriodEnd(referralValidUntil, 'yearly');
+    assert.equal(subscriptionRequests[2].start_at, Math.ceil(referralYearlyEnd / 1000));
+    assert.equal(subscriptionRequests[2].addons[0].item.amount, 39900);
+    assert.equal(
+      fakeDatabase.records.get(`billingSubscriptions/${referralBody.subscriptionId}`).status,
+      'cancelled'
+    );
+    assert.equal(
+      providerCancellations.some(item => item.subscriptionId === referralBody.subscriptionId
+        && item.body.cancel_at_cycle_end === false),
+      true
+    );
+
+    const deferredPaymentId = 'pay_deferredverify';
+    const deferredPaymentSignature = createHmac('sha256', environment.RAZORPAY_KEY_SECRET)
+      .update(`${deferredPaymentId}|${voucherBody.subscriptionId}`)
+      .digest('hex');
+    app.locals.razorpayRequest = async (endpoint, options = {}) => {
+      if (endpoint === `/payments/${deferredPaymentId}`) {
+        return {
+          id: deferredPaymentId,
+          subscription_id: voucherBody.subscriptionId,
+          status: 'captured',
+          amount: 9900,
+          currency: 'INR',
+          created_at: Math.floor(Date.now() / 1000)
+        };
+      }
+      return originalRazorpayRequest(endpoint, options);
+    };
+    const verification = await request('/api/billing/verify', {
+      method: 'POST',
+      token: 'third-test-token',
+      body: {
+        razorpayPaymentId: deferredPaymentId,
+        razorpaySubscriptionId: voucherBody.subscriptionId,
+        razorpaySignature: deferredPaymentSignature
+      }
+    });
+    const verificationBody = await verification.json();
+    assert.equal(verification.status, 200, JSON.stringify(verificationBody));
+    assert.equal(verificationBody.pending, undefined);
+    assert.equal(verificationBody.entitlement.status, 'active');
+    assert.equal(fakeDatabase.records.get(uidKeys[0]).billingPlan, 'monthly');
+    assert.equal(fakeDatabase.records.get(uidKeys[0]).validUntil, voucherMonthlyEnd);
+    app.locals.razorpayRequest = trackingRazorpayRequest;
+
+    fakeDatabase.records.set(uidKeys[4], {
+      planId: 'pro',
+      billingPlan: 'voucher',
+      status: 'active',
+      source: 'server-verified',
+      lifetime: false,
+      validUntil: voucherValidUntil
+    });
+    const voucherYearly = await request('/api/billing/subscriptions', {
+      method: 'POST',
+      token: 'other-test-token',
+      body: { planKey: 'yearly', currency: 'INR', expectedAmount: 39900 }
+    });
+    const voucherYearlyBody = await voucherYearly.json();
+    assert.equal(voucherYearly.status, 201, JSON.stringify(voucherYearlyBody));
+    assert.equal(voucherYearlyBody.scheduledAt, voucherValidUntil);
+    assert.equal(subscriptionRequests[3].start_at, Math.ceil(billingPeriodEnd(voucherValidUntil, 'yearly') / 1000));
+    assert.equal(subscriptionRequests[3].addons[0].item.amount, 39900);
+
+    fakeDatabase.records.set(uidKeys[6], {
+      planId: 'pro',
+      billingPlan: 'monthly',
+      status: 'active',
+      source: 'server-verified',
+      validUntil: now + 30 * 86_400_000,
+      subscriptionId: 'sub_activepaidcheckout'
+    });
+    const activePaidCheckout = await request('/api/billing/subscriptions', {
+      method: 'POST',
+      token: 'valid-test-token',
+      body: { planKey: 'monthly', currency: 'INR', expectedAmount: 9900 }
+    });
+    assert.equal(activePaidCheckout.status, 409);
+    assert.match((await activePaidCheckout.json()).error, /already has active Pro access/i);
+    assert.equal(subscriptionRequests.length, 4);
+
+    const voucherEntitlementResponse = await request('/api/billing/entitlement', {
+      token: 'third-test-token'
+    });
+    const voucherEntitlement = (await voucherEntitlementResponse.json()).entitlement;
+    assert.equal(voucherEntitlement.canScheduleSubscriptionAfterPromotional, false);
+    assert.equal(voucherEntitlement.pendingSubscriptionStartAt, voucherMonthlyEnd);
+    assert.equal(voucherEntitlement.pendingSubscriptionPrepaidStartsAt, voucherValidUntil);
+    assert.equal(voucherEntitlement.pendingSubscriptionPlan, 'monthly');
+  } finally {
+    app.locals.razorpayRequest = originalRazorpayRequest;
+    providerSubscriptions.delete(legacySubscriptionId);
+    fakeDatabase.records.delete(`billingSubscriptions/${legacySubscriptionId}`);
+    for (const key of deferredPaymentKeys) fakeDatabase.records.delete(key);
+    for (const key of [...fakeDatabase.records.keys()]) {
+      if (key.startsWith('users/user-3/billingActivity/') && !previousActivityKeys.has(key)) {
+        fakeDatabase.records.delete(key);
+      }
+    }
+    for (const [key, value] of previousDeferredPaymentRecords) {
+      if (value === undefined) fakeDatabase.records.delete(key);
+      else fakeDatabase.records.set(key, value);
+    }
+    for (const subscriptionId of createdSubscriptionIds) {
+      fakeDatabase.records.delete(`billingSubscriptions/${subscriptionId}`);
+      providerSubscriptions.delete(subscriptionId);
+    }
+    for (const [key, value] of previousRecords) {
+      if (value === undefined) fakeDatabase.records.delete(key);
+      else fakeDatabase.records.set(key, value);
+    }
+    nextSubscriptionId = previousNextSubscriptionId;
     if (originalReferralFlag === undefined) delete process.env.REFERRALS_ENABLED;
     else process.env.REFERRALS_ENABLED = originalReferralFlag;
   }
@@ -2316,6 +2586,122 @@ test('checkout replaces expired subscriptions and does not reopen authorized sub
     else fakeDatabase.records.delete(`billingSubscriptions/${expiredId}`);
     if (previousAuthorized) fakeDatabase.records.set(`billingSubscriptions/${authorizedId}`, previousAuthorized);
     else fakeDatabase.records.delete(`billingSubscriptions/${authorizedId}`);
+  }
+});
+
+test('dismissing an unpaid checkout clears it and allows a different subscription plan', async () => {
+  const uid = 'user-4';
+  const checkoutKey = `users/${uid}/billing/checkout`;
+  const entitlementKey = `users/${uid}/billing/entitlement`;
+  const subscriptionId = 'sub_usercancelcheckout';
+  const keys = [
+    checkoutKey,
+    entitlementKey,
+    `billingSubscriptions/${subscriptionId}`
+  ];
+  const previousRecords = keys.map(key => [key, fakeDatabase.records.get(key)]);
+  const previousProviderSubscription = providerSubscriptions.get(subscriptionId);
+  const originalRazorpayRequest = app.locals.razorpayRequest;
+  const previousNextSubscriptionId = nextSubscriptionId;
+  let newSubscriptionId;
+  const scheduledStartAt = Date.now() + 10 * 86_400_000;
+  fakeDatabase.records.set(checkoutKey, {
+    requestId: 'cancel-checkout-request',
+    subscriptionId,
+    planKey: 'monthly',
+    currency: 'INR',
+    status: 'created',
+    scheduledStartAt,
+    currentEnd: 0
+  });
+  fakeDatabase.records.set(entitlementKey, {
+    planId: 'free',
+    billingPlan: 'free',
+    status: 'inactive',
+    source: 'server-verified',
+    lifetime: false,
+    validUntil: 0
+  });
+  fakeDatabase.records.set(`billingSubscriptions/${subscriptionId}`, {
+    uid,
+    planKey: 'monthly',
+    planId: 'plan_monthly_test',
+    status: 'created',
+    scheduledStartAt
+  });
+  providerSubscriptions.set(subscriptionId, {
+    id: subscriptionId,
+    plan_id: 'plan_monthly_test',
+    status: 'created',
+    paid_count: 0,
+    current_end: null
+  });
+  app.locals.razorpayRequest = async (endpoint, options = {}) => {
+    const cancellation = endpoint.match(/^\/subscriptions\/([^/]+)\/cancel$/);
+    if (cancellation && options.method === 'POST') {
+      const current = providerSubscriptions.get(cancellation[1]);
+      if (current) {
+        providerSubscriptions.set(cancellation[1], { ...current, status: 'cancelled' });
+      }
+    }
+    return originalRazorpayRequest(endpoint, options);
+  };
+
+  try {
+    const cancelled = await request('/api/billing/checkout/cancel', {
+      method: 'POST',
+      token: 'fourth-test-token',
+      body: { subscriptionId }
+    });
+    assert.equal(cancelled.status, 200, JSON.stringify(await cancelled.clone().json()));
+    assert.equal((await cancelled.json()).cancelled, true);
+    assert.equal(fakeDatabase.records.get(`billingSubscriptions/${subscriptionId}`).status, 'cancelled');
+    const clearedCheckout = fakeDatabase.records.get(checkoutKey);
+    assert.equal(clearedCheckout.status, 'cancelled');
+    assert.equal(clearedCheckout.subscriptionId, null);
+    assert.equal(clearedCheckout.scheduledStartAt, null);
+    assert.equal(clearedCheckout.amount, null);
+
+    const yearly = await request('/api/billing/subscriptions', {
+      method: 'POST',
+      token: 'fourth-test-token',
+      body: { planKey: 'yearly', currency: 'INR', expectedAmount: 39900 }
+    });
+    const yearlyBody = await yearly.json();
+    assert.equal(yearly.status, 201, JSON.stringify(yearlyBody));
+    newSubscriptionId = yearlyBody.subscriptionId;
+    assert.equal(
+      fakeDatabase.records.get(`billingSubscriptions/${yearlyBody.subscriptionId}`).planId,
+      'plan_yearly_test'
+    );
+    assert.equal(yearlyBody.scheduledAt, null);
+    providerSubscriptions.set(yearlyBody.subscriptionId, {
+      ...providerSubscriptions.get(yearlyBody.subscriptionId),
+      status: 'authenticated'
+    });
+    const authorizedCancellation = await request('/api/billing/checkout/cancel', {
+      method: 'POST',
+      token: 'fourth-test-token',
+      body: { subscriptionId: yearlyBody.subscriptionId }
+    });
+    assert.equal(authorizedCancellation.status, 409);
+    assert.equal(
+      fakeDatabase.records.get(checkoutKey).subscriptionId,
+      yearlyBody.subscriptionId
+    );
+  } finally {
+    app.locals.razorpayRequest = originalRazorpayRequest;
+    if (newSubscriptionId) {
+      fakeDatabase.records.delete(`billingSubscriptions/${newSubscriptionId}`);
+      providerSubscriptions.delete(newSubscriptionId);
+    }
+    nextSubscriptionId = previousNextSubscriptionId;
+    for (const [key, value] of previousRecords) {
+      if (value === undefined) fakeDatabase.records.delete(key);
+      else fakeDatabase.records.set(key, value);
+    }
+    if (previousProviderSubscription) providerSubscriptions.set(subscriptionId, previousProviderSubscription);
+    else providerSubscriptions.delete(subscriptionId);
   }
 });
 

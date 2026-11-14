@@ -167,6 +167,13 @@ export async function createBillingSubscription(user, planKey, currency, expecte
   });
 }
 
+export async function cancelBillingCheckout(user, subscriptionId) {
+  return billingRequest('checkout/cancel', user, {
+    method: 'POST',
+    body: { subscriptionId }
+  });
+}
+
 export async function scheduleBillingPlanChange(user, planKey) {
   return billingRequest('change-plan', user, {
     method: 'POST',

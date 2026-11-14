@@ -260,17 +260,23 @@ test('subscription management buttons are hidden unless the user is signed in', 
 
 test('all pricing plan actions use the same button dimensions and shape', () => {
   const styles = readFileSync(new URL('../frontend/src/pricing.css', import.meta.url), 'utf8');
-  assert.match(styles, /\.plan-action\{width:100%;min-height:54px;margin-top:auto;padding:14px 20px;justify-content:center;border-radius:10px;font-weight:750\}/);
-  assert.match(styles, /\.plan-card \.plan-action:is\(#purchaseMonthly,#purchaseYearly\)\{min-height:54px;padding:14px 20px;border:1px solid transparent;border-radius:10px;color:#fff;font-weight:750/);
+  assert.match(styles, /\.pricing-page \.plan-cards \.plan-action\{[^}]*width:100%;height:56px;min-height:56px;max-height:56px;[^}]*text-align:center\}/);
+  assert.doesNotMatch(styles, /#purchase(?:Monthly|Yearly)\.plan-action:not\(:disabled\)::after/);
+  assert.match(styles, /\.pricing-page #purchaseMonthly::before,\.pricing-page #purchaseMonthly::after,\.pricing-page #purchaseYearly::before,\.pricing-page #purchaseYearly::after\{display:none!important;content:none!important\}/);
 });
 
 test('unsupported Razorpay yearly changes offer an explicit end-of-cycle cancellation fallback', () => {
   const billingSource = readFileSync(new URL('../frontend/src/billing.js', import.meta.url), 'utf8');
+  const pricingSource = readFileSync(new URL('../frontend/src/pricing.js', import.meta.url), 'utf8');
   const clientSource = readFileSync(new URL('../frontend/src/billing-client.js', import.meta.url), 'utf8');
   assert.match(clientSource, /if \(typeof result\.code === 'string'\) error\.code = result\.code/);
   assert.match(billingSource, /error\.code === 'YEARLY_SWITCH_REQUIRES_CANCELLATION'/);
   assert.match(billingSource, /No yearly subscription or charge will be created now/);
   assert.match(billingSource, /await cancelBillingSubscription\(currentUser, entitlement\.subscriptionId\)/);
+  assert.match(pricingSource, /error\.code === 'YEARLY_SWITCH_REQUIRES_CANCELLATION'/);
+  assert.match(pricingSource, /monthly Pro access remains active through \$\{expiry\}/);
+  assert.match(pricingSource, /await cancelBillingSubscription\([\s\S]*?entitlement\.subscriptionId/);
+  assert.match(pricingSource, /entitlement\.cancelAtCycleEnd === true \|\| entitlement\.scheduledPlan === 'yearly'/);
 });
 
 test('Community and My Posts pages provide an Editor navigation button', () => {
@@ -460,6 +466,16 @@ test('subscription checkout lets the Razorpay plan determine its payment currenc
   assert.match(pricingSource, /failure\.code[\s\S]*failure\.description[\s\S]*failure\.reason[\s\S]*failure\.step/);
 });
 
+test('checkout charges the first plan period upfront and discloses deferred promotional billing', () => {
+  const pricingSource = readFileSync(new URL('../frontend/src/pricing.js', import.meta.url), 'utf8');
+  const pricingHtml = readFileSync(new URL('../frontend/pricing.html', import.meta.url), 'utf8');
+  assert.match(pricingSource, /title: 'Review subscription payment'/);
+  assert.match(pricingSource, /Razorpay will charge \$\{planPrice\} now for your first \$\{billingInterval\}/);
+  assert.match(pricingSource, /Your prepaid \$\{billingInterval\} starts after your current Pro access ends/);
+  assert.match(pricingHtml, /The selected plan price is charged at checkout: ₹99 for monthly or ₹399 for yearly/);
+  assert.match(pricingHtml, /recurring billing begins after the prepaid period/);
+});
+
 test('Razorpay checkout shows status-specific success, pending, and failure popups', () => {
   const pricingSource = readFileSync(new URL('../frontend/src/pricing.js', import.meta.url), 'utf8');
   assert.match(pricingSource, /import \{ alertModern, confirmModern \} from '\.\/modern-modal\.js'/);
@@ -481,12 +497,19 @@ test('Razorpay checkout shows status-specific success, pending, and failure popu
 
 test('closing Razorpay checkout shows a modern cancellation popup without duplicating payment outcomes', () => {
   const pricingSource = readFileSync(new URL('../frontend/src/pricing.js', import.meta.url), 'utf8');
+  const billingClientSource = readFileSync(new URL('../frontend/src/billing-client.js', import.meta.url), 'utf8');
   assert.match(pricingSource, /let paymentOutcomeReceived = false/);
   assert.match(pricingSource, /handler: async checkoutResponse => \{\s*paymentOutcomeReceived = true/);
-  assert.match(pricingSource, /ondismiss: \(\) => \{\s*if \(paymentOutcomeReceived\) return/);
-  assert.match(pricingSource, /title: 'Payment cancelled'/);
-  assert.match(pricingSource, /You closed Razorpay checkout before completing the payment/);
-  assert.match(pricingSource, /paymentOutcomeReceived = true;\s*const failure = event\.error/);
+  assert.match(pricingSource, /ondismiss: async \(\) => \{\s*if \(paymentOutcomeReceived\) return/);
+  assert.match(pricingSource, /await cancelBillingCheckout\(checkoutUser, created\.subscriptionId\)/);
+  assert.match(pricingSource, /The unpaid checkout was cancelled and cleared/);
+  assert.match(pricingSource, /Could not clean up the dismissed Razorpay checkout/);
+  assert.doesNotMatch(pricingSource, /paymentOutcomeReceived = true;\s*const failure = event\.error/);
+  assert.match(billingClientSource, /export async function cancelBillingCheckout\(user, subscriptionId\)/);
+  assert.match(billingClientSource, /billingRequest\('checkout\/cancel'/);
+  const serverSource = readFileSync(new URL('../backend/server.js', import.meta.url), 'utf8');
+  assert.match(serverSource, /app\.post\('\/api\/billing\/checkout\/cancel'/);
+  assert.match(serverSource, /isUnpaidAndStopped/);
 });
 
 test('successful subscription checkout refreshes Pro access and shows its expiry date', () => {
@@ -501,11 +524,11 @@ test('active subscribers see their plan and can manage billing even when checkou
   const pricingSource = readFileSync(new URL('../frontend/src/pricing.js', import.meta.url), 'utf8');
   const purchaseControls = pricingSource.match(/function updatePurchaseControls\(\) \{[\s\S]*?\n\}/)?.[0] || '';
   assert.ok(purchaseControls.indexOf('if (active)') < purchaseControls.indexOf('else if (!checkoutReady)'));
-  assert.match(purchaseControls, /monthlyButton\.textContent = 'Manage billing'/);
-  assert.match(purchaseControls, /yearlyButton\.textContent = entitlement\.scheduledPlan === 'yearly'/);
+  assert.match(purchaseControls, /: 'Manage billing'/);
+  assert.match(purchaseControls, /entitlement\.scheduledPlan === 'yearly'/);
   assert.match(purchaseControls, /'Switch to yearly'/);
-  assert.match(purchaseControls, /monthlyButton\.disabled = false/);
-  assert.match(purchaseControls, /yearlyButton\.disabled = entitlement\.scheduledPlan === 'yearly'/);
+  assert.match(purchaseControls, /monthlyButton\.disabled = canScheduleAfterPromotional/);
+  assert.match(purchaseControls, /yearlyButton\.disabled = canScheduleAfterPromotional/);
   assert.match(purchaseControls, /activePlan === 'voucher'\s*\?\s*entitlement\.lifetime \? 'Pro Lifetime Voucher' : 'Pro Voucher'/);
   assert.match(purchaseControls, /entitlement\.source === 'admin'\s*\?\s*' \(Admin granted\)'/);
   assert.match(purchaseControls, /\['monthly', 'yearly'\]\.includes\(activePlan\)\s*\?\s*' \(Subscription\)'/);
@@ -516,6 +539,19 @@ test('active subscribers see their plan and can manage billing even when checkou
   assert.match(pricingSource, /async function scheduleYearlySwitch\(\)/);
   assert.match(pricingSource, /scheduleBillingPlanChange\(currentUser, 'yearly'\)/);
   assert.match(pricingSource, /entitlement\?\.status === 'active'[\s\S]*?window\.location\.assign\('\/billing\.html'\)/);
+});
+
+test('active promotional Pro users can start monthly or yearly subscriptions after access expires', () => {
+  const pricingSource = readFileSync(new URL('../frontend/src/pricing.js', import.meta.url), 'utf8');
+  const purchaseControls = pricingSource.match(/function updatePurchaseControls\(\) \{[\s\S]*?\n\}/)?.[0] || '';
+  assert.match(purchaseControls, /entitlement\.canScheduleSubscriptionAfterPromotional === true/);
+  assert.match(purchaseControls, /'Start monthly after Pro expires'/);
+  assert.match(purchaseControls, /'Start yearly after Pro expires'/);
+  assert.match(purchaseControls, /'Complete monthly setup'/);
+  assert.match(purchaseControls, /monthly or yearly subscription that begins after your current Pro access ends/);
+  assert.match(pricingSource, /entitlement\.canScheduleSubscriptionAfterPromotional !== true\s*\?\s*window\.location\.assign\('\/billing\.html'\)\s*:\s*startCheckout\('monthly'\)/);
+  assert.match(pricingSource, /entitlement\.canScheduleSubscriptionAfterPromotional === true\) \{\s*return startCheckout\('yearly'\)/);
+  assert.match(pricingSource, /if \(created\.scheduledAt\) \{[\s\S]*?title: `\$\{scheduledPlanLabel\} subscription scheduled`/);
 });
 
 test('inactive users see a friendly no-plan status on the Plans page', () => {

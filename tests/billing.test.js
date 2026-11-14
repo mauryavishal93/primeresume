@@ -7,6 +7,7 @@ import {
   billingPlanEnvKey,
   BILLING_CURRENCY_PLANS,
   BILLING_PLANS,
+  billingPeriodEnd,
   billingCheckoutConfigured,
   billingConfigured,
   configuredVouchers,
@@ -40,6 +41,13 @@ test('international billing plans use the requested fixed USD prices', () => {
   );
   assert.equal(billingPlan('monthly', 'USD'), BILLING_CURRENCY_PLANS.USD.monthly);
   assert.equal(billingPlan('monthly', 'EUR'), null);
+});
+
+test('prepaid subscription periods end on the matching calendar date without month overflow', () => {
+  const january31 = Date.UTC(2026, 0, 31, 12);
+  assert.equal(billingPeriodEnd(january31, 'monthly'), Date.UTC(2026, 1, 28, 12));
+  assert.equal(billingPeriodEnd(Date.UTC(2028, 1, 29, 12), 'yearly'), Date.UTC(2029, 1, 28, 12));
+  assert.equal(billingPeriodEnd(january31, 'weekly'), null);
 });
 
 test('Razorpay checkout signature accepts only the expected subscription and payment pair', () => {
