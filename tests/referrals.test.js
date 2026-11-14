@@ -56,6 +56,23 @@ test('referral identities are masked and reward stacking preserves current Pro t
   }), { startsAt: 300, expiresAt: 604800300 });
 });
 
+test('referral sign-in buttons use the shared Google mark and stay visible in the sign-in card', () => {
+  const signInButtons = [...page.matchAll(/<button class="btn google-signin"[^>]*data-auth-sign-in>([\s\S]*?)<\/button>/g)];
+  assert.equal(signInButtons.length, 2);
+  for (const [, button] of signInButtons) {
+    assert.match(button, /<svg class="google-signin-logo" viewBox="0 0 24 24"/);
+    assert.match(button, /<span data-auth-sign-in-label>Sign in with Google<\/span>/);
+  }
+
+  const styles = readFileSync(new URL('../frontend/src/referrals.css', import.meta.url), 'utf8');
+  assert.match(styles, /\.referrals-sign-in\s*\{\s*display:\s*grid;\s*justify-items:\s*center;[\s\S]*?text-align:\s*center/);
+  assert.match(styles, /\.referrals-sign-in \.google-signin,[\s\S]*?\.referrals-page \.about-nav \.auth-actions \.google-signin/);
+  assert.match(styles, /@media\(max-width:760px\)\{[\s\S]*?grid-template-areas:"auth community plans editor" "theme theme theme theme"/);
+  assert.match(styles, /\.referrals-page \.about-nav\{grid-area:nav;width:100%;min-width:0;justify-self:stretch\}/);
+  assert.match(styles, /body\.site-mobile-header:not\(\.admin-page\) \.about-nav \.google-signin \[data-auth-sign-in-label\]/);
+  assert.match(styles, /white-space:nowrap/);
+});
+
 test('referral message has one link after Get started and is reused by every sharing option', () => {
   const url = 'https://www.resumeout.com/?ref=INVITECODE12';
   const message = buildReferralShareMessage(url, 'INVITECODE12');

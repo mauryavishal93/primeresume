@@ -238,15 +238,59 @@ body.about-page.referrals-page {
   background: var(--about-paper);
   box-shadow: 0 8px 24px rgba(34,20,68,.05);
 }
+.referrals-sign-in {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  text-align: center;
+}
 .referrals-sign-in h2,.referral-link-card h2,.referral-rules h2,.referral-section-heading h2 {
   margin: 0;
   color: var(--about-ink);
   font-size: 20px;
   line-height: 1.25;
 }
-.referrals-sign-in p,.referral-rules li{color:var(--about-muted)}
-.referrals-sign-in .google-signin{display:inline-flex;align-items:center;gap:8px;min-height:40px;padding:8px 14px;border:1px solid #dadce0;border-radius:7px;background:#fff;color:#3c4043;font-size:13px;font-weight:650;cursor:pointer}
-.referrals-sign-in .google-signin:hover{background:#f7f9ff;border-color:#c8d6ed}
+.referrals-sign-in p{max-width:620px;margin:0;color:var(--about-muted)}
+.referral-rules li{color:var(--about-muted)}
+.referrals-sign-in .google-signin,
+.referrals-page .about-nav .auth-actions .google-signin {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 14px;
+  gap: 10px;
+  border: 1px solid #dadce0;
+  border-radius: 6px;
+  background: #fff;
+  color: #3c4043;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: .15px;
+  box-shadow: 0 1px 2px #0000001a;
+  cursor: pointer;
+}
+.referrals-sign-in .google-signin:hover:not(:disabled),
+.referrals-page .about-nav .auth-actions .google-signin:hover:not(:disabled) {
+  border-color: #d2e3fc;
+  background: #f8faff;
+  box-shadow: 0 1px 3px #00000024;
+}
+.referrals-sign-in .google-signin:active:not(:disabled),
+.referrals-page .about-nav .auth-actions .google-signin:active:not(:disabled) {
+  background: #eef3fc;
+  box-shadow: inset 0 1px 2px #0000001a;
+}
+.referrals-sign-in .google-signin:focus-visible,
+.referrals-page .about-nav .auth-actions .google-signin:focus-visible {
+  outline: 3px solid #a87bfa70;
+  outline-offset: 2px;
+}
+.referrals-sign-in .google-signin-logo {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+}
 .referral-steps {
   display: grid;
   grid-template-columns: minmax(0,1fr) 24px minmax(0,1fr) 24px minmax(0,1fr);
@@ -393,12 +437,14 @@ body.about-page.referrals-page {
   .referral-social-row>span{flex-basis:100%}
   .social-share{width:34px;height:34px}
   .referral-link-card,.referral-rules,.referral-list-section{padding:16px}
+  .referrals-sign-in{gap:10px;padding:18px 16px}
+  .referrals-sign-in .google-signin{min-height:40px}
 }
 
 @media(max-width:980px){
   .referrals-page .about-header{height:auto;min-height:64px;padding-top:8px;padding-bottom:8px;flex-wrap:wrap}
 }
-@media(max-width:640px){
+@media(max-width:760px){
   .referrals-page .about-header{
     display:grid;
     grid-template-columns:minmax(0,1fr) 42px;
@@ -409,6 +455,7 @@ body.about-page.referrals-page {
     padding:8px 12px;
   }
   .referrals-page .about-brand{grid-area:brand;justify-self:start;margin:0}
+  .referrals-page .about-nav{grid-area:nav;width:100%;min-width:0;justify-self:stretch}
   .referrals-page .about-nav>.site-account-menu{position:absolute;top:8px;right:12px;margin:0}
   .referrals-page .about-nav>a[href="/support.html"],
   .referrals-page .about-nav>.referral-nav-link{display:none}
@@ -419,5 +466,50 @@ body.about-page.referrals-page {
     align-items:center;
     justify-content:stretch;
     gap:6px;
+  }
+  body.about-page.referrals-page.site-mobile-header:not(.admin-page) .about-nav>.auth-actions{grid-area:auth;min-width:0}
+  body.about-page.referrals-page.site-mobile-header:not(.admin-page) .about-nav>a[href="/community.html"]{grid-area:community}
+  body.about-page.referrals-page.site-mobile-header:not(.admin-page) .about-nav>a[href="/pricing.html"]{grid-area:plans}
+  body.about-page.referrals-page.site-mobile-header:not(.admin-page) .about-nav>.about-editor{grid-area:editor}
+  body.site-mobile-header:not(.admin-page) .about-nav .google-signin{
+    display:inline-flex;
+    width:34px;
+    min-width:34px;
+    max-width:34px;
+    height:34px;
+    min-height:34px;
+    justify-content:center;
+    gap:0;
+    padding:0;
+    border-radius:8px;
+  }
+  body.site-mobile-header:not(.admin-page) .about-nav .google-signin [data-auth-sign-in-label]{
+    position:absolute;
+    width:1px;
+    height:1px;
+    padding:0;
+    margin:-1px;
+    overflow:hidden;
+    clip:rect(0,0,0,0);
+    white-space:nowrap;
+    border:0;
+  }
+  body.site-mobile-header:not(.admin-page) .about-nav .google-signin-logo{
+    width:18px;
+    height:18px;
+    flex-basis:18px;
+  }
+  body.about-page.referrals-page.site-mobile-header.auth-user-signed-in:not(.admin-page) .about-nav{
+    grid-template-columns:repeat(3,minmax(0,1fr));
+    grid-template-areas:"community plans editor";
+  }
+  body.about-page.referrals-page.site-mobile-header.auth-user-signed-in:not(.admin-page) .about-nav>.auth-actions{display:none}
+  .referrals-page .about-nav>a[href="/community.html"],
+  .referrals-page .about-nav>a[href="/pricing.html"],
+  .referrals-page .about-nav>.about-editor{
+    min-width:0;
+    padding-right:3px;
+    padding-left:3px;
+    white-space:nowrap;
   }
 }
