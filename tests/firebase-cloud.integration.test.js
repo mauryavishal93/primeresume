@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createFirebaseCloudClient, googleSignInErrorMessage, isDisabledAccountSignInError, isGoogleSignInCancellation, resolveFirebaseConfig } from '../frontend/src/firebase-cloud.js';
+import { clearPendingReferralCode, createFirebaseCloudClient, getPendingReferralCode, googleSignInErrorMessage, isDisabledAccountSignInError, isGoogleSignInCancellation, resolveFirebaseConfig, savePendingReferralCode } from '../frontend/src/firebase-cloud.js';
 import { chooseAuthenticatedResume } from '../frontend/src/resume-persistence.js';
 
 test('Firebase web config can be selected per build environment', () => {
@@ -18,7 +18,7 @@ test('Firebase web config can be selected per build environment', () => {
   assert.equal(resolveFirebaseConfig({}).projectId, 'buildmyportfolio-5b714');
 });
 
-function createFakeFirebase({ popupError = null, popupDelay = null, signOutError = null } = {}) {
+function createFakeFirebase({ popupError = null, popupDelay = null, signOutError = null, newGoogleUser = false, redirectResult = null, navigate } = {}) {
   const records = new Map();
   const sharedResumes = new Map();
   let activePopupError = popupError;
@@ -62,9 +62,11 @@ function createFakeFirebase({ popupError = null, popupDelay = null, signOutError
       }
       if (activePopupError) throw activePopupError;
       signedInWith = provider;
-      return { user: auth.currentUser };
+      return { user: auth.currentUser, additionalUserInfo: { isNewUser: newGoogleUser } };
     },
     signInWithRedirect: async (_auth, provider) => { redirectedWith = provider; },
+    getAdditionalUserInfo: credential => credential.additionalUserInfo,
+    getRedirectResult: async () => redirectResult,
     signOut: async () => {
       if (signOutError) throw signOutError;
       signedOut = true;
@@ -189,7 +191,8 @@ function createFakeFirebase({ popupError = null, popupDelay = null, signOutError
   const client = createFirebaseCloudClient({
     config: { projectId: 'test-project' },
     loadSdk: async () => [appSdk, authSdk, firestoreSdk],
-    fetchImpl
+    fetchImpl,
+    navigate
   });
   return {
     client,
@@ -232,6 +235,55 @@ test('Google sign-in falls back to redirect when the browser blocks a popup', as
 
   assert.ok(firebase.redirectedWith instanceof firebase.GoogleAuthProvider);
   assert.equal(firebase.signedInWith, undefined);
+});
+
+test('new Google accounts are sent to My Account after popup or redirect sign-in', async () => {
+  const destinations = [];
+  const popup = createFakeFirebase({ newGoogleUser: true, navigate: url => destinations.push(url) });
+  await popup.client.signInWithGoogle();
+  assert.deepEqual(destinations, ['/my-account.html']);
+
+  const redirected = createFakeFirebase({
+    redirectResult: { additionalUserInfo: { isNewUser: true } },
+    navigate: url => destinations.push(url)
+  });
+  redirected.client.observeAuth(() => {});
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(destinations, ['/my-account.html', '/my-account.html']);
+});
+
+test('first Google sign-in preserves referral code through My Account onboarding but returning sign-ins stay put', async () => {
+  const originalLocation = globalThis.location;
+  const originalSessionStorage = globalThis.sessionStorage;
+  const values = new Map();
+  globalThis.sessionStorage = {
+    getItem: key => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: key => values.delete(key)
+  };
+  globalThis.location = { pathname: '/home.html', search: '?ref=TAF1VTSBG-I6' };
+  try {
+    assert.equal(savePendingReferralCode('TAF1VTSBG-I6'), true);
+    assert.equal(getPendingReferralCode(), 'TAF1VTSBG-I6');
+    globalThis.location = { pathname: '/home.html', search: '' };
+    const destinations = [];
+    const firstSignIn = createFakeFirebase({ newGoogleUser: true, navigate: url => destinations.push(url) });
+    await firstSignIn.client.signInWithGoogle();
+    assert.deepEqual(destinations, ['/my-account.html?ref=TAF1VTSBG-I6']);
+
+    globalThis.location = { pathname: '/referrals.html', search: '' };
+    const returningSignIn = createFakeFirebase({ navigate: url => destinations.push(url) });
+    await returningSignIn.client.signInWithGoogle();
+    assert.deepEqual(destinations, ['/my-account.html?ref=TAF1VTSBG-I6']);
+
+    clearPendingReferralCode();
+    assert.equal(getPendingReferralCode(), '');
+  } finally {
+    if (originalLocation === undefined) delete globalThis.location;
+    else globalThis.location = originalLocation;
+    if (originalSessionStorage === undefined) delete globalThis.sessionStorage;
+    else globalThis.sessionStorage = originalSessionStorage;
+  }
 });
 
 test('rapid Google sign-in requests open a fresh popup and canceled popup requests are ignored', async () => {

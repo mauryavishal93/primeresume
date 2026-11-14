@@ -214,6 +214,102 @@
   color: var(--about-muted);
 }
 
+.account-referral-code {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 24px;
+  padding: 18px;
+  border: 1px solid rgba(139, 188, 242, .38);
+  border-radius: 14px;
+  background: rgba(139, 188, 242, .08);
+}
+
+.account-referral-code[hidden],
+.account-referral-code form[hidden] {
+  display: none !important;
+}
+
+.account-referral-code h2 {
+  margin: 0;
+  color: var(--about-ink);
+  font-size: 18px;
+}
+
+.account-referral-code > p {
+  margin: 0;
+  color: var(--about-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.account-referral-code form {
+  display: grid;
+  gap: 7px;
+}
+
+.account-referral-code label {
+  color: var(--about-ink);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.account-referral-code-row {
+  display: flex;
+  gap: 8px;
+}
+
+.account-referral-code-row input {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 9px 12px;
+  border: 1px solid rgba(210, 184, 126, .34);
+  border-radius: 9px;
+  background: rgba(0, 0, 0, .18);
+  color: var(--about-ink);
+  font: inherit;
+  font-size: 14px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.account-referral-code-row input:focus-visible {
+  outline: 3px solid rgba(139, 188, 242, .35);
+  border-color: #8bbcf2;
+}
+
+.account-referral-code-row .btn {
+  min-height: 44px;
+  padding: 9px 14px;
+  border: 0;
+  border-radius: 9px;
+  background: linear-gradient(135deg, #8bbcf2, #bd9b5b);
+  color: #171710;
+  font-weight: 750;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.account-referral-code-row .btn:disabled {
+  cursor: wait;
+  opacity: .65;
+}
+
+.account-referral-status {
+  min-height: 18px;
+  margin: 0 !important;
+  color: var(--about-muted);
+  font-size: 12px !important;
+}
+
+.account-referral-status[data-state="success"] {
+  color: #81d8b0;
+}
+
+.account-referral-status[data-state="error"] {
+  color: #ff9a9a;
+}
+
 :root[data-theme=light] .my-account-card {
   border-color: #e2d8c5;
   background: linear-gradient(145deg, #fffefa, #f4f0e7);
@@ -263,12 +359,39 @@
   color: #b42318;
 }
 
+:root[data-theme=light] .account-referral-code {
+  border-color: #c9d9ed;
+  background: #f3f8ff;
+}
+
+:root[data-theme=light] .account-referral-code-row input {
+  border-color: #cbd6e5;
+  background: #fff;
+  color: #292820;
+}
+
+:root[data-theme=light] .account-referral-status[data-state=success] {
+  color: #17684d;
+}
+
+:root[data-theme=light] .account-referral-status[data-state=error] {
+  color: #b42318;
+}
+
 @media(max-width:640px) {
   .my-account-main {
     width: min(100% - 24px, 760px);
   }
 
   .my-account-actions .btn {
+    width: 100%;
+  }
+
+  .account-referral-code-row {
+    flex-direction: column;
+  }
+
+  .account-referral-code-row .btn {
     width: 100%;
   }
 

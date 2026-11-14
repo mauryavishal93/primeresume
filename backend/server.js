@@ -20,6 +20,18 @@ import {
   validWebhookSignature,
   voucherDocumentId
 } from './billing.js';
+import {
+  REFERRAL_CONFIG,
+  calculateReferralSummary,
+  encodeReferralCursor,
+  generateReferralCode,
+  maskReferralIdentity,
+  parseReferralCursor,
+  referralPageSize,
+  referralRewardDays,
+  referralsEnabled,
+  validReferralCode
+} from './referrals.js';
 
 const backendDir = path.dirname(fileURLToPath(import.meta.url));
 try {
@@ -32,6 +44,7 @@ const app = express();
 const port = Number(process.env.PORT) || 3000;
 const subscriptionCollection = 'billingSubscriptions';
 const VOUCHER_MAX_REDEMPTIONS = 1;
+const referralAttributionAttempts = new Map();
 let firebaseAdmin;
 
 app.disable('x-powered-by');
@@ -662,6 +675,170 @@ function userEntitlementDocument(db, uid) {
 
 function userCheckoutDocument(db, uid) {
   return db.doc(`users/${uid}/billing/checkout`);
+}
+
+function referralCookieId(request) {
+  const cookies = String(request.get('cookie') || '').split(';');
+  const cookie = cookies.map(value => value.trim()).find(value => value.startsWith('resumeout_referral='));
+  const id = cookie?.slice('resumeout_referral='.length) || '';
+  return /^[A-Za-z0-9_-]{20,80}$/.test(id) ? id : null;
+}
+
+function referralHistoryIndexUnavailable(error) {
+  return error?.code === 'failed-precondition'
+    || /requires an index/i.test(String(error?.message || ''));
+}
+
+function referralAttributionRateLimited(clientAddress, now = Date.now()) {
+  const key = String(clientAddress || 'unknown');
+  const record = referralAttributionAttempts.get(key);
+  if (!record || record.resetAt <= now) {
+    referralAttributionAttempts.set(key, { count: 1, resetAt: now + 60 * 60 * 1000 });
+  } else if (record.count >= 30) {
+    return true;
+  } else {
+    record.count += 1;
+  }
+  if (referralAttributionAttempts.size > 5000) {
+    for (const [address, attempt] of referralAttributionAttempts) {
+      if (attempt.resetAt <= now) referralAttributionAttempts.delete(address);
+    }
+  }
+  return false;
+}
+
+function referralCookieOptions() {
+  return [
+    'Path=/',
+    `Max-Age=${REFERRAL_CONFIG.attributionWindowDays * 24 * 60 * 60}`,
+    'HttpOnly',
+    'SameSite=Lax',
+    ...(process.env.VERCEL === '1' || process.env.NODE_ENV === 'production' ? ['Secure'] : [])
+  ].join('; ');
+}
+
+function publicSiteOrigin() {
+  const configuredOrigin = (process.env.PUBLIC_SITE_URL || 'https://resumeout.com').trim();
+  const origin = new URL(configuredOrigin);
+  if (origin.username || origin.password
+    || !['https:', 'http:'].includes(origin.protocol)
+    || origin.protocol === 'http:' && !['localhost', '127.0.0.1'].includes(origin.hostname)) {
+    throw new Error('PUBLIC_SITE_URL must be an HTTPS origin (HTTP is allowed only for localhost).');
+  }
+  return origin.origin;
+}
+
+function referralRewardRecord({
+  rewardId, beneficiaryUid, referralId, rewardType, days, now, startsAt,
+  planKey = null, paymentId = null, subscriptionId = null, reason = null,
+  originalRewardId = null, idempotencyKey
+}) {
+  return {
+    beneficiaryUid,
+    referralId,
+    rewardSource: rewardType === 'manual' ? 'admin_manual' : 'referral',
+    rewardType,
+    durationDays: days,
+    status: startsAt > now ? 'scheduled' : 'active',
+    createdAt: now,
+    startsAt,
+    activatedAt: startsAt <= now ? now : null,
+    expiresAt: startsAt + days * 86_400_000,
+    idempotencyKey,
+    relatedPaymentId: paymentId,
+    relatedSubscriptionId: subscriptionId,
+    planKey,
+    reason,
+    originalRewardId,
+    configurationVersion: REFERRAL_CONFIG.version,
+    revokedAt: null
+  };
+}
+
+async function revokeReferralConversion(db, {
+  referralId, reason, eventReference, providerState, relatedPaymentId = null, relatedSubscriptionId = null
+}) {
+  const referralRef = db.doc(`referrals/${referralId}`);
+  const originalRewardRef = db.doc(`referralRewards/${referralId}_conversion`);
+  const reversalId = `${referralId}_reversal_${eventReference.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 100)}`;
+  const reversalRef = db.doc(`referralRewards/${reversalId}`);
+  const auditRef = db.doc(`referralRewardEvents/${reversalId}`);
+  const now = Date.now();
+  return db.runTransaction(async transaction => {
+    const [referralSnapshot, rewardSnapshot, reversalSnapshot] = await Promise.all([
+      transaction.get(referralRef),
+      transaction.get(originalRewardRef),
+      transaction.get(reversalRef)
+    ]);
+    if (!referralSnapshot.exists || !rewardSnapshot.exists || reversalSnapshot.exists) return false;
+    const referral = referralSnapshot.data() || {};
+    const reward = rewardSnapshot.data() || {};
+    if (referral.firstQualifyingPaymentId !== relatedPaymentId && relatedPaymentId
+      || referral.firstQualifyingSubscriptionId !== relatedSubscriptionId && relatedSubscriptionId) return false;
+    if (reward.rewardType !== 'conversion' || reward.status === 'revoked'
+      || referral.paidConversionRewardStatus !== 'issued') return false;
+    const summaryRef = db.doc(`referralUserSummaries/${reward.beneficiaryUid}`);
+    const [allRewardsSnapshot, entitlementSnapshot, summarySnapshot] = await Promise.all([
+      transaction.get(db.collection('referralRewards').where('beneficiaryUid', '==', reward.beneficiaryUid)),
+      transaction.get(userEntitlementDocument(db, reward.beneficiaryUid)),
+      transaction.get(summaryRef)
+    ]);
+    const rewardRecords = (allRewardsSnapshot.docs || []).map(document => ({
+      id: document.id,
+      ...(document.data() || {})
+    }));
+    const previouslyRevoked = new Set(rewardRecords
+      .filter(item => item.rewardType === 'reversal')
+      .map(item => item.originalRewardId)
+      .filter(Boolean));
+    previouslyRevoked.add(`${referralId}_conversion`);
+    const remainingRewardEnd = rewardRecords
+      .filter(item => item.rewardType !== 'reversal' && !previouslyRevoked.has(item.id))
+      .reduce((latest, item) => Math.max(latest, Number(item.expiresAt) || 0), 0);
+    const paidUntil = Number(entitlementSnapshot.data()?.validUntil) || 0;
+    transaction.create(reversalRef, {
+      beneficiaryUid: reward.beneficiaryUid,
+      referralId,
+      rewardSource: 'referral',
+      rewardType: 'reversal',
+      originalRewardType: 'conversion',
+      durationDays: Number(reward.durationDays) || 0,
+      status: 'revoked',
+      createdAt: now,
+      reason,
+      originalRewardId: `${referralId}_conversion`,
+      relatedPaymentId: relatedPaymentId || referral.firstQualifyingPaymentId || null,
+      relatedSubscriptionId: relatedSubscriptionId || referral.firstQualifyingSubscriptionId || null,
+      providerState,
+      providerEventReference: eventReference,
+      idempotencyKey: `reversal:${referralId}:${eventReference}`,
+      configurationVersion: REFERRAL_CONFIG.version
+    });
+    transaction.set(summaryRef, {
+      rewardStackUntil: Math.max(paidUntil, remainingRewardEnd),
+      updatedAt: now
+    }, { merge: true });
+    transaction.set(referralRef, {
+      status: 'revoked',
+      paidConversionRewardStatus: 'revoked',
+      revokedAt: now,
+      revocationReason: reason,
+      updatedAt: now
+    }, { merge: true });
+    transaction.create(auditRef, {
+      type: 'conversion-revoked',
+      referralId,
+      originalRewardId: `${referralId}_conversion`,
+      reversalId,
+      reason,
+      relatedPaymentId: relatedPaymentId || referral.firstQualifyingPaymentId || null,
+      relatedSubscriptionId: relatedSubscriptionId || referral.firstQualifyingSubscriptionId || null,
+      providerState,
+      providerEventReference: eventReference,
+      occurredAt: now
+    });
+    return true;
+  });
 }
 
 async function linkedSubscriptionId(db, uid, entitlement) {
@@ -1935,6 +2112,902 @@ app.use('/api/billing', (_request, response, next) => {
   next();
 });
 
+app.get('/api/referrals/config', (_request, response) => {
+  response.set('Cache-Control', 'no-store');
+  response.json({ enabled: referralsEnabled(), attributionWindowDays: REFERRAL_CONFIG.attributionWindowDays });
+});
+
+app.post('/api/referrals/attribution', async (request, response) => {
+  response.set('Cache-Control', 'no-store');
+  if (!referralsEnabled()) {
+    response.status(404).json({ error: 'Referral rewards are not available.' });
+    return;
+  }
+  if (referralAttributionRateLimited(request.ip)) {
+    response.set('Retry-After', '3600').status(429).json({ error: 'Referral links are temporarily unavailable from this network. Please try again later.' });
+    return;
+  }
+  const referralCode = typeof request.body?.code === 'string' ? request.body.code.trim().toUpperCase() : '';
+  if (!validReferralCode(referralCode)) {
+    response.status(400).json({ error: 'Enter a valid referral link.' });
+    return;
+  }
+  try {
+    const { db } = await getFirebaseAdmin();
+    const existingId = referralCookieId(request);
+    if (existingId) {
+      const existing = await db.doc(`referralAttributions/${existingId}`).get();
+      if (existing.exists && Number(existing.data()?.expiresAt) > Date.now()) {
+        response.json({ recorded: true, firstTouch: true });
+        return;
+      }
+    }
+    const codeSnapshot = await db.doc(`referralCodes/${referralCode}`).get();
+    const code = codeSnapshot.data();
+    if (!codeSnapshot.exists || code?.active !== true) {
+      response.status(404).json({ error: 'That referral link is invalid or inactive.' });
+      return;
+    }
+    const now = Date.now();
+    const attributionId = randomUUID();
+    await db.doc(`referralAttributions/${attributionId}`).create({
+      referralCode,
+      referrerUid: code.referrerUid,
+      createdAt: now,
+      expiresAt: now + REFERRAL_CONFIG.attributionWindowDays * 86_400_000,
+      status: 'pending'
+    });
+    response.set('Set-Cookie', `resumeout_referral=${attributionId}; ${referralCookieOptions()}`);
+    response.json({ recorded: true, firstTouch: true });
+  } catch (error) {
+    console.error('Could not record referral attribution.', error);
+    response.status(500).json({ error: 'Could not save this referral. Please retry.' });
+  }
+});
+
+app.get('/api/referrals/claim-status', requireFirebaseUser, async (request, response) => {
+  response.set('Cache-Control', 'no-store');
+  if (!referralsEnabled()) {
+    response.status(404).json({ error: 'Referral rewards are not available.' });
+    return;
+  }
+  try {
+    const { auth, db } = await getFirebaseAdmin();
+    const [firebaseUser, mappingSnapshot] = await Promise.all([
+      auth.getUser(request.user.uid),
+      db.doc(`referralByUser/${request.user.uid}`).get()
+    ]);
+    if (mappingSnapshot.exists) {
+      response.json({ eligible: false, claimed: true, reason: 'already-used' });
+      return;
+    }
+    const createdAt = Date.parse(firebaseUser.metadata?.creationTime || '');
+    const now = Date.now();
+    const expiresAt = createdAt + REFERRAL_CONFIG.attributionWindowDays * 86_400_000;
+    if (!Number.isFinite(createdAt) || createdAt > now || now > expiresAt) {
+      response.json({ eligible: false, claimed: false, reason: 'window-expired' });
+      return;
+    }
+    response.json({ eligible: true, claimed: false, expiresAt });
+  } catch (error) {
+    console.error('Could not check referral-code eligibility.', error);
+    response.status(500).json({ error: 'Could not check referral-code eligibility.' });
+  }
+});
+
+app.post('/api/referrals/register', requireFirebaseUser, async (request, response) => {
+  response.set('Cache-Control', 'no-store');
+  if (!referralsEnabled()) {
+    response.status(404).json({ error: 'Referral rewards are not available.' });
+    return;
+  }
+  const manualClaim = Object.prototype.hasOwnProperty.call(request.body || {}, 'code');
+  const submittedCode = typeof request.body?.code === 'string' ? request.body.code.trim().toUpperCase() : '';
+  try {
+    const { auth, db } = await getFirebaseAdmin();
+    const firebaseUser = await auth.getUser(request.user.uid);
+    const createdAt = Date.parse(firebaseUser.metadata?.creationTime || '');
+    const now = Date.now();
+    const mappingRef = db.doc(`referralByUser/${request.user.uid}`);
+    const existingMapping = await mappingRef.get();
+    if (existingMapping.exists) {
+      if (manualClaim) {
+        response.status(409).json({ error: 'A referral code has already been used by this account.' });
+        return;
+      }
+      response.set('Set-Cookie', `resumeout_referral=; ${referralCookieOptions().replace(/Max-Age=\d+/, 'Max-Age=0')}`);
+      response.json({ registered: false, alreadyRegistered: true });
+      return;
+    }
+    let attributionId = referralCookieId(request);
+    if (manualClaim) {
+      if (!validReferralCode(submittedCode)) {
+        response.status(400).json({ error: 'Enter a valid referral code.' });
+        return;
+      }
+      const expiresAt = createdAt + REFERRAL_CONFIG.attributionWindowDays * 86_400_000;
+      if (!Number.isFinite(createdAt) || createdAt > now || now > expiresAt) {
+        response.status(403).json({ error: 'Referral codes can only be used within 30 days of creating your account.' });
+        return;
+      }
+      const codeSnapshot = await db.doc(`referralCodes/${submittedCode}`).get();
+      const code = codeSnapshot.data();
+      if (!codeSnapshot.exists || code?.active !== true) {
+        response.status(404).json({ error: 'That referral code is invalid or inactive.' });
+        return;
+      }
+      if (code.referrerUid === request.user.uid) {
+        response.status(400).json({ error: 'You cannot use your own referral code.' });
+        return;
+      }
+      attributionId = `manual-${Buffer.from(request.user.uid).toString('base64url')}`;
+      await db.doc(`referralAttributions/${attributionId}`).set({
+        referralCode: submittedCode,
+        referrerUid: code.referrerUid,
+        createdAt,
+        expiresAt,
+        status: 'pending',
+        source: 'manual_code',
+        submittedAt: now
+      });
+    }
+    if (!attributionId) {
+      response.json({ registered: false, reason: 'no-attribution' });
+      return;
+    }
+    const attributionRef = db.doc(`referralAttributions/${attributionId}`);
+    const attributionSnapshot = await attributionRef.get();
+    const attribution = attributionSnapshot.data() || {};
+    if (!attributionSnapshot.exists || attribution.status !== 'pending'
+      || Number(attribution.expiresAt) < now
+      || !Number.isFinite(createdAt)
+      || createdAt < Math.floor(Number(attribution.createdAt) / 1000) * 1000
+      || createdAt > Number(attribution.expiresAt)) {
+      response.set('Set-Cookie', `resumeout_referral=; ${referralCookieOptions().replace(/Max-Age=\d+/, 'Max-Age=0')}`);
+      response.json({ registered: false, reason: 'not-eligible' });
+      return;
+    }
+    if (request.user.uid === attribution.referrerUid) {
+      await attributionRef.set({ status: 'rejected', rejectionReason: 'self-referral', reviewedAt: now }, { merge: true });
+      response.set('Set-Cookie', `resumeout_referral=; ${referralCookieOptions().replace(/Max-Age=\d+/, 'Max-Age=0')}`);
+      response.json({ registered: false, reason: 'self-referral' });
+      return;
+    }
+
+    const referralId = randomUUID();
+    const referralRef = db.doc(`referrals/${referralId}`);
+    const referrerEntitlementRef = userEntitlementDocument(db, attribution.referrerUid);
+    const referredEntitlementRef = userEntitlementDocument(db, request.user.uid);
+    const referrerSummaryRef = db.doc(`referralUserSummaries/${attribution.referrerUid}`);
+    const referredSummaryRef = db.doc(`referralUserSummaries/${request.user.uid}`);
+    const codeRef = db.doc(`referralCodes/${attribution.referralCode}`);
+    let alreadyRegistered = false;
+    let pendingReview = false;
+    await db.runTransaction(async transaction => {
+      const [existingMapping, codeSnapshot, currentAttribution, referrerEntitlement, referredEntitlement, referrerSummary, referredSummary] = await Promise.all([
+        transaction.get(mappingRef),
+        transaction.get(codeRef),
+        transaction.get(attributionRef),
+        transaction.get(referrerEntitlementRef),
+        transaction.get(referredEntitlementRef),
+        transaction.get(referrerSummaryRef),
+        transaction.get(referredSummaryRef)
+      ]);
+      if (existingMapping.exists) {
+        alreadyRegistered = true;
+        return;
+      }
+      if (!currentAttribution.exists || currentAttribution.data()?.status !== 'pending'
+        || Number(currentAttribution.data()?.expiresAt) < now
+        || currentAttribution.data()?.referralCode !== attribution.referralCode
+        || !codeSnapshot.exists || codeSnapshot.data()?.active !== true
+        || codeSnapshot.data()?.referrerUid !== attribution.referrerUid) {
+        const error = new Error('This referral is no longer eligible.');
+        error.code = 'REFERRAL_INELIGIBLE';
+        throw error;
+      }
+      const referral = {
+        referrerUid: attribution.referrerUid,
+        referredUid: request.user.uid,
+        referralCode: attribution.referralCode,
+        referredIdentity: maskReferralIdentity(firebaseUser.email),
+        status: Number(codeSnapshot.data()?.registrationCount) >= REFERRAL_CONFIG.registrationReviewThreshold - 1
+          ? 'pending_review'
+          : 'registered',
+        createdAt: now,
+        registeredAt: now,
+        attributionCreatedAt: Number(currentAttribution.data()?.createdAt) || now,
+        attributionExpiresAt: Number(currentAttribution.data()?.expiresAt) || now,
+        registrationRewardStatus: Number(codeSnapshot.data()?.registrationCount) >= REFERRAL_CONFIG.registrationReviewThreshold - 1
+          ? 'pending_review'
+          : 'issued',
+        firstQualifyingPaymentId: null,
+        firstQualifyingSubscriptionId: null,
+        firstQualifyingPlanKey: null,
+        paidConversionRewardStatus: 'not_eligible',
+        paidConversionRewardDays: 0,
+        riskFlags: Number(codeSnapshot.data()?.registrationCount) >= REFERRAL_CONFIG.registrationReviewThreshold - 1
+          ? ['high-volume-code']
+          : [],
+        updatedAt: now
+      };
+      const needsReview = referral.status === 'pending_review';
+      pendingReview = needsReview;
+      const rewardDefinitions = [
+        {
+          uid: attribution.referrerUid,
+          type: 'registration',
+          role: 'referrer',
+          entitlement: referrerEntitlement.data() || {},
+          summary: referrerSummary.data() || {}
+        },
+        {
+          uid: request.user.uid,
+          type: 'registration',
+          role: 'referred',
+          entitlement: referredEntitlement.data() || {},
+          summary: referredSummary.data() || {}
+        }
+      ];
+      const rewards = needsReview ? [] : rewardDefinitions.map(item => {
+        const startsAt = Math.max(
+          now,
+          Number(item.entitlement.validUntil) || 0,
+          Number(item.summary.rewardStackUntil) || 0
+        );
+        const rewardId = `${referralId}_registration_${item.role}`;
+        return {
+          ref: db.doc(`referralRewards/${rewardId}`),
+          uid: item.uid,
+          summaryRef: item.role === 'referrer' ? referrerSummaryRef : referredSummaryRef,
+          summary: item.summary,
+          data: referralRewardRecord({
+            rewardId,
+            beneficiaryUid: item.uid,
+            referralId,
+            rewardType: 'registration',
+            days: REFERRAL_CONFIG.registrationRewardDays,
+            now,
+            startsAt,
+            idempotencyKey: `registration:${referralId}:${item.role}`
+          })
+        };
+      });
+      transaction.create(referralRef, referral);
+      transaction.create(mappingRef, { referralId, createdAt: now });
+      transaction.set(attributionRef, { status: 'attributed', referredUid: request.user.uid, referralId, registeredAt: now }, { merge: true });
+      transaction.set(codeRef, {
+        registrationCount: (Number(codeSnapshot.data()?.registrationCount) || 0) + 1,
+        updatedAt: now
+      }, { merge: true });
+      for (const reward of rewards) {
+        transaction.create(reward.ref, reward.data);
+        transaction.set(reward.summaryRef, {
+          rewardStackUntil: reward.data.expiresAt,
+          registrationRewardDays: (Number(reward.summary.registrationRewardDays) || 0) + REFERRAL_CONFIG.registrationRewardDays,
+          updatedAt: now
+        }, { merge: true });
+      }
+    });
+    response.set('Set-Cookie', `resumeout_referral=; ${referralCookieOptions().replace(/Max-Age=\d+/, 'Max-Age=0')}`);
+    if (manualClaim && alreadyRegistered) {
+      response.status(409).json({ error: 'A referral code has already been used by this account.' });
+      return;
+    }
+    response.json(manualClaim
+      ? { registered: !alreadyRegistered, alreadyRegistered, pendingReview }
+      : { registered: !alreadyRegistered, alreadyRegistered });
+  } catch (error) {
+    if (error?.code === 'REFERRAL_INELIGIBLE') {
+      response.status(409).json({ error: 'This referral is no longer eligible.' });
+      return;
+    }
+    console.error('Could not process referral registration.', error);
+    response.status(500).json({ error: 'Could not verify referral eligibility.' });
+  }
+});
+
+app.get('/api/referrals/me', requireFirebaseUser, async (request, response) => {
+  response.set('Cache-Control', 'no-store');
+  if (!referralsEnabled()) {
+    response.status(404).json({ error: 'Referral rewards are not available.' });
+    return;
+  }
+  try {
+    const { db } = await getFirebaseAdmin();
+    const userRef = db.doc(`referralUserCodes/${request.user.uid}`);
+    let code;
+    await db.runTransaction(async transaction => {
+      const mapping = await transaction.get(userRef);
+      if (mapping.exists) {
+        code = mapping.data()?.code;
+        return;
+      }
+      let candidate;
+      let codeRef;
+      let existing;
+      do {
+        candidate = generateReferralCode();
+        codeRef = db.doc(`referralCodes/${candidate}`);
+        existing = await transaction.get(codeRef);
+      } while (existing.exists);
+      const now = Date.now();
+      transaction.create(codeRef, { referrerUid: request.user.uid, active: true, createdAt: now, updatedAt: now, codeVersion: 1 });
+      transaction.create(userRef, { code: candidate, createdAt: now });
+      code = candidate;
+    });
+    let summary = null;
+    let referralCount = 0;
+    let rewardCount = 0;
+    let summaryError;
+    try {
+      const [referralSnapshot, rewardSnapshot] = await Promise.all([
+        db.collection('referrals').where('referrerUid', '==', request.user.uid).get(),
+        db.collection('referralRewards').where('beneficiaryUid', '==', request.user.uid).get()
+      ]);
+      const referrals = (referralSnapshot.docs || []).map(document => ({ id: document.id, ...document.data() }));
+      const rewards = (rewardSnapshot.docs || []).map(document => ({ id: document.id, ...document.data() }));
+      summary = calculateReferralSummary(referrals, rewards);
+      referralCount = referrals.length;
+      rewardCount = rewards.length;
+    } catch (error) {
+      console.error('Could not load referral summary.', error);
+      summaryError = 'Your referral code is ready, but reward statistics could not be loaded.';
+    }
+    response.json({
+      code,
+      url: `${publicSiteOrigin()}/home.html?ref=${encodeURIComponent(code)}`,
+      summary,
+      referrals: referralCount,
+      rewards: rewardCount,
+      summaryError
+    });
+  } catch (error) {
+    console.error('Could not load referral information.', error);
+    response.status(500).json({ error: 'Could not load your referral information.' });
+  }
+});
+
+async function loadReferralPage(collection, field, uid, request, response) {
+  response.set('Cache-Control', 'no-store');
+  if (!referralsEnabled()) {
+    response.status(404).json({ error: 'Referral rewards are not available.' });
+    return;
+  }
+  try {
+    const { db } = await getFirebaseAdmin();
+    const size = referralPageSize(request.query.limit);
+    const cursor = parseReferralCursor(request.query.cursor);
+    const userQuery = db.collection(collection).where(field, '==', uid);
+    let documents;
+    try {
+      let query = userQuery
+        .orderBy('createdAt', 'desc')
+        .orderBy('__name__', 'desc')
+        .limit(size + 1);
+      if (cursor) query = query.startAfter(cursor.createdAt, cursor.id);
+      const snapshot = await query.get();
+      documents = snapshot.docs || [];
+    } catch (error) {
+      if (!referralHistoryIndexUnavailable(error)) throw error;
+      const snapshot = await userQuery.get();
+      documents = (snapshot.docs || [])
+        .filter(document => {
+          if (!cursor) return true;
+          const createdAt = Number(document.data()?.createdAt) || 0;
+          return createdAt < cursor.createdAt
+            || createdAt === cursor.createdAt && document.id < cursor.id;
+        })
+        .sort((left, right) => {
+          const createdAtDifference = (Number(right.data()?.createdAt) || 0)
+            - (Number(left.data()?.createdAt) || 0);
+          if (createdAtDifference) return createdAtDifference;
+          if (right.id > left.id) return 1;
+          if (right.id < left.id) return -1;
+          return 0;
+        })
+        .slice(0, size + 1);
+      console.warn(`Using the fallback reader for ${collection}; its Firestore history index is unavailable.`);
+    }
+    const hasMore = documents.length > size;
+    const page = documents.slice(0, size);
+    const reversalByRewardId = new Map();
+    if (collection === 'referralRewards') {
+      const allRewards = await db.collection('referralRewards').where(field, '==', uid).get();
+      for (const rewardDocument of allRewards.docs || []) {
+        const rewardData = rewardDocument.data() || {};
+        if (rewardData.rewardType === 'reversal' && rewardData.originalRewardId) {
+          reversalByRewardId.set(rewardData.originalRewardId, { id: rewardDocument.id, ...rewardData });
+        }
+      }
+    }
+    const items = page.map(document => {
+      const data = document.data() || {};
+      if (collection === 'referrals') {
+        return {
+          id: document.id,
+          referredIdentity: data.referredIdentity || 'ResumeOut member',
+          status: data.status,
+          registrationStatus: data.registrationRewardStatus === 'issued' ? 'Registered' : data.status,
+          createdAt: data.createdAt,
+          registeredAt: data.registeredAt,
+          qualifyingPlanType: data.firstQualifyingPlanKey,
+          verifiedPaymentStatus: data.firstQualifyingPaymentId ? 'verified' : 'not-paid',
+          conversionRewardDays: data.paidConversionRewardDays || 0,
+          currentStatus: data.paidConversionRewardStatus || data.status
+        };
+      }
+      const reversal = reversalByRewardId.get(document.id);
+      const now = Date.now();
+      return {
+        id: document.id,
+        rewardType: data.rewardType,
+        rewardSource: data.rewardSource,
+        description: data.rewardType === 'reversal'
+          ? `Reward reversal: ${data.reason || 'verified provider event'}`
+          : `${data.durationDays} promotional Pro days · ${data.rewardType}`,
+        durationDays: data.durationDays,
+        status: reversal
+          ? 'revoked'
+          : Number(data.expiresAt) <= now
+            ? 'expired'
+            : Number(data.startsAt) > now
+              ? 'scheduled'
+              : 'active',
+        createdAt: data.createdAt,
+        startsAt: data.startsAt,
+        activatedAt: data.activatedAt,
+        expiresAt: data.expiresAt,
+        originalRewardId: data.originalRewardId || null,
+        reversalReason: reversal?.reason || data.reason || null,
+        reversalReference: reversal?.id || null
+      };
+    });
+    response.json({ items, nextCursor: hasMore && page.length ? encodeReferralCursor(page.at(-1)) : null });
+  } catch (error) {
+    console.error(`Could not load referral ${collection}.`, error);
+    response.status(500).json({
+      error: collection === 'referrals'
+        ? 'Could not load referral history.'
+        : 'Could not load reward history.'
+    });
+  }
+}
+
+app.get('/api/referrals/history', requireFirebaseUser, (request, response) => (
+  loadReferralPage('referrals', 'referrerUid', request.user.uid, request, response)
+));
+
+app.get('/api/referrals/rewards', requireFirebaseUser, (request, response) => (
+  loadReferralPage('referralRewards', 'beneficiaryUid', request.user.uid, request, response)
+));
+
+app.get('/api/admin/referrals/summary', requireFirebaseUser, requireAdmin, async (_request, response) => {
+  response.set('Cache-Control', 'no-store');
+  if (!referralsEnabled()) {
+    response.status(404).json({ error: 'Referral rewards are not available.' });
+    return;
+  }
+  try {
+    const { db } = await getFirebaseAdmin();
+    const [codes, referrals, rewards] = await Promise.all([
+      db.collection('referralCodes').get(),
+      db.collection('referrals').get(),
+      db.collection('referralRewards').get()
+    ]);
+    const referralRows = (referrals.docs || []).map(document => document.data() || {});
+    const rewardRows = (rewards.docs || []).map(document => document.data() || {});
+    const successful = referralRows.filter(item => ['registered', 'payment_pending', 'converted', 'revoked'].includes(item.status));
+    const monthly = successful.filter(item => item.firstQualifyingPlanKey === 'monthly' && item.firstQualifyingPaymentId).length;
+    const yearly = successful.filter(item => item.firstQualifyingPlanKey === 'yearly' && item.firstQualifyingPaymentId).length;
+    const issued = (type) => rewardRows.filter(item => item.rewardType === type).reduce((sum, item) => sum + (Number(item.durationDays) || 0), 0);
+    const reversals = rewardRows.filter(item => item.rewardType === 'reversal').reduce((sum, item) => sum + (Number(item.durationDays) || 0), 0);
+    response.json({
+      metrics: {
+        activeCodes: (codes.docs || []).filter(document => document.data()?.active === true).length,
+        attributedRegistrations: successful.length,
+        monthlyConversions: monthly,
+        yearlyConversions: yearly,
+        conversionRate: successful.length ? (monthly + yearly) / successful.length : 0,
+        registrationRewardDaysIssued: issued('registration'),
+        conversionRewardDaysIssued: issued('conversion'),
+        daysRevoked: reversals,
+        pendingReview: referralRows.filter(item => item.status === 'pending_review').length
+      }
+    });
+  } catch (error) {
+    console.error('Could not load admin referral metrics.', error);
+    response.status(500).json({ error: 'Could not load referral metrics.' });
+  }
+});
+
+app.get('/api/admin/referrals', requireFirebaseUser, requireAdmin, async (request, response) => {
+  response.set('Cache-Control', 'no-store');
+  if (!referralsEnabled()) {
+    response.status(404).json({ error: 'Referral rewards are not available.' });
+    return;
+  }
+  try {
+    const { db } = await getFirebaseAdmin();
+    const limit = referralPageSize(request.query.limit);
+    const cursor = parseReferralCursor(request.query.cursor);
+    const snapshot = await db.collection('referrals').orderBy('createdAt', 'desc').limit(5000).get();
+    let documents = (snapshot.docs || []).filter(document => {
+      const data = document.data() || {};
+      return (!request.query.status || request.query.status === 'all' || data.status === request.query.status)
+        && (!request.query.search || `${data.referredIdentity || ''} ${data.referralCode || ''} ${document.id}`.toLowerCase().includes(String(request.query.search).toLowerCase()));
+    });
+    if (cursor) {
+      const cursorIndex = documents.findIndex(document => document.id === cursor.id);
+      documents = cursorIndex >= 0 ? documents.slice(cursorIndex + 1) : [];
+    }
+    const hasMore = documents.length > limit;
+    documents = documents.slice(0, limit);
+    const items = await Promise.all(documents.map(async document => {
+      const data = document.data() || {};
+      const code = data.referralCode
+        ? await db.doc(`referralCodes/${data.referralCode}`).get()
+        : null;
+      return { id: document.id, ...data, codeActive: code?.data()?.active === true };
+    }));
+    response.json({
+      items,
+      nextCursor: hasMore && documents.length ? encodeReferralCursor(documents.at(-1)) : null
+    });
+  } catch (error) {
+    console.error('Could not search admin referrals.', error);
+    response.status(500).json({ error: 'Could not search referrals.' });
+  }
+});
+
+app.get('/api/admin/referral-details/:referralId', requireFirebaseUser, requireAdmin, async (request, response) => {
+  response.set('Cache-Control', 'no-store');
+  if (!referralsEnabled()) {
+    response.status(404).json({ error: 'Referral rewards are not available.' });
+    return;
+  }
+  try {
+    const { db } = await getFirebaseAdmin();
+    const referralRef = db.doc(`referrals/${request.params.referralId}`);
+    const referral = await referralRef.get();
+    if (!referral.exists) {
+      response.status(404).json({ error: 'Referral not found.' });
+      return;
+    }
+    const data = referral.data() || {};
+    const [rewards, adminAudit, rewardEvents] = await Promise.all([
+      db.collection('referralRewards').where('referralId', '==', request.params.referralId).get(),
+      db.collection('referralAdminAudit').where('targetRecord', '==', request.params.referralId).get(),
+      db.collection('referralRewardEvents').where('referralId', '==', request.params.referralId).get()
+    ]);
+    response.json({
+      referral: { id: referral.id, ...data },
+      rewards: (rewards.docs || []).map(document => ({ id: document.id, ...document.data() })),
+      auditHistory: [
+        ...(adminAudit.docs || []).map(document => ({ id: document.id, ...(document.data() || {}) })),
+        ...(rewardEvents.docs || []).map(document => ({ id: document.id, ...(document.data() || {}) }))
+      ].sort((left, right) => Number(left.timestamp || left.occurredAt) - Number(right.timestamp || right.occurredAt))
+    });
+  } catch (error) {
+    console.error('Could not load admin referral details.', error);
+    response.status(500).json({ error: 'Could not load referral details.' });
+  }
+});
+
+app.post('/api/admin/referrals/:referralId/action', requireFirebaseUser, requireAdmin, async (request, response) => {
+  response.set('Cache-Control', 'no-store');
+  if (!referralsEnabled()) {
+    response.status(404).json({ error: 'Referral rewards are not available.' });
+    return;
+  }
+  const action = request.body?.action;
+  const reason = typeof request.body?.reason === 'string' ? request.body.reason.trim().slice(0, 500) : '';
+  if (!reason || !['approve', 'reject', 'reverse-conversion'].includes(action)) {
+    response.status(400).json({ error: 'Choose a supported action and provide a reason.' });
+    return;
+  }
+  try {
+    const { db } = await getFirebaseAdmin();
+    const referralRef = db.doc(`referrals/${request.params.referralId}`);
+    const auditRef = db.collection('referralAdminAudit').doc();
+    const now = Date.now();
+    await db.runTransaction(async transaction => {
+      const referralSnapshot = await transaction.get(referralRef);
+      if (!referralSnapshot.exists) {
+        const missing = new Error('Referral not found.');
+        missing.status = 404;
+        throw missing;
+      }
+      const before = referralSnapshot.data() || {};
+      if (action === 'approve' && before.status !== 'pending_review') {
+        const invalid = new Error('Only referrals pending review can be approved.');
+        invalid.status = 409;
+        throw invalid;
+      }
+      if (action === 'reject' && before.status !== 'pending_review') {
+        const invalid = new Error('Only referrals pending review can be rejected.');
+        invalid.status = 409;
+        throw invalid;
+      }
+      let after = { ...before, updatedAt: now, reviewedBy: request.user.uid, reviewReason: reason };
+      if (action === 'approve') after.status = 'registered';
+      if (action === 'reject') {
+        after.status = 'rejected';
+        after.registrationRewardStatus = 'rejected';
+      }
+      let registrationRewards = [];
+      if (action === 'approve' && before.registrationRewardStatus === 'pending_review') {
+        const referrerEntitlementRef = userEntitlementDocument(db, before.referrerUid);
+        const referredEntitlementRef = userEntitlementDocument(db, before.referredUid);
+        const referrerSummaryRef = db.doc(`referralUserSummaries/${before.referrerUid}`);
+        const referredSummaryRef = db.doc(`referralUserSummaries/${before.referredUid}`);
+        const [referrerEntitlement, referredEntitlement, referrerSummary, referredSummary] = await Promise.all([
+          transaction.get(referrerEntitlementRef),
+          transaction.get(referredEntitlementRef),
+          transaction.get(referrerSummaryRef),
+          transaction.get(referredSummaryRef)
+        ]);
+        registrationRewards = [
+          {
+            uid: before.referrerUid,
+            role: 'referrer',
+            entitlement: referrerEntitlement.data() || {},
+            summaryRef: referrerSummaryRef,
+            summary: referrerSummary.data() || {}
+          },
+          {
+            uid: before.referredUid,
+            role: 'referred',
+            entitlement: referredEntitlement.data() || {},
+            summaryRef: referredSummaryRef,
+            summary: referredSummary.data() || {}
+          }
+        ].map(item => {
+          const startsAt = Math.max(
+            now,
+            Number(item.entitlement.validUntil) || 0,
+            Number(item.summary.rewardStackUntil) || 0
+          );
+          const rewardId = `${request.params.referralId}_registration_${item.role}`;
+          return {
+            ref: db.doc(`referralRewards/${rewardId}`),
+            summaryRef: item.summaryRef,
+            summary: item.summary,
+            data: referralRewardRecord({
+              rewardId,
+              beneficiaryUid: item.uid,
+              referralId: request.params.referralId,
+              rewardType: 'registration',
+              days: REFERRAL_CONFIG.registrationRewardDays,
+              now,
+              startsAt,
+              idempotencyKey: `registration:${request.params.referralId}:${item.role}`
+            })
+          };
+        });
+        after.registrationRewardStatus = 'issued';
+      }
+      let reversal = null;
+      if (action === 'reverse-conversion') {
+        if (before.paidConversionRewardStatus !== 'issued' || !before.firstQualifyingPaymentId) {
+          const invalid = new Error('There is no active paid-conversion reward to reverse.');
+          invalid.status = 409;
+          throw invalid;
+        }
+        const rewardRef = db.doc(`referralRewards/${request.params.referralId}_conversion`);
+        const reversalRef = db.doc(`referralRewards/${request.params.referralId}_manual_reversal`);
+        const [rewardSnapshot, reversalSnapshot] = await Promise.all([
+          transaction.get(rewardRef),
+          transaction.get(reversalRef)
+        ]);
+        if (!rewardSnapshot.exists || reversalSnapshot.exists || rewardSnapshot.data()?.status === 'revoked') {
+          const invalid = new Error('The conversion reward is already unavailable.');
+          invalid.status = 409;
+          throw invalid;
+        }
+        const original = rewardSnapshot.data() || {};
+        reversal = {
+          ref: db.doc(`referralRewards/${request.params.referralId}_manual_reversal`),
+          beneficiaryUid: original.beneficiaryUid,
+          reward: original
+        };
+        after = {
+          ...after,
+          status: 'revoked',
+          paidConversionRewardStatus: 'revoked',
+          revokedAt: now,
+          revocationReason: reason
+        };
+      }
+      transaction.set(referralRef, after, { merge: true });
+      for (const reward of registrationRewards) {
+        transaction.create(reward.ref, reward.data);
+        transaction.set(reward.summaryRef, {
+          rewardStackUntil: reward.data.expiresAt,
+          registrationRewardDays: (Number(reward.summary.registrationRewardDays) || 0) + REFERRAL_CONFIG.registrationRewardDays,
+          updatedAt: now
+        }, { merge: true });
+      }
+      if (reversal) {
+        transaction.create(reversal.ref, {
+          beneficiaryUid: reversal.beneficiaryUid,
+          referralId: request.params.referralId,
+          rewardSource: 'admin_manual',
+          rewardType: 'reversal',
+          originalRewardType: 'conversion',
+          durationDays: reversal.reward.durationDays,
+          status: 'revoked',
+          createdAt: now,
+          reason,
+          originalRewardId: `${request.params.referralId}_conversion`,
+          relatedPaymentId: before.firstQualifyingPaymentId,
+          relatedSubscriptionId: before.firstQualifyingSubscriptionId,
+          idempotencyKey: `admin-reversal:${request.params.referralId}`,
+          configurationVersion: REFERRAL_CONFIG.version
+        });
+      }
+      transaction.create(auditRef, {
+        adminUid: request.user.uid,
+        timestamp: now,
+        action,
+        targetRecord: request.params.referralId,
+        reason,
+        before,
+        after
+      });
+    });
+    response.json({ updated: true });
+  } catch (error) {
+    if (error?.status) {
+      response.status(error.status).json({ error: error.message });
+      return;
+    }
+    console.error('Could not apply admin referral action.', error);
+    response.status(500).json({ error: 'Could not update this referral.' });
+  }
+});
+
+app.post('/api/admin/referrals/:referralId/adjustment', requireFirebaseUser, requireAdmin, async (request, response) => {
+  response.set('Cache-Control', 'no-store');
+  if (!referralsEnabled()) {
+    response.status(404).json({ error: 'Referral rewards are not available.' });
+    return;
+  }
+  const reason = typeof request.body?.reason === 'string' ? request.body.reason.trim().slice(0, 500) : '';
+  const days = Number(request.body?.days);
+  if (!reason || !Number.isInteger(days) || days < 1 || days > 3650) {
+    response.status(400).json({ error: 'Provide a reason and a promotional adjustment of 1–3650 days.' });
+    return;
+  }
+  try {
+    const { db } = await getFirebaseAdmin();
+    const referralRef = db.doc(`referrals/${request.params.referralId}`);
+    const adjustmentId = randomUUID();
+    const auditRef = db.collection('referralAdminAudit').doc();
+    const now = Date.now();
+    await db.runTransaction(async transaction => {
+      const referralSnapshot = await transaction.get(referralRef);
+      if (!referralSnapshot.exists) {
+        const missing = new Error('Referral not found.');
+        missing.status = 404;
+        throw missing;
+      }
+      const referral = referralSnapshot.data() || {};
+      const beneficiaryUid = typeof request.body?.beneficiaryUid === 'string'
+        && [referral.referrerUid, referral.referredUid].includes(request.body.beneficiaryUid)
+        ? request.body.beneficiaryUid
+        : referral.referrerUid;
+      const summaryRef = db.doc(`referralUserSummaries/${beneficiaryUid}`);
+      const entitlementRef = userEntitlementDocument(db, beneficiaryUid);
+      const [summarySnapshot, entitlementSnapshot] = await Promise.all([
+        transaction.get(summaryRef),
+        transaction.get(entitlementRef)
+      ]);
+      const summary = summarySnapshot.data() || {};
+      const entitlement = entitlementSnapshot.data() || {};
+      const startsAt = Math.max(now, Number(entitlement.validUntil) || 0, Number(summary.rewardStackUntil) || 0);
+      const rewardRef = db.doc(`referralRewards/${request.params.referralId}_manual_${adjustmentId}`);
+      const reward = referralRewardRecord({
+        rewardId: rewardRef.id,
+        beneficiaryUid,
+        referralId: request.params.referralId,
+        rewardType: 'manual',
+        days,
+        now,
+        startsAt,
+        reason,
+        idempotencyKey: `admin-adjustment:${adjustmentId}`
+      });
+      transaction.create(rewardRef, reward);
+      transaction.set(summaryRef, {
+        rewardStackUntil: reward.expiresAt,
+        manualRewardDays: (Number(summary.manualRewardDays) || 0) + days,
+        updatedAt: now
+      }, { merge: true });
+      transaction.create(auditRef, {
+        adminUid: request.user.uid,
+        timestamp: now,
+        action: 'manual-promotional-adjustment',
+        targetRecord: request.params.referralId,
+        reason,
+        beneficiaryUid,
+        days,
+        after: reward
+      });
+    });
+    response.json({ updated: true });
+  } catch (error) {
+    response.status(error?.status || 500).json({ error: error?.status ? error.message : 'Could not issue the promotional adjustment.' });
+  }
+});
+
+app.post('/api/admin/referrals/codes/:code/action', requireFirebaseUser, requireAdmin, async (request, response) => {
+  response.set('Cache-Control', 'no-store');
+  if (!referralsEnabled()) {
+    response.status(404).json({ error: 'Referral rewards are not available.' });
+    return;
+  }
+  const reason = typeof request.body?.reason === 'string' ? request.body.reason.trim().slice(0, 500) : '';
+  if (!reason || typeof request.body?.active !== 'boolean') {
+    response.status(400).json({ error: 'Provide the enabled state and a reason.' });
+    return;
+  }
+  try {
+    const { db } = await getFirebaseAdmin();
+    const codeRef = db.doc(`referralCodes/${request.params.code}`);
+    const auditRef = db.collection('referralAdminAudit').doc();
+    await db.runTransaction(async transaction => {
+      const snapshot = await transaction.get(codeRef);
+      if (!snapshot.exists) {
+        const missing = new Error('Referral code not found.');
+        missing.status = 404;
+        throw missing;
+      }
+      const before = snapshot.data() || {};
+      const now = Date.now();
+      const after = { ...before, active: request.body.active, updatedAt: now, codeVersion: (before.codeVersion || 1) + 1 };
+      transaction.set(codeRef, after);
+      transaction.create(auditRef, {
+        adminUid: request.user.uid, timestamp: now, action: request.body.active ? 'enable-code' : 'disable-code',
+        targetRecord: request.params.code, reason, before, after
+      });
+    });
+    response.json({ updated: true });
+  } catch (error) {
+    response.status(error?.status || 500).json({ error: error?.status ? error.message : 'Could not update referral code.' });
+  }
+});
+
+app.get('/api/admin/referrals/export.csv', requireFirebaseUser, requireAdmin, async (request, response) => {
+  response.set('Cache-Control', 'no-store');
+  if (!referralsEnabled()) {
+    response.status(404).json({ error: 'Referral rewards are not available.' });
+    return;
+  }
+  try {
+    const { db } = await getFirebaseAdmin();
+    const snapshot = await db.collection('referrals').orderBy('createdAt', 'desc').limit(5000).get();
+    const quote = value => `"${String(value ?? '').replaceAll('"', '""')}"`;
+    const rows = ['referral_id,masked_identity,status,created_at,plan,payment_id,reward_status,reward_days'];
+    const documents = (snapshot.docs || []).filter(document => {
+      const data = document.data() || {};
+      return (!request.query.status || request.query.status === 'all' || data.status === request.query.status)
+        && (!request.query.search || `${data.referredIdentity || ''} ${data.referralCode || ''} ${document.id}`.toLowerCase().includes(String(request.query.search).toLowerCase()));
+    });
+    for (const document of documents) {
+      const data = document.data() || {};
+      rows.push([
+        document.id, data.referredIdentity, data.status, data.createdAt, data.firstQualifyingPlanKey,
+        data.firstQualifyingPaymentId, data.paidConversionRewardStatus, data.paidConversionRewardDays
+      ].map(quote).join(','));
+    }
+    response.type('text/csv').set('Content-Disposition', 'attachment; filename="referrals.csv"').send(rows.join('\r\n'));
+  } catch (error) {
+    console.error('Could not export referrals.', error);
+    response.status(500).json({ error: 'Could not export referral data.' });
+  }
+});
+
 app.get('/api/pricing/config', async (_request, response) => {
   try {
     response.json({ pricing: publicPricingConfig(await loadPricingConfigFromStore()) });
@@ -2120,6 +3193,94 @@ app.post('/api/billing/webhook', async (request, response) => {
     const subscription = event.payload?.subscription?.entity;
     const payment = event.payload?.payment?.entity;
     const subscriptionId = subscription?.id || payment?.subscription_id;
+    const referralReversalEvent = ['payment.refunded', 'payment.dispute.lost'].includes(event.event);
+    if (referralReversalEvent && referralsEnabled()) {
+      const eventPaymentId = typeof payment?.id === 'string' && /^pay_[A-Za-z0-9]+$/.test(payment.id)
+        ? payment.id
+        : typeof event.payload?.dispute?.entity?.payment_id === 'string'
+          && /^pay_[A-Za-z0-9]+$/.test(event.payload.dispute.entity.payment_id)
+          ? event.payload.dispute.entity.payment_id
+          : null;
+      if (typeof eventId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(eventId) || !eventPaymentId) {
+        response.status(200).json({ received: true });
+        return;
+      }
+      try {
+        const { db } = await getFirebaseAdmin();
+        const eventRef = db.collection('billingWebhookEvents').doc(eventId);
+        const existingEvent = await eventRef.get();
+        if (existingEvent.exists) {
+          response.json({ received: true });
+          return;
+        }
+        let providerState;
+        if (event.event === 'payment.refunded') {
+          const providerPayment = await razorpayRequest(`/payments/${encodeURIComponent(eventPaymentId)}`);
+          if (providerPayment.id !== eventPaymentId || providerPayment.status !== 'refunded') {
+            response.status(200).json({ received: true });
+            return;
+          }
+          providerState = { type: 'payment', id: providerPayment.id, status: providerPayment.status };
+        } else {
+          const dispute = event.payload?.dispute?.entity;
+          const disputeId = typeof dispute?.id === 'string' && /^disp_[A-Za-z0-9]+$/.test(dispute.id) ? dispute.id : '';
+          if (!disputeId) {
+            response.status(200).json({ received: true });
+            return;
+          }
+          const verifiedDispute = await razorpayRequest(`/disputes/${encodeURIComponent(disputeId)}`);
+          if (verifiedDispute.id !== disputeId
+            || verifiedDispute.payment_id !== eventPaymentId
+            || verifiedDispute.status !== 'lost') {
+            response.status(200).json({ received: true });
+            return;
+          }
+          providerState = { type: 'dispute', id: disputeId, status: verifiedDispute.status };
+        }
+        const referrals = await db.collection('referrals')
+          .where('firstQualifyingPaymentId', '==', eventPaymentId)
+          .get();
+        for (const referral of referrals.docs || []) {
+          await revokeReferralConversion(db, {
+            referralId: referral.id,
+            reason: event.event === 'payment.refunded' ? 'verified-refund' : 'verified-chargeback',
+            eventReference: eventId,
+            providerState,
+            relatedPaymentId: eventPaymentId,
+            relatedSubscriptionId: referral.data()?.firstQualifyingSubscriptionId || null
+          });
+        }
+        const reversalMarkerRef = db.doc(`referralPaymentReversals/${eventPaymentId}`);
+        const receivedAt = Date.now();
+        await db.runTransaction(async transaction => {
+          const [eventSnapshot, markerSnapshot] = await Promise.all([
+            transaction.get(eventRef),
+            transaction.get(reversalMarkerRef)
+          ]);
+          if (eventSnapshot.exists) return;
+          if (!markerSnapshot.exists) {
+            transaction.create(reversalMarkerRef, {
+              paymentId: eventPaymentId,
+              event: event.event,
+              providerState,
+              providerEventReference: eventId,
+              confirmedAt: receivedAt
+            });
+          }
+          transaction.create(eventRef, {
+            event: event.event,
+            paymentId: eventPaymentId,
+            providerState,
+            receivedAt
+          });
+        });
+        response.json({ received: true });
+      } catch (error) {
+        console.error('Could not process Razorpay referral reversal event.', error);
+        response.status(500).json({ error: 'Webhook processing failed.' });
+      }
+      return;
+    }
     const lifecycleEvents = new Set([
       'subscription.activated',
       'subscription.charged',
@@ -2151,6 +3312,48 @@ app.post('/api/billing/webhook', async (request, response) => {
       const eventPaymentId = typeof payment?.id === 'string' && /^pay_[A-Za-z0-9]+$/.test(payment.id)
         ? payment.id
         : null;
+      let verifiedCapturedPayment = false;
+      if (referralsEnabled()
+        && event.event === 'subscription.charged'
+        && payment?.status === 'captured'
+        && eventPaymentId
+        && payment.subscription_id === subscriptionId) {
+        const [providerPayment, providerSubscription] = await Promise.all([
+          razorpayRequest(`/payments/${encodeURIComponent(eventPaymentId)}`),
+          razorpayRequest(`/subscriptions/${encodeURIComponent(subscriptionId)}`)
+        ]);
+        const providerSubscriptionEnd = Number(providerSubscription.current_end) * 1000;
+        const expectedProviderPlanId = mapping.pendingPlanId || mapping.planId;
+        verifiedCapturedPayment = providerPayment.id === eventPaymentId
+          && providerPayment.status === 'captured'
+          && providerPayment.subscription_id === subscriptionId
+          && providerPayment.amount === payment.amount
+          && providerPayment.currency === payment.currency
+          && providerSubscription.id === subscriptionId
+          && providerSubscription.status === 'active'
+          && providerSubscription.plan_id === subscription?.plan_id
+          && providerSubscription.plan_id === expectedProviderPlanId
+          && Number.isFinite(providerSubscriptionEnd)
+          && providerSubscriptionEnd > Date.now();
+      }
+      let verifiedImmediateCancellation = null;
+      if (referralsEnabled() && ['subscription.cancelled', 'subscription.completed', 'subscription.expired'].includes(event.event)) {
+        try {
+          const providerSubscription = await razorpayRequest(`/subscriptions/${encodeURIComponent(subscriptionId)}`);
+          const providerEnd = Number(providerSubscription.current_end) * 1000;
+          if (providerSubscription.id === subscriptionId
+            && ['cancelled', 'completed', 'expired'].includes(providerSubscription.status)
+            && Number.isFinite(providerEnd)
+            && providerEnd <= Date.now()) {
+            verifiedImmediateCancellation = {
+              providerState: { type: 'subscription', id: subscriptionId, status: providerSubscription.status },
+              eventReference: eventId
+            };
+          }
+        } catch (error) {
+          console.error('Could not verify provider state for referral cancellation handling.', error);
+        }
+      }
       await db.runTransaction(async transaction => {
         const duplicate = await transaction.get(eventRef);
         if (duplicate.exists) return;
@@ -2192,6 +3395,65 @@ app.post('/api/billing/webhook', async (request, response) => {
         const billingCurrency = planChangeApplied ? providerCurrency : currentMapping.currency || providerCurrency || 'INR';
         const scheduledPlan = planChangeApplied || planChangeCancelled ? null : currentMapping.pendingPlanKey || null;
         const scheduledAt = scheduledPlan ? Number(currentMapping.scheduledAt) || null : null;
+        let conversionReward = null;
+        const conversionDays = event.event === 'subscription.charged'
+          && verifiedCapturedPayment
+          && payment?.status === 'captured'
+          && eventPaymentId
+          && payment.subscription_id === subscriptionId
+          && Number.isSafeInteger(payment.amount)
+          && payment.amount > 0
+          && isPaidThrough
+          ? referralRewardDays(billingPlanKey)
+          : 0;
+        if (conversionDays > 0 && currentMapping.uid) {
+          const [referralMatches, paymentReversal] = await Promise.all([
+            transaction.get(db.collection('referrals').where('referredUid', '==', currentMapping.uid)),
+            transaction.get(db.doc(`referralPaymentReversals/${eventPaymentId}`))
+          ]);
+          const eligibleReferral = (referralMatches.docs || []).find(document => {
+            const data = document.data() || {};
+            return data.status !== 'rejected'
+              && !data.firstQualifyingPaymentId
+              && ['registered', 'payment_pending'].includes(data.status);
+          });
+          if (eligibleReferral && !paymentReversal.exists) {
+            const referralData = eligibleReferral.data() || {};
+            const referrerSummaryRef = db.doc(`referralUserSummaries/${referralData.referrerUid}`);
+            const referrerEntitlementRef = userEntitlementDocument(db, referralData.referrerUid);
+            const [summarySnapshot, entitlementSnapshot] = await Promise.all([
+              transaction.get(referrerSummaryRef),
+              transaction.get(referrerEntitlementRef)
+            ]);
+            const now = Date.now();
+            const startsAt = Math.max(
+              now,
+              Number(entitlementSnapshot.data()?.validUntil) || 0,
+              Number(summarySnapshot.data()?.rewardStackUntil) || 0
+            );
+            const rewardId = `${eligibleReferral.id}_conversion`;
+            conversionReward = {
+              referralRef: eligibleReferral.ref,
+              referralData,
+              summaryRef: referrerSummaryRef,
+              summary: summarySnapshot.data() || {},
+              rewardRef: db.doc(`referralRewards/${rewardId}`),
+              reward: referralRewardRecord({
+                rewardId,
+                beneficiaryUid: referralData.referrerUid,
+                referralId: eligibleReferral.id,
+                rewardType: 'conversion',
+                days: conversionDays,
+                now,
+                startsAt,
+                planKey: billingPlanKey,
+                paymentId: eventPaymentId,
+                subscriptionId,
+                idempotencyKey: `conversion:${eligibleReferral.id}:${eventPaymentId}`
+              })
+            };
+          }
+        }
         const entitlement = subscriptionRevoked
           ? {
               planId: 'free',
@@ -2246,6 +3508,25 @@ app.post('/api/billing/webhook', async (request, response) => {
         }
 
         transaction.create(eventRef, { event: event.event, subscriptionId, receivedAt: Date.now() });
+        if (conversionReward) {
+          transaction.create(conversionReward.rewardRef, conversionReward.reward);
+          transaction.set(conversionReward.referralRef, {
+            status: 'converted',
+            firstQualifyingPaymentId: eventPaymentId,
+            firstQualifyingSubscriptionId: subscriptionId,
+            firstQualifyingPlanKey: billingPlanKey,
+            paidConversionRewardStatus: 'issued',
+            paidConversionRewardDays: conversionDays,
+            paidAt: Number(payment.created_at) > 0 ? Number(payment.created_at) * 1000 : Date.now(),
+            rewardedAt: Date.now(),
+            updatedAt: Date.now()
+          }, { merge: true });
+          transaction.set(conversionReward.summaryRef, {
+            rewardStackUntil: conversionReward.reward.expiresAt,
+            conversionRewardDays: (Number(conversionReward.summary.conversionRewardDays) || 0) + conversionDays,
+            updatedAt: Date.now()
+          }, { merge: true });
+        }
         if (payment?.status === 'captured'
           && eventPaymentId
           && payment.subscription_id === subscriptionId
@@ -2352,6 +3633,21 @@ app.post('/api/billing/webhook', async (request, response) => {
           }
         }
       });
+      if (verifiedImmediateCancellation) {
+        const referrals = await db.collection('referrals')
+          .where('firstQualifyingSubscriptionId', '==', subscriptionId)
+          .get();
+        for (const referral of referrals.docs || []) {
+          await revokeReferralConversion(db, {
+            referralId: referral.id,
+            reason: 'verified-immediate-cancellation',
+            eventReference: verifiedImmediateCancellation.eventReference,
+            providerState: verifiedImmediateCancellation.providerState,
+            relatedPaymentId: referral.data()?.firstQualifyingPaymentId || null,
+            relatedSubscriptionId: subscriptionId
+          });
+        }
+      }
       response.json({ received: true });
     } catch (error) {
       console.error('Could not process Razorpay subscription webhook.', error);
@@ -2741,6 +4037,47 @@ app.get('/api/billing/entitlement', requireEntitlementConfig, requireFirebaseUse
         : '';
       if (checkoutSubscriptionId) entitlement.subscriptionId = checkoutSubscriptionId;
     }
+    if (referralsEnabled()) {
+      const rewardSnapshot = await db.collection('referralRewards')
+        .where('beneficiaryUid', '==', request.user.uid)
+        .get();
+      const now = Date.now();
+      const rewardRecords = (rewardSnapshot.docs || []).map(document => ({
+        id: document.id,
+        ...(document.data() || {})
+      }));
+      const revokedRewardIds = new Set(rewardRecords
+        .filter(reward => reward.rewardType === 'reversal')
+        .map(reward => reward.originalRewardId)
+        .filter(Boolean));
+      const unexpiredRewards = rewardRecords
+        .filter(reward => reward.rewardType !== 'reversal'
+          && !revokedRewardIds.has(reward.id)
+          && reward.status !== 'revoked'
+          && Number.isFinite(Number(reward.startsAt))
+          && Number.isFinite(Number(reward.expiresAt))
+          && Number(reward.expiresAt) > now
+          && Number(reward.expiresAt) > Number(reward.startsAt));
+      const activeRewards = unexpiredRewards
+        .filter(reward => Number(reward.startsAt) <= now);
+      const promotionalValidUntil = unexpiredRewards
+        .reduce((latest, reward) => Math.max(latest, Number(reward.expiresAt)), 0);
+      if (promotionalValidUntil > 0) {
+        const existingValidUntil = entitlement.lifetime ? 0 : Number(entitlement.validUntil) || 0;
+        entitlement.promotionalValidUntil = promotionalValidUntil;
+        entitlement.promotionalRewardCount = unexpiredRewards.length;
+        const proIsCurrentlyActive = entitlement.planId === 'pro'
+          && entitlement.status === 'active'
+          && (entitlement.lifetime || existingValidUntil > now);
+        if (activeRewards.length || proIsCurrentlyActive) {
+          entitlement.planId = 'pro';
+          entitlement.status = 'active';
+          entitlement.validUntil = entitlement.lifetime
+            ? null
+            : Math.max(existingValidUntil, promotionalValidUntil);
+        }
+      }
+    }
     response.json({ entitlement });
   } catch (error) {
     console.error('Could not load billing entitlement.', error);
@@ -2936,6 +4273,36 @@ app.get('/api/admin/dashboard', requireFirebaseUser, requireAdmin, async (reques
       const paymentsSnapshot = await db.collection('billingPayments').get();
       paymentDocuments = (paymentsSnapshot.docs || []).map(document => ({ id: document.id, ...(document.data() || {}) }));
     }
+    let referralRewardDocuments = [];
+    if (referralsEnabled()
+      && typeof db.collection === 'function'
+      && typeof db.collection('referralRewards').get === 'function') {
+      const referralRewardsSnapshot = await db.collection('referralRewards').get();
+      referralRewardDocuments = (referralRewardsSnapshot.docs || []).map(document => ({
+        id: document.id,
+        ...(document.data() || {})
+      }));
+    }
+    const reversedReferralRewardIds = new Set(referralRewardDocuments
+      .filter(reward => reward.rewardType === 'reversal')
+      .map(reward => reward.originalRewardId)
+      .filter(Boolean));
+    const referralRewardsByUser = new Map();
+    for (const reward of referralRewardDocuments) {
+      const startsAt = Number(reward.startsAt);
+      const expiresAt = Number(reward.expiresAt);
+      if (reward.rewardSource !== 'referral'
+        || reward.rewardType === 'reversal'
+        || !['active', 'scheduled'].includes(reward.status)
+        || reversedReferralRewardIds.has(reward.id)
+        || !Number.isFinite(startsAt)
+        || !Number.isFinite(expiresAt)
+        || expiresAt <= now
+        || expiresAt <= startsAt) continue;
+      const userRewards = referralRewardsByUser.get(reward.beneficiaryUid) || [];
+      userRewards.push(reward);
+      referralRewardsByUser.set(reward.beneficiaryUid, userRewards);
+    }
     const enriched = await Promise.all(users.map(async user => {
       const snapshot = await db.doc(`users/${user.uid}/billing/entitlement`).get();
       const entitlement = snapshot.exists
@@ -2946,8 +4313,34 @@ app.get('/api/admin/dashboard', requireFirebaseUser, requireAdmin, async (reques
         ? await subscriptionDocument(db, subscriptionId).get()
         : null;
       const adminRevoked = adminRevocationApplies(user.uid, entitlement, mappingSnapshot?.data());
-      const active = !adminRevoked
-        && hasActiveProEntitlement(entitlement, now);
+      const currentEntitlementActive = hasActiveProEntitlement(entitlement, now);
+      const referralRewards = referralRewardsByUser.get(user.uid) || [];
+      const activeReferralRewards = referralRewards.filter(reward => Number(reward.startsAt) <= now);
+      const activeReferralReward = activeReferralRewards.length > 0;
+      const active = !adminRevoked && (currentEntitlementActive || activeReferralReward);
+      const referralExpiry = referralRewards.reduce((latest, reward) => (
+        Math.max(latest, Number(reward.expiresAt) || 0)
+      ), 0);
+      const effectiveValidUntil = Math.max(
+        entitlementValidUntil(entitlement) || 0,
+        currentEntitlementActive || activeReferralReward ? referralExpiry : 0
+      );
+      const activePaymentPlan = currentEntitlementActive
+        && ['monthly', 'yearly'].includes(entitlement?.billingPlan)
+        && entitlement?.source !== 'admin';
+      const hasAdminGrant = entitlement?.source === 'admin';
+      const hasVoucherGrant = entitlement?.billingPlan === 'voucher';
+      const activationSource = activePaymentPlan
+        ? 'payment'
+        : hasAdminGrant
+          ? 'admin'
+          : hasVoucherGrant
+            ? 'voucher'
+            : activeReferralReward && active
+              ? 'referral'
+              : active
+                ? 'payment'
+                : null;
       const payments = paymentDocuments.filter(payment => payment.uid === user.uid && isRazorpayCapturedPayment(payment));
       const paidAmountByCurrency = payments.reduce((amounts, payment) => {
         const currency = payment.currency || 'INR';
@@ -2958,18 +4351,18 @@ app.get('/api/admin/dashboard', requireFirebaseUser, requireAdmin, async (reques
         ...user,
         isPro: active,
         disabled: user.disabled === true,
-        plan: active ? entitlement.planId || 'pro' : 'free',
-        billingPlan: active ? entitlement.billingPlan || null : null,
-        activationSource: entitlement?.billingPlan === 'voucher'
-          ? 'voucher'
-          : entitlement?.source === 'admin'
-            ? 'admin'
-            : active
-              ? 'payment'
-              : null,
+        plan: active
+          ? (activeReferralReward ? 'pro' : entitlement.planId || 'pro')
+          : 'free',
+        billingPlan: active
+          ? activeReferralReward && !currentEntitlementActive
+            ? 'referral'
+            : entitlement.billingPlan || (activeReferralReward ? 'referral' : null)
+          : null,
+        activationSource,
         validUntil: entitlement?.lifetime === true
           ? null
-          : entitlementValidUntil(entitlement) || null,
+          : effectiveValidUntil || null,
         lifetime: entitlement?.lifetime === true,
         subscriptionId: active && ['monthly', 'yearly'].includes(entitlement?.billingPlan)
           ? subscriptionId

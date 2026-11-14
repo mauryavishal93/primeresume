@@ -55,7 +55,7 @@ export const PRICING_FEATURES = Object.freeze([
   Object.freeze({ label: 'Basic cover-letter tools', free: 'Included', pro: 'Included' }),
   Object.freeze({ label: 'JSON import and export', free: 'Included', pro: 'Included' }),
   Object.freeze({ label: 'Browser autosave', free: 'Included', pro: 'Included' }),
-  Object.freeze({ label: 'Existing optional cloud storage', free: 'Unchanged', pro: 'Unchanged' }),
+  Object.freeze({ label: 'Google account cloud resumes', free: 'Included', pro: 'Included' }),
   Object.freeze({ label: 'Tailored resume versions', free: 'Not available', pro: 'Not available yet' }),
   Object.freeze({ label: 'Enhanced cover-letter tools', free: 'Not available', pro: 'Not available yet' }),
   Object.freeze({ label: 'Premium export options', free: 'Not available', pro: 'Not available yet' })

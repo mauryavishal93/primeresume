@@ -6,6 +6,9 @@ let dashboard;
 let forumActivityCursor = null;
 let forumActivityLoading = false;
 let forumActivityRequest = 0;
+let adminReferralCursor = null;
+let adminReferralSearchTimer = null;
+let adminReferralLoading = false;
 let forumPostSearchTimer = null;
 const forumContentStates = {
   posts: { cursor: null, loading: false, request: 0 },
@@ -44,7 +47,10 @@ function selectForumContentTab(tabName, { focus = false } = {}) {
 }
 
 document.querySelectorAll('[data-admin-category-link]').forEach(button => {
-  button.addEventListener('click', () => selectAdminCategory(button.dataset.adminCategoryLink));
+  button.addEventListener('click', () => {
+    selectAdminCategory(button.dataset.adminCategoryLink);
+    if (button.dataset.adminCategoryLink === 'referrals') void loadAdminReferrals();
+  });
 });
 selectAdminCategory('overview');
 
@@ -82,6 +88,217 @@ async function api(path, options = {}) {
   }
   return body;
 }
+
+function setAdminReferralMessage(message, state = 'ready') {
+  const element = $('[data-admin-referral-message]');
+  element.textContent = message;
+  element.dataset.state = state;
+}
+
+async function loadAdminReferrals({ append = false } = {}) {
+  if (!currentUser || adminReferralLoading) return;
+  adminReferralLoading = true;
+  setAdminReferralMessage('Loading referral records…', 'loading');
+  try {
+    const [summary, page] = await Promise.all([
+      api('/api/admin/referrals/summary'),
+      api(`/api/admin/referrals?${new URLSearchParams({
+        limit: '30',
+        status: $('[data-admin-referral-status]').value,
+        search: $('[data-admin-referral-search]').value.trim(),
+        ...(append && adminReferralCursor ? { cursor: adminReferralCursor } : {})
+      })}`)
+    ]);
+    const metricLabels = [
+      ['Active codes', summary.metrics.activeCodes],
+      ['Attributed registrations', summary.metrics.attributedRegistrations],
+      ['Monthly conversions', summary.metrics.monthlyConversions],
+      ['Yearly conversions', summary.metrics.yearlyConversions],
+      ['Conversion rate', `${Math.round((Number(summary.metrics.conversionRate) || 0) * 100)}%`],
+      ['Registration days issued', summary.metrics.registrationRewardDaysIssued],
+      ['Conversion days issued', summary.metrics.conversionRewardDaysIssued],
+      ['Days revoked', summary.metrics.daysRevoked],
+      ['Pending review', summary.metrics.pendingReview]
+    ];
+    const metricContainer = $('[data-admin-referral-metrics]');
+    metricContainer.replaceChildren(...metricLabels.map(([label, value]) => {
+      const card = document.createElement('article');
+      card.className = 'referral-admin-metric';
+      const caption = document.createElement('span');
+      caption.textContent = label;
+      const amount = document.createElement('strong');
+      amount.textContent = String(value ?? 0);
+      card.append(caption, amount);
+      return card;
+    }));
+    const rows = $('[data-admin-referral-rows]');
+    if (!append) rows.replaceChildren();
+    for (const referral of page.items || []) {
+      const row = rows.insertRow();
+      row.dataset.referralId = referral.id;
+      const addTextCell = text => {
+        const cell = row.insertCell();
+        cell.textContent = text == null || text === '' ? '—' : String(text);
+      };
+      addTextCell(referral.referredIdentity);
+      addTextCell(referral.referralCode);
+      addTextCell(referral.status);
+      addTextCell(referral.firstQualifyingPlanKey);
+      addTextCell(referral.firstQualifyingPaymentId);
+      addTextCell(referral.paidConversionRewardDays);
+      const actions = row.insertCell();
+      actions.className = 'referral-admin-actions';
+      const addAction = (action, label) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'mini-button';
+        button.dataset.refAction = action;
+        button.dataset.referralId = referral.id;
+        button.dataset.referralCode = referral.referralCode || '';
+        button.textContent = label;
+        actions.append(button);
+      };
+      addAction('details', 'Details');
+      if (referral.status === 'pending_review') addAction('approve', 'Approve');
+      if (!['converted', 'revoked', 'rejected'].includes(referral.status)) addAction('reject', 'Reject');
+      if (referral.paidConversionRewardStatus === 'issued') addAction('reverse', 'Reverse conversion');
+      row.dataset.codeActive = String(referral.codeActive === true);
+      addAction('toggle-code', referral.codeActive ? 'Disable code' : 'Enable code');
+      addAction('adjust', 'Manual days');
+    }
+    if (!append && !(page.items || []).length) {
+      const row = rows.insertRow();
+      const cell = row.insertCell();
+      cell.colSpan = 7;
+      cell.textContent = 'No referrals match these filters.';
+    }
+    adminReferralCursor = page.nextCursor;
+    $('[data-admin-referral-more]').hidden = !adminReferralCursor;
+    setAdminReferralMessage('Referral data loaded. Administrative changes require a reason and are audited.');
+  } catch (error) {
+    setAdminReferralMessage(error.message || 'Could not load referral data.', 'error');
+  } finally {
+    adminReferralLoading = false;
+  }
+}
+
+function resetAdminReferralList() {
+  adminReferralCursor = null;
+  const rows = $('[data-admin-referral-rows]');
+  rows.replaceChildren();
+  void loadAdminReferrals();
+}
+
+$('[data-admin-referral-refresh]').addEventListener('click', resetAdminReferralList);
+$('[data-admin-referral-status]').addEventListener('change', resetAdminReferralList);
+$('[data-admin-referral-search]').addEventListener('input', () => {
+  clearTimeout(adminReferralSearchTimer);
+  adminReferralSearchTimer = setTimeout(resetAdminReferralList, 250);
+});
+$('[data-admin-referral-more]').addEventListener('click', () => void loadAdminReferrals({ append: true }));
+
+$('[data-admin-referral-rows]').addEventListener('click', async event => {
+  const button = event.target.closest('[data-ref-action]');
+  if (!button) return;
+  const referralId = button.dataset.referralId;
+  try {
+    if (button.dataset.refAction === 'details') {
+      const details = await api(`/api/admin/referral-details/${encodeURIComponent(referralId)}`);
+      const referral = details.referral || {};
+      const rewards = (details.rewards || []).map(reward =>
+        `${reward.rewardType}: ${reward.durationDays} days · ${reward.status} · ${reward.id}`
+      ).join('\n') || 'No reward entries.';
+      const auditHistory = (details.auditHistory || []).map(entry =>
+        `${new Date(entry.timestamp || entry.occurredAt || 0).toLocaleString()} · ${entry.action || entry.type || 'event'} · ${entry.reason || entry.targetRecord || '—'}`
+      ).join('\n') || 'No audit events.';
+      await alertModern({
+        title: `Referral ${referral.id}`,
+        message: [
+          `Referrer UID: ${referral.referrerUid || '—'}`,
+          `Referred UID: ${referral.referredUid || '—'}`,
+          `Attribution: ${new Date(referral.attributionCreatedAt || 0).toLocaleString()}`,
+          `Payment: ${referral.firstQualifyingPaymentId || '—'}`,
+          `Subscription: ${referral.firstQualifyingSubscriptionId || '—'}`,
+          `Risk flags: ${(referral.riskFlags || []).join(', ') || 'None'}`,
+          `Review/reversal reason: ${referral.reviewReason || referral.revocationReason || '—'}`,
+          'Reward ledger:',
+          rewards,
+          'Audit history:',
+          auditHistory
+        ].join('\n')
+      });
+      return;
+    }
+
+    let path;
+    let body;
+    if (button.dataset.refAction === 'adjust') {
+      const daysText = await promptModern({
+        title: 'Manual promotional adjustment',
+        message: 'Enter 1–3650 promotional days for the referrer. This will not modify billing.',
+        confirmText: 'Continue',
+        placeholder: 'Days'
+      });
+      if (!daysText) return;
+      const days = Number(daysText);
+      if (!Number.isInteger(days) || days < 1 || days > 3650) {
+        await alertModern({ title: 'Invalid day count', message: 'Enter a whole number from 1 to 3650.', variant: 'error' });
+        return;
+      }
+      const reason = await promptModern({ title: 'Adjustment reason', message: 'This reason is saved in the audit log.', confirmText: 'Continue', placeholder: 'Reason' });
+      if (!reason?.trim()) return;
+      if (!await confirmModern({ title: 'Issue promotional days?', message: `${days} promotional days will be added to the referrer’s reward ledger.`, confirmText: 'Issue days' })) return;
+      path = `/api/admin/referrals/${encodeURIComponent(referralId)}/adjustment`;
+      body = { days, reason: reason.trim() };
+    } else if (button.dataset.refAction === 'toggle-code') {
+      const active = button.closest('tr').dataset.codeActive !== 'true';
+      const reason = await promptModern({ title: `${active ? 'Enable' : 'Disable'} referral code`, message: 'Provide a reason recorded in the audit log.', confirmText: 'Continue', placeholder: 'Reason' });
+      if (!reason?.trim()) return;
+      if (!await confirmModern({ title: `${active ? 'Enable' : 'Disable'} this code?`, message: active ? 'New visitors can use this referral code.' : 'New visitors will no longer be able to attribute this referral code.', confirmText: active ? 'Enable code' : 'Disable code', variant: active ? 'default' : 'danger' })) return;
+      path = `/api/admin/referrals/codes/${encodeURIComponent(button.dataset.referralCode)}/action`;
+      body = { active, reason: reason.trim() };
+    } else {
+      const action = button.dataset.refAction;
+      const labels = { approve: 'Approve referral', reject: 'Reject referral', reverse: 'Reverse conversion reward' };
+      if (!await confirmModern({ title: `${labels[action]}?`, message: 'This action is recorded in the referral audit log.', confirmText: labels[action], variant: action === 'reject' || action === 'reverse' ? 'danger' : 'default' })) return;
+      const reason = await promptModern({ title: `${labels[action]} reason`, message: 'Provide the reason recorded in the audit log.', confirmText: 'Continue', placeholder: 'Reason' });
+      if (!reason?.trim()) return;
+      path = `/api/admin/referrals/${encodeURIComponent(referralId)}/action`;
+      body = { action: action === 'reverse' ? 'reverse-conversion' : action, reason: reason.trim() };
+    }
+    await api(path, { method: 'POST', body: JSON.stringify(body) });
+    await loadAdminReferrals();
+    await alertModern({ title: 'Referral updated', message: 'The change was saved and audited.' });
+  } catch (error) {
+    await alertModern({ title: 'Could not update referral', message: error.message, variant: 'error' });
+  }
+});
+
+$('[data-referrals-export]').addEventListener('click', async () => {
+  try {
+    const token = await getFirebaseIdToken(currentUser);
+    const query = new URLSearchParams({
+      status: $('[data-admin-referral-status]').value,
+      search: $('[data-admin-referral-search]').value.trim()
+    });
+    const response = await fetch(`/api/admin/referrals/export.csv?${query}`, {
+      cache: 'no-store',
+      headers: { authorization: `Bearer ${token}` }
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error || 'Could not export referral data.');
+    }
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'referrals.csv';
+    link.click();
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    await alertModern({ title: 'Could not export referrals', message: error.message, variant: 'error' });
+  }
+});
 
 function setDashboardStatus(message, state = 'ready') {
   const status = $('#dashboard-status');
@@ -308,9 +525,11 @@ function renderUsers() {
   $('#user-list').innerHTML = rows.map(user => {
     const activation = user.activationSource === 'voucher'
       ? user.isPro ? 'Pro · Voucher' : 'Voucher'
-      : user.activationSource === 'admin'
-        ? user.isPro ? 'Pro · Admin granted' : 'Admin granted'
-        : user.isPro ? 'Pro · Payment plan' : '—';
+      : user.activationSource === 'referral'
+        ? user.isPro ? 'Pro · Referral' : 'Referral'
+        : user.activationSource === 'admin'
+          ? user.isPro ? 'Pro · Admin granted' : 'Admin granted'
+          : user.isPro ? 'Pro · Payment plan' : '—';
     const paid = formatMoneyByCurrency(user.paidAmountByCurrency || { INR: user.paidAmount });
     const status = userIsActive(user) ? 'Active' : 'Inactive';
     const activeClass = userIsActive(user) ? 'pro' : '';

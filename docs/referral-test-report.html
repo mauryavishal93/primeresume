@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Referral System Test Report - ResumeOut</title>
+  <style>
+    :root{color-scheme:light;--ink:#172033;--muted:#586579;--line:#dce3ed;--surface:#fff;--wash:#f3f6fb;--green:#147a4a;--amber:#8b5a00;--blue:#2456a6}
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--wash);color:var(--ink);font:15px/1.55 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    main{max-width:1180px;margin:36px auto;padding:0 22px 48px}
+    header,.card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:24px;margin-bottom:18px}
+    h1{margin:0 0 8px;font-size:clamp(1.7rem,4vw,2.4rem);line-height:1.15}
+    h2{margin:0 0 14px;font-size:1.25rem}
+    p{margin:8px 0}
+    .muted{color:var(--muted)}
+    .status{display:inline-block;border-radius:999px;background:#e6f5ed;color:var(--green);font-weight:700;padding:4px 11px}
+    .metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-top:20px}
+    .metric{background:var(--wash);border-radius:12px;padding:14px}
+    .metric strong{display:block;font-size:1.5rem}
+    .table-wrap{overflow-x:auto}
+    table{width:100%;border-collapse:collapse;min-width:760px}
+    th,td{padding:11px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+    th{background:var(--wash);font-size:.88rem}
+    code{overflow-wrap:anywhere;background:var(--wash);padding:2px 5px;border-radius:4px}
+    .pass{color:var(--green);font-weight:700}
+    .limit{border-left:4px solid #d89c29;padding:10px 14px;background:#fff8e9;margin:10px 0}
+    ol,ul{padding-left:22px}
+    @media(max-width:600px){main{margin:16px auto;padding:0 12px 30px}header,.card{padding:17px;border-radius:12px}}
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Referral System Test Report</h1>
+    <p class="muted">ResumeOut · Executed 2026-11-14 · Automated repository tests</p>
+    <p><span class="status">PASS — all executed suites passed</span></p>
+    <div class="metrics" aria-label="Test results">
+      <div class="metric"><strong>277 / 277</strong>Full repository suite</div>
+      <div class="metric"><strong>80 / 80</strong>Referral and adjacent suites</div>
+      <div class="metric"><strong>16 / 16</strong>Referral-only suites</div>
+      <div class="metric"><strong>0</strong>Failures in final run</div>
+    </div>
+    <p class="muted">The 80-test and 16-test runs overlap with the full suite; do not add these counts together.</p>
+  </header>
+
+  <section class="card">
+    <h2>Commands and environment</h2>
+    <ul>
+      <li><code>npm test</code> — 277 passed, 0 failed.</li>
+      <li><code>npm test -- tests/referrals.test.js tests/referrals.integration.test.js tests/billing.integration.test.js tests/firebase-cloud.integration.test.js tests/account-profile.test.js</code> — 80 passed, 0 failed.</li>
+      <li><code>npm test -- tests/referrals.test.js tests/referrals.integration.test.js</code> — 16 passed, 0 failed.</li>
+      <li><code>git diff --check</code> — passed.</li>
+    </ul>
+    <p>These are Node.js automated tests. Referral API integration tests use a fake Firebase database and mocked Razorpay provider responses; they do not contact production services.</p>
+  </section>
+
+  <section class="card">
+    <h2>Referral test cases and results</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>#</th><th>Procedure / input</th><th>Expected result</th><th>Actual result</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td>Load referral configuration with the feature flag unset, enabled, and disabled.</td><td>Default is enabled; explicit false disables referral functionality; configured reward amounts and review threshold are stable.</td><td class="pass">PASS — configuration and reward constants asserted.</td></tr>
+          <tr><td>2</td><td>Request referral codes for signed-in accounts more than once; validate generated and malformed codes.</td><td>Each owner retains one stable opaque code; generated codes are unique in the sample and invalid short codes are rejected.</td><td class="pass">PASS — API and code validation tests passed.</td></tr>
+          <tr><td>3</td><td>Open referral/reward history with no rows, then simulate missing ordered indexes.</td><td>Empty results are successful empty lists for the informational UI; fallback queries remain scoped to the user and return usable history.</td><td class="pass">PASS — empty-state API and index fallback tests passed.</td></tr>
+          <tr><td>4</td><td>Make the referral summary query fail while requesting the user's referral code.</td><td>The code remains available; summary failure is reported rather than replacing the response with a success-shaped empty summary.</td><td class="pass">PASS — resilience test passed; simulated failure was logged as expected.</td></tr>
+          <tr><td>5</td><td>Resolve a referral link, register a new eligible Google/Firebase account, then attempt to claim again.</td><td>First-touch attribution is recorded server-side; eligible registration is one-time and grants seven days to both parties; repeated claims cannot duplicate rewards.</td><td class="pass">PASS — registration, one-time mapping, and ledger assertions passed.</td></tr>
+          <tr><td>6</td><td>Attempt registration rewards for an existing Firebase account and a manual claim after the 30-day window.</td><td>Account creation metadata and claim window determine eligibility; ineligible attempts receive no registration reward.</td><td class="pass">PASS — existing-account and expired-window cases passed.</td></tr>
+          <tr><td>7</td><td>Submit a manual code owned by the current user, then test code claim for an eligible new account.</td><td>Self-referrals are rejected; one valid code within the eligibility window grants only the defined registration rewards.</td><td class="pass">PASS — self-referral, eligible claim, and boundary rejection cases passed.</td></tr>
+          <tr><td>8</td><td>Send signed subscription-charged webhook events for captured monthly/yearly payments, duplicates, and an authorized-but-not-captured payment.</td><td>Only provider-verified captured payment on an active subscription earns conversion days: seven monthly or 30 yearly; duplicate events do not duplicate rewards; unverified payment earns none.</td><td class="pass">PASS — provider-state verification, plan duration, duplicate, and rejected-payment assertions passed.</td></tr>
+          <tr><td>9</td><td>Cancel at period end, then simulate a verified refund and a lost payment dispute.</td><td>Period-end cancellation preserves earned conversion days through paid expiry; verified refund/chargeback creates a separate reversal; registration rewards remain active.</td><td class="pass">PASS — cancellation, refund, chargeback, and reversal ledger assertions passed.</td></tr>
+          <tr><td>10</td><td>Stack earned days on an active Pro account and inspect paid billing records/Admin activation.</td><td>Promotional days extend the displayed Pro expiry after existing time without changing the paid entitlement; Admin identifies active/scheduled referral access.</td><td class="pass">PASS — billing integration and Admin dashboard assertions passed.</td></tr>
+          <tr><td>11</td><td>Register the 50th user through a high-volume code, then approve it as Admin with a reason.</td><td>Registration waits in review without issuing days; approval writes both registration rewards and an audit record.</td><td class="pass">PASS — review threshold, approval, rewards, and audit assertions passed.</td></tr>
+          <tr><td>12</td><td>Build the share message and links for WhatsApp, Telegram, Facebook, X, and LinkedIn.</td><td>Common message includes the referral code and one referral URL; supported destinations receive the message; Facebook link uses its supported URL parameter and does not claim to prefill post text.</td><td class="pass">PASS — message and URL construction plus Facebook copy-and-continue UI assertions passed.</td></tr>
+          <tr><td>13</td><td>Inspect identity masking, summary totals, page-size bounds, and Firestore access rules.</td><td>Personal identities are masked; reward and reversal totals are separate; page size is bounded; referral collections deny direct client reads/writes.</td><td class="pass">PASS — unit/source assertions passed.</td></tr>
+          <tr><td>14</td><td>Sign in with Google using a referral URL versus a regular URL; revisit with an existing account.</td><td>First Google sign-in preserves referral code and routes to My Account; normal repeat sign-in stays on the current page.</td><td class="pass">PASS — Firebase onboarding integration tests passed.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Coverage gaps and risk notes</h2>
+    <div class="limit"><strong>Not a live end-to-end certification.</strong> Tests use fake Firebase storage and mocked Razorpay data. Live credentials, provider webhook delivery/signature rejection, deployed Firestore indexes/rules, and production account/payment state were not exercised.</div>
+    <ul>
+      <li>No real browser automation verified the responsive referral page, Google popup flow, clipboard permissions, native share sheet, or posting behavior on social networks. Facebook does not let third-party sites prefill post text; this test verifies the supported copy-and-open flow, not the contents of a Facebook composer.</li>
+      <li>Admin referral search/export/details and all mutations (reject, reverse, adjustment, code disable/enable), including their authorization, missing-reason, and malformed-input cases, are not comprehensively covered here. The high-volume approval and audit path is covered.</li>
+      <li>Pagination cursor tampering, malformed limits/codes, simultaneous registration/webhook races, first-touch replacement/expiry boundaries, webhook signature failures, and additional out-of-order reversal/payment permutations need dedicated tests.</li>
+      <li>Source-pattern assertions confirm parts of the UI and Firestore rules text; they are not substitutes for browser behavior tests or emulator/deployed rules evaluation.</li>
+    </ul>
+    <p><strong>Recommended follow-up:</strong> add Admin route authorization/mutation tests and adversarial cursor/input tests, then run Firebase Emulator and Razorpay test-mode browser/webhook checks before production rollout.</p>
+  </section>
+
+  <section class="card">
+    <h2>Run history note</h2>
+    <p>An earlier full-suite run exposed a brittle editor markup assertion after an additional page class was introduced. The assertion was updated to allow the optional page-specific class, and the final full-suite run passed all 277 tests.</p>
+  </section>
+</main>
+</body>
+</html>

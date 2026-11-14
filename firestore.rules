@@ -95,5 +95,45 @@ service cloud.firestore {
     match /billingWebhookEvents/{eventId} {
       allow read, write: if false;
     }
+
+    match /referralCodes/{code} {
+      allow read, write: if false;
+    }
+
+    match /referralAttributions/{attributionId} {
+      allow read, write: if false;
+    }
+
+    match /referrals/{referralId} {
+      allow read, write: if false;
+    }
+
+    match /referralByUser/{userId} {
+      allow read, write: if false;
+    }
+
+    match /referralUserCodes/{userId} {
+      allow read, write: if false;
+    }
+
+    match /referralUserSummaries/{userId} {
+      allow read, write: if false;
+    }
+
+    match /referralRewards/{rewardId} {
+      allow read, write: if false;
+    }
+
+    match /referralAdminAudit/{auditId} {
+      allow read, write: if false;
+    }
+
+    match /referralRewardEvents/{eventId} {
+      allow read, write: if false;
+    }
+
+    match /referralPaymentReversals/{paymentId} {
+      allow read, write: if false;
+    }
   }
 }

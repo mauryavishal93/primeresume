@@ -1,4 +1,4 @@
-import { cloudConfigured, getAccountProfile, googleSignInErrorMessage, isGoogleSignInCancellation, observeAuth, signInWithGoogle, signOutUser } from './firebase-cloud.js';
+import { cloudConfigured, getAccountProfile, getPendingReferralCode, googleSignInErrorMessage, isGoogleSignInCancellation, observeAuth, savePendingReferralCode, signInWithGoogle, signOutUser } from './firebase-cloud.js';
 import { clearBillingEntitlementCache, loadBillingConfig, loadBillingEntitlement } from './billing-client.js';
 import { canUseFeature, FEATURE_IDS } from './plan-access.js';
 import { alertModern, confirmModern } from './modern-modal.js';
@@ -25,6 +25,8 @@ if (proBadge) {
 }
 
 const initialProBadgeHint = getCachedProBadgeHint();
+let referralRegistrationUid = null;
+const referralAttributionRequest = captureReferralAttribution();
 if (proBadge && initialProBadgeHint) {
   proBadge.hidden = false;
   document.title = `${originalTitle} | Pro`;
@@ -81,6 +83,8 @@ function createAccountMenu() {
   if (location.pathname === '/my-posts.html') myPostsLink.setAttribute('aria-current', 'page');
   const billingLink = addMenuItem(panel, 'a', 'account-menu-item', 'Billing', '/billing.html');
   if (location.pathname === '/billing.html') billingLink.setAttribute('aria-current', 'page');
+  const referralsLink = addMenuItem(panel, 'a', 'account-menu-item', 'Referrals & rewards', '/referrals.html');
+  if (location.pathname === '/referrals.html') referralsLink.setAttribute('aria-current', 'page');
   const communityLink = addMenuItem(panel, 'a', 'account-menu-item', 'Community', '/community.html');
   if (location.pathname === '/community.html') communityLink.setAttribute('aria-current', 'page');
   const about = addMenuItem(panel, 'a', 'account-menu-item', 'About', '/about.html');
@@ -143,7 +147,62 @@ function createAccountMenu() {
     }
   });
 
-  return { menu, summary, avatar, largeAvatar, profile, name, email, menuSignInButton, about, accountLink, billingLink, myPostsLink };
+  return {
+    menu, summary, avatar, largeAvatar, profile, name, email, menuSignInButton,
+    about, accountLink, billingLink, referralsLink, myPostsLink
+  };
+}
+
+async function captureReferralAttribution() {
+  const referralCode = new URLSearchParams(location.search).get('ref');
+  if (!referralCode) return;
+  const pendingCodeSaved = savePendingReferralCode(referralCode);
+  try {
+    const response = await fetch('/api/referrals/attribution', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code: referralCode })
+    });
+    if (!response.ok && response.status !== 404) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error || 'Could not save your referral link.');
+    }
+    if (response.ok && pendingCodeSaved) {
+      const url = new URL(location.href);
+      url.searchParams.delete('ref');
+      history.replaceState(null, '', url);
+    }
+  } catch (error) {
+    console.error('Could not record referral attribution.', error);
+  }
+}
+
+async function processReferralRegistration(user) {
+  if (!user?.uid || referralRegistrationUid === user.uid) return;
+  if (getPendingReferralCode()) return;
+  referralRegistrationUid = user.uid;
+  try {
+    await referralAttributionRequest;
+    const configResponse = await fetch('/api/referrals/config', { cache: 'no-store' });
+    if (!configResponse.ok) return;
+    const config = await configResponse.json();
+    if (config.enabled !== true) return;
+    const token = await user.getIdToken();
+    const response = await fetch('/api/referrals/register', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: '{}'
+    });
+    if (!response.ok && response.status !== 404) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error || 'Could not verify referral registration.');
+    }
+  } catch (error) {
+    referralRegistrationUid = null;
+    console.error('Could not process referral registration.', error);
+  }
 }
 
 const accountMenu = createAccountMenu();
@@ -222,6 +281,8 @@ function updateAuthControls(user, error) {
   document.body.classList.remove('account-avatar-cached');
   accountMenu?.menu.removeAttribute('data-auth-shell-visible');
   const previousUser = currentUser;
+  if (previousUser?.uid !== user?.uid) referralRegistrationUid = null;
+  if (user && !error) void processReferralRegistration(user);
   if (previousUser && previousUser.uid !== user?.uid) {
     clearUserSessionCache(previousUser.uid);
     clearBillingEntitlementCache(previousUser);
@@ -292,6 +353,8 @@ function updateAuthControls(user, error) {
       else accountMenu.about.removeAttribute('aria-current');
       if (location.pathname === '/billing.html') accountMenu.billingLink.setAttribute('aria-current', 'page');
       else accountMenu.billingLink.removeAttribute('aria-current');
+      if (location.pathname === '/referrals.html') accountMenu.referralsLink.setAttribute('aria-current', 'page');
+      else accountMenu.referralsLink.removeAttribute('aria-current');
       if (location.pathname === '/my-posts.html') accountMenu.myPostsLink.setAttribute('aria-current', 'page');
       else accountMenu.myPostsLink.removeAttribute('aria-current');
       if (location.pathname === '/my-account.html') accountMenu.accountLink.setAttribute('aria-current', 'page');
@@ -329,6 +392,7 @@ function updateAuthControls(user, error) {
 
 async function handleGoogleSignIn() {
   try {
+    await referralAttributionRequest;
     await signInWithGoogle();
   } catch (error) {
     if (isGoogleSignInCancellation(error)) return;

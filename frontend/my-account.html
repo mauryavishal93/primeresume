@@ -8,6 +8,7 @@
   <link rel="icon" type="image/svg+xml" href="/images/resumeout-mark.svg">
   <link rel="stylesheet" href="/src/about.css">
   <link rel="stylesheet" href="/src/my-account.css">
+  <link rel="stylesheet" href="/src/vibrant-theme.css">
   <script type="module" src="/src/theme.js"></script>
   <script type="module" src="/src/auth-nav.js"></script>
   <script type="module" src="/src/my-account.js"></script>
@@ -109,10 +110,22 @@
             <small id="mobileHelp">Choose your country, then enter your number. It will be saved with the international calling code.</small>
           </div>
         </fieldset>
-        <div class="my-account-actions">
-          <button class="btn primary" id="saveAccount" type="submit" disabled>Save changes</button>
-        </div>
       </form>
+      <section class="account-referral-code" id="accountReferralPanel" aria-labelledby="accountReferralTitle" hidden>
+        <h2 id="accountReferralTitle">Have a referral code?</h2>
+        <p>Enter one within 30 days of creating your account. If the referral is eligible, you and your friend can each receive 7 promotional Pro days. A referral code can only be used once per account.</p>
+        <form id="accountReferralForm">
+          <label for="accountReferralCode">Referral code</label>
+          <div class="account-referral-code-row">
+            <input id="accountReferralCode" name="referralCode" type="text" minlength="10" maxlength="40" pattern="[A-Za-z0-9_-]{10,40}" autocomplete="off" autocapitalize="characters" spellcheck="false" required>
+            <button class="btn primary" id="applyReferralCode" type="submit">Apply code</button>
+          </div>
+        </form>
+        <p class="account-referral-status" id="accountReferralStatus" role="status" aria-live="polite"></p>
+      </section>
+      <div class="my-account-actions">
+        <button class="btn primary" id="saveAccount" type="submit" form="accountForm" disabled>Save changes</button>
+      </div>
       <p class="my-account-signin" id="accountSignIn" hidden>Sign in with Google to view and edit your account details.</p>
     </section>
   </main>

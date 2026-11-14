@@ -180,8 +180,25 @@ test('account page exposes editable name and mobile fields with a read-only emai
   assert.match(page, /id="accountPhoto"[^>]*type="file"[^>]*accept="image\/jpeg,image\/png,image\/webp"/);
   assert.match(page, /id="accountPhotoPreview"/);
   assert.match(page, /id="saveAccount"[^>]*type="submit"/);
+  assert.ok(page.indexOf('id="accountMobile"') < page.indexOf('id="accountReferralPanel"'));
+  assert.ok(page.indexOf('id="accountReferralPanel"') < page.indexOf('id="saveAccount"'));
+  assert.match(page, /id="saveAccount"[^>]*form="accountForm"/);
   assert.match(page, /Sign in with Google/);
+  assert.match(page, /id="accountReferralPanel"/);
+  assert.match(page, /id="accountReferralCode"[^>]*maxlength="40"/);
+  assert.match(page, /within 30 days of creating your account/);
+  const accountClient = readFileSync(new URL('../frontend/src/my-account.js', import.meta.url), 'utf8');
+  assert.match(accountClient, /\/api\/referrals\/claim-status/);
+  assert.match(accountClient, /\/api\/referrals\/register/);
+  assert.match(accountClient, /const pendingCode = getPendingReferralCode\(\);[\s\S]*?referralCodeInput\.value = pendingCode/);
+  assert.match(accountClient, /Your referral link code is ready/);
+  assert.match(accountClient, /function clearReferralCodeFromUrl\(\)/);
+  assert.match(authNavigation, /if \(user && !error\) void processReferralRegistration\(user\)/);
+  assert.match(authNavigation, /if \(getPendingReferralCode\(\)\) return/);
+  const firebaseCloud = readFileSync(new URL('../frontend/src/firebase-cloud.js', import.meta.url), 'utf8');
+  assert.match(firebaseCloud, /navigate\(`\/my-account\.html\$\{referralQuery\}`\)/);
   assert.ok(myAccountStyles.includes('grid-template-columns: max-content minmax(0, 1fr);'));
+  assert.match(myAccountStyles, /\.account-referral-code\[hidden\][\s\S]*display: none !important/);
   assert.ok(readFileSync(new URL('../frontend/src/my-account.js', import.meta.url), 'utf8').includes('measureContext.measureText(selectedLabel).width + 48'));
 });
 

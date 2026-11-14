@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Admin | ResumeOut.com</title>
   <link rel="icon" type="image/svg+xml" href="/images/resumeout-mark.svg">
-  <link rel="stylesheet" href="/src/about.css"><link rel="stylesheet" href="/src/admin.css">
+  <link rel="stylesheet" href="/src/about.css"><link rel="stylesheet" href="/src/admin.css"><link rel="stylesheet" href="/src/vibrant-theme.css">
 </head>
 <body class="about-page admin-page site-mobile-header">
   <header class="about-header"><a class="about-brand" href="/home.html" aria-label="ResumeOut.com home"><img class="about-logo" src="/images/resumeout-mark.svg" alt="" aria-hidden="true"><span class="about-brand-name"><span class="brand-resume">Resume</span><span class="brand-out">Out</span><span class="brand-domain">.com</span></span></a><nav class="about-nav"><button class="theme-switch" data-theme-toggle type="button"><span class="theme-switch-track"><span class="theme-switch-thumb"></span></span></button><div class="auth-actions"><button class="btn google-signin" type="button" data-auth-sign-in aria-label="Sign in with Google"><svg class="google-signin-logo" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.05 5.05 0 0 1-2.2 3.31v2.77h3.57c2.08-1.92 3.27-4.74 3.27-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.99.66-2.25 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.15v2.84A11 11 0 0 0 12 23z"/><path fill="#FBBC05" d="M5.84 14.1A6.6 6.6 0 0 1 5.5 12c0-.73.13-1.43.34-2.1V7.06H2.15A11 11 0 0 0 1 12c0 1.78.43 3.46 1.15 4.94l3.69-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1a11 11 0 0 0-9.85 6.06L5.84 9.9c.87-2.6 3.3-4.53 6.16-4.53z"/></svg><span data-auth-sign-in-label>Sign in with Google</span></button></div><a href="/community.html" class="nav-link">Community</a><a href="/pricing.html" class="nav-link">Plans</a><a href="/editor.html" class="nav-link">Open editor</a></nav></header>
@@ -42,6 +42,7 @@
         <button type="button" class="admin-category-link" data-admin-category-link="access">Access &amp; vouchers</button>
         <button type="button" class="admin-category-link" data-admin-category-link="revenue">Revenue</button>
         <button type="button" class="admin-category-link" data-admin-category-link="pricing">Pricing</button>
+        <button type="button" class="admin-category-link" data-admin-category-link="referrals">Referrals</button>
         <button type="button" class="admin-category-link" data-admin-category-link="community">Community</button>
       </nav>
       <div class="admin-category-content">
@@ -271,7 +272,40 @@
 
       </div>
       </section>
-
+      <section class="admin-category-panel" data-admin-category="referrals" aria-label="Referral management" hidden>
+        <section class="admin-card">
+          <div class="admin-card-title">
+            <div><p class="eyebrow">Referral rewards</p><h2>Referral management</h2></div>
+            <button type="button" class="admin-button secondary" data-referrals-export>Export CSV</button>
+          </div>
+          <p>Review attributed referrals, verified conversions, reward ledger entries, and administrator actions. Referral rewards do not change Razorpay billing data.</p>
+          <div class="referral-admin-metrics" data-admin-referral-metrics></div>
+          <div class="referral-admin-toolbar">
+            <label>Search referrals <input type="search" data-admin-referral-search placeholder="Masked user, code, or ID"></label>
+            <label>Status
+              <select data-admin-referral-status>
+                <option value="all">All statuses</option>
+                <option value="pending_review">Pending review</option>
+                <option value="registered">Registered</option>
+                <option value="payment_pending">Payment pending</option>
+                <option value="converted">Converted</option>
+                <option value="revoked">Revoked</option>
+                <option value="rejected">Rejected</option>
+              </select>
+            </label>
+            <button type="button" class="admin-button secondary" data-admin-referral-refresh>Refresh</button>
+          </div>
+          <p class="referral-admin-status" data-admin-referral-message role="status" aria-live="polite">Referral management has not loaded.</p>
+          <pre class="referral-admin-detail" data-admin-referral-detail hidden></pre>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Masked user</th><th>Referral code</th><th>Status</th><th>Plan</th><th>Payment</th><th>Conversion days</th><th>Actions</th></tr></thead>
+              <tbody data-admin-referral-rows><tr><td colspan="7">No referral data loaded.</td></tr></tbody>
+            </table>
+          </div>
+          <button type="button" class="admin-button secondary" data-admin-referral-more hidden>Load more referrals</button>
+        </section>
+      </section>
       <section class="admin-category-panel admin-access-category" data-admin-category="access" aria-label="Access and vouchers">
         <section class="admin-card voucher-card">
           <details class="voucher-manager" open>

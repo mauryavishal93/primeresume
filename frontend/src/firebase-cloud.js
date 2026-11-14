@@ -17,8 +17,47 @@ export function resolveFirebaseConfig(environment = {}, fallback = existingFireb
 }
 
 const firebaseConfig = resolveFirebaseConfig(import.meta.env || {});
+const pendingReferralCodeKey = 'resumeout:pending-referral-code';
 
 export const cloudConfigured = Object.values(firebaseConfig).every(value => typeof value === 'string' && value.length > 0);
+
+function validReferralCode(value) {
+  return typeof value === 'string' && /^[A-Z0-9_-]{10,40}$/i.test(value.trim());
+}
+
+export function getPendingReferralCode() {
+  const queryCode = new URLSearchParams(globalThis.location?.search || '').get('ref');
+  if (validReferralCode(queryCode)) return queryCode.trim().toUpperCase();
+  try {
+    const storedCode = globalThis.sessionStorage?.getItem(pendingReferralCodeKey);
+    return validReferralCode(storedCode) ? storedCode.trim().toUpperCase() : '';
+  } catch (error) {
+    console.warn('Could not read the pending referral code from this browser session.', error);
+    return '';
+  }
+}
+
+export function savePendingReferralCode(value) {
+  const code = typeof value === 'string' ? value.trim().toUpperCase() : '';
+  if (!validReferralCode(code)) return false;
+  try {
+    const storage = globalThis.sessionStorage;
+    if (!storage) return false;
+    storage.setItem(pendingReferralCodeKey, code);
+    return true;
+  } catch (error) {
+    console.warn('Could not save the pending referral code in this browser session.', error);
+    return false;
+  }
+}
+
+export function clearPendingReferralCode() {
+  try {
+    globalThis.sessionStorage?.removeItem(pendingReferralCodeKey);
+  } catch (error) {
+    console.warn('Could not clear the pending referral code from this browser session.', error);
+  }
+}
 
 export function isGoogleSignInCancellation(error) {
   return ['auth/cancelled-popup-request', 'auth/popup-closed-by-user', 'auth/user-cancelled'].includes(error?.code)
@@ -60,9 +99,42 @@ const loadFirebaseSdk = () => Promise.all([
       import('firebase/firestore')
     ]);
 
-export function createFirebaseCloudClient({ config = firebaseConfig, loadSdk = loadFirebaseSdk, fetchImpl = globalThis.fetch } = {}) {
+export function createFirebaseCloudClient({
+  config = firebaseConfig,
+  loadSdk = loadFirebaseSdk,
+  fetchImpl = globalThis.fetch,
+  navigate = url => globalThis.location?.assign?.(url)
+} = {}) {
   const isConfigured = Object.values(config).every(value => typeof value === 'string' && value.length > 0);
   let servicesPromise;
+  let redirectResultPromise;
+
+  function routeNewGoogleAccount(authSdk, credential) {
+    const additionalInfo = credential
+      ? authSdk.getAdditionalUserInfo?.(credential) || credential.additionalUserInfo
+      : null;
+    if (additionalInfo?.isNewUser === true && globalThis.location?.pathname !== '/my-account.html') {
+      const referralCode = getPendingReferralCode();
+      const referralQuery = referralCode ? `?ref=${encodeURIComponent(referralCode)}` : '';
+      navigate(`/my-account.html${referralQuery}`);
+    }
+  }
+
+  function consumeGoogleRedirectResult(auth, authSdk) {
+    if (typeof authSdk.getRedirectResult !== 'function') return;
+    if (!redirectResultPromise) {
+      redirectResultPromise = authSdk.getRedirectResult(auth)
+        .then(credential => {
+          routeNewGoogleAccount(authSdk, credential);
+          return credential;
+        })
+        .catch(error => {
+          console.error('Could not complete Google sign-in redirect.', error);
+          return null;
+        });
+    }
+    return redirectResultPromise;
+  }
 
   async function getServices() {
     if (!isConfigured) throw new Error('Cloud saving is not configured yet.');
@@ -205,6 +277,7 @@ export function createFirebaseCloudClient({ config = firebaseConfig, loadSdk = l
     let unsubscribe = () => {};
     getServices().then(({ auth, authSdk }) => {
       if (cancelled) return;
+      void consumeGoogleRedirectResult(auth, authSdk);
       unsubscribe = authSdk.onAuthStateChanged(auth, user => callback(user, null), error => callback(null, error));
     }).catch(error => {
       if (!cancelled) callback(null, error);
@@ -220,7 +293,9 @@ export function createFirebaseCloudClient({ config = firebaseConfig, loadSdk = l
       try {
         const { auth, authSdk } = await getServices();
         const provider = new authSdk.GoogleAuthProvider();
-        return await authSdk.signInWithPopup(auth, provider);
+        const credential = await authSdk.signInWithPopup(auth, provider);
+        routeNewGoogleAccount(authSdk, credential);
+        return credential;
       } catch (error) {
         if (isGoogleSignInCancellation(error)) return null;
         if (isDisabledAccountSignInError(error)) {

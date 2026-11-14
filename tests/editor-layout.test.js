@@ -100,7 +100,7 @@ test('mobile resume canvas aligns A4 pages and fits them below the desktop zoom 
 test('editor account menu links to Community and My posts', () => {
   const html = readFileSync(new URL('../frontend/editor.html', import.meta.url), 'utf8');
   const source = readFileSync(new URL('../frontend/src/main.js', import.meta.url), 'utf8');
-  assert.match(html, /<body class="auth-state-pending">/);
+  assert.match(html, /<body class="auth-state-pending(?: editor-page)?">/);
   assert.match(styles, /body\.auth-state-pending:not\(\.account-avatar-cached\) #googleSignInBtn,body\.auth-state-pending #accountMenu:not\(\[data-auth-shell-visible\]\),body\.auth-signout-pending #googleSignInBtn,body\.auth-signout-pending #accountMenu\{visibility:hidden\}/);
   assert.match(source, /async function updateCloudAccount\(user,error\)\{\s*authStateResolved=true;\s*document\.body\.classList\.remove\('auth-state-pending'\)/);
   assert.match(source, /document\.body\.classList\.add\('auth-signout-pending'\);\s*button\.disabled=true;\s*button\.textContent='Signing out…';\s*await signOutUser\(\)/);

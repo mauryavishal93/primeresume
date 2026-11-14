@@ -1,4 +1,4 @@
-import { cloudConfigured, observeAuth, getAccountProfile, saveAccountProfile } from './firebase-cloud.js';
+import { clearPendingReferralCode, cloudConfigured, getAccountProfile, getFirebaseIdToken, getPendingReferralCode, observeAuth, saveAccountProfile } from './firebase-cloud.js';
 import { getAccountPhotoUrl, setAccountAvatar } from './account-avatar.js';
 import { cacheAccountPhoto, clearCachedAccountAvatar } from './session-cache.js';
 import { formatNationalPhoneNumber, formatPhoneInput, getDefaultPhoneCountry, getPhoneCountryCallingCode, getPhoneCountryLabel, getPhoneCountryOptions, parseAccountPhoneNumber, splitAccountPhoneNumber } from './phone-number.js';
@@ -18,6 +18,11 @@ const removePhotoButton = document.querySelector('#removeAccountPhoto');
 const saveButton = document.querySelector('#saveAccount');
 const status = document.querySelector('#accountStatus');
 const signInPrompt = document.querySelector('#accountSignIn');
+const referralPanel = document.querySelector('#accountReferralPanel');
+const referralForm = document.querySelector('#accountReferralForm');
+const referralCodeInput = document.querySelector('#accountReferralCode');
+const applyReferralCodeButton = document.querySelector('#applyReferralCode');
+const referralStatus = document.querySelector('#accountReferralStatus');
 let currentUser = null;
 let requestId = 0;
 let photoDataUrl = '';
@@ -50,6 +55,60 @@ function showStatus(message, state = '') {
   status.textContent = message;
   if (state) status.dataset.state = state;
   else delete status.dataset.state;
+}
+
+function showReferralStatus(message, state = '') {
+  referralStatus.textContent = message;
+  if (state) referralStatus.dataset.state = state;
+  else delete referralStatus.dataset.state;
+}
+
+function clearReferralCodeFromUrl() {
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has('ref')) return;
+  url.searchParams.delete('ref');
+  window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+}
+
+async function updateReferralCodeStatus(user, currentRequest) {
+  referralForm.hidden = true;
+  showReferralStatus('Checking referral-code eligibility…');
+  let referralsUnavailable = false;
+  try {
+    const response = await fetch('/api/referrals/claim-status', {
+      cache: 'no-store',
+      credentials: 'same-origin',
+      headers: { authorization: `Bearer ${await getFirebaseIdToken(user)}` }
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      referralsUnavailable = response.status === 404;
+      throw new Error(result.error || 'Could not check referral-code eligibility.');
+    }
+    if (currentRequest !== requestId || currentUser?.uid !== user.uid) return;
+    if (result.claimed) {
+      clearPendingReferralCode();
+      clearReferralCodeFromUrl();
+      showReferralStatus('A referral code has already been used by this account. Referral codes can only be used once.');
+      return;
+    }
+    if (result.eligible) {
+      const pendingCode = getPendingReferralCode();
+      if (pendingCode) referralCodeInput.value = pendingCode;
+      referralForm.hidden = false;
+      showReferralStatus(pendingCode
+        ? 'Your referral link code is ready. Apply it before the 30-day claim period ends.'
+        : 'Enter a valid code before the 30-day claim period ends.');
+      return;
+    }
+    clearPendingReferralCode();
+    clearReferralCodeFromUrl();
+    showReferralStatus('Referral-code entry is available only within 30 days of creating your account.');
+  } catch (error) {
+    if (currentRequest !== requestId || currentUser?.uid !== user.uid) return;
+    referralForm.hidden = referralsUnavailable;
+    showReferralStatus(error instanceof Error ? error.message : 'Could not check referral-code eligibility.', 'error');
+  }
 }
 
 function setFormEnabled(enabled) {
@@ -102,6 +161,7 @@ async function updateAccountPage(user, error) {
   const currentRequest = ++requestId;
   currentUser = user;
   form.hidden = !user;
+  referralPanel.hidden = !user;
   signInPrompt.hidden = Boolean(user) || Boolean(error);
   setFormEnabled(false);
 
@@ -111,10 +171,14 @@ async function updateAccountPage(user, error) {
     return;
   }
   if (!user) {
+    referralForm.hidden = true;
     showStatus(cloudConfigured ? 'Sign in to manage your account.' : 'Account sign-in is not configured.');
     return;
   }
 
+  referralCodeInput.value = '';
+  showReferralStatus('');
+  void updateReferralCodeStatus(user, currentRequest);
   nameInput.value = user.displayName?.trim() || '';
   emailInput.value = user.email || '';
   fallbackPhotoUrl = getAccountPhotoUrl(user);
@@ -143,6 +207,46 @@ async function updateAccountPage(user, error) {
     console.error('Could not load the account profile.', loadError);
   }
 }
+
+referralCodeInput.addEventListener('input', () => {
+  referralCodeInput.value = referralCodeInput.value.toUpperCase().replace(/[^A-Z0-9_-]/g, '');
+});
+
+referralForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  if (!currentUser || applyReferralCodeButton.disabled || !referralCodeInput.value) return;
+  const user = currentUser;
+  applyReferralCodeButton.disabled = true;
+  referralCodeInput.disabled = true;
+  showReferralStatus('Verifying your referral code…');
+  try {
+    const response = await fetch('/api/referrals/register', {
+      method: 'POST',
+      cache: 'no-store',
+      credentials: 'same-origin',
+      headers: {
+        authorization: `Bearer ${await getFirebaseIdToken(user)}`,
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({ code: referralCodeInput.value.trim() })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || 'Could not apply this referral code.');
+    if (currentUser?.uid !== user.uid) return;
+    clearPendingReferralCode();
+    clearReferralCodeFromUrl();
+    referralForm.hidden = true;
+    referralCodeInput.value = '';
+    showReferralStatus(result.pendingReview
+      ? 'Code submitted for review. If approved, you and your friend will each receive 7 days of Pro.'
+      : 'Referral code applied! You and your friend each received 7 days of Pro.', 'success');
+  } catch (error) {
+    showReferralStatus(error instanceof Error ? error.message : 'Could not apply this referral code.', 'error');
+  } finally {
+    applyReferralCodeButton.disabled = false;
+    referralCodeInput.disabled = false;
+  }
+});
 
 nameInput.addEventListener('input', () => updatePhotoPreview());
 

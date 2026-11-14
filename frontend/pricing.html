@@ -3,11 +3,12 @@
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Compare Free, Pro Monthly, and Pro Yearly plans for ResumeOut.com.">
+    <meta name="description" content="Compare ResumeOut Free and Pro monthly or yearly plans, templates, ATS features, PDF download limits, supported tools, and current prices.">
     <title>Plans | ResumeOut.com</title>
     <link rel="icon" type="image/svg+xml" href="/images/resumeout-mark.svg">
     <link rel="stylesheet" href="/src/about.css">
     <link rel="stylesheet" href="/src/pricing.css">
+    <link rel="stylesheet" href="/src/vibrant-theme.css">
   </head>
   <body class="about-page pricing-page site-mobile-header">
     <header class="about-header">
@@ -43,7 +44,7 @@
       <section class="pricing-hero">
         <p class="about-eyebrow">PLANS THAT STAY SIMPLE</p>
         <h1>Start free and upgrade only when you need more power.</h1>
-        <p class="about-lead">ResumeOut.com keeps the core editor free, while Pro unlocks more templates, unlimited Pro-template downloads, and deeper ATS guidance for job-specific resume targeting.</p>
+        <p class="about-lead">Use the resume editor, standard PDF export, resume-only ATS checks, and basic cover-letter tools for free. Pro adds all 25 templates, unlimited Pro-template PDF downloads, and job-description ATS comparison.</p>
       </section>
       <div id="pricingAnnouncement" class="pricing-announcement" role="status" aria-live="polite" hidden>
         <span class="pricing-announcement-label"></span>
@@ -59,12 +60,12 @@
           <ul>
             <li>Complete resume editing and six Free templates</li>
             <li>Use any Pro template after Google sign-in</li>
-            <li>First 2 free Pro-template PDF downloads after Google sign-in, per account</li>
+            <li>Two lifetime Pro-template PDF downloads after Google sign-in, per account</li>
             <li>Watermark-free standard A4 PDF preview and export</li>
             <li>Resume-only ATS readiness checks</li>
             <li>Basic cover-letter tools</li>
-            <li>JSON import/export and a guest browser-saving toggle</li>
-            <li>Google sign-in cloud sync with latest-resume loading</li>
+            <li>Import PDF, DOCX, TXT, JSON, or image resumes; export and import JSON backups</li>
+            <li>Guest browser saving and optional Google account cloud resumes</li>
           </ul>
           <a class="btn primary plan-action" href="/editor.html">Get started free</a>
         </article>
@@ -73,8 +74,9 @@
           <div class="plan-card-heading"><h2>Pro Monthly</h2><span class="plan-status-badge" id="monthlyPlanBadge" hidden></span></div>
           <p class="plan-price" id="monthlyPrice" aria-busy="true">Loading price…</p>
           <ul>
-            <li>All 25 templates with unlimited PDF downloads</li>
+            <li>All 25 templates and unlimited Pro-template PDF downloads</li>
             <li>Job-description keyword and skills comparison</li>
+            <li>All free features, including standard PDF export and cover-letter tools</li>
             <li>Cancel any time; access continues through the paid billing period</li>
           </ul>
           <button class="btn primary plan-action" id="purchaseMonthly" type="button" disabled>Sign in to purchase monthly</button>
@@ -84,8 +86,9 @@
           <div class="plan-card-heading"><h2>Pro Yearly</h2><span class="plan-status-badge" id="yearlyPlanBadge" hidden></span></div>
           <p class="plan-price" id="yearlyPrice" aria-busy="true">Loading price…</p>
           <ul>
-            <li>All 25 templates with unlimited PDF downloads</li>
+            <li>All 25 templates and unlimited Pro-template PDF downloads</li>
             <li>Job-description keyword and skills comparison</li>
+            <li>All free features, including standard PDF export and cover-letter tools</li>
             <li>Cancel any time; access continues through the paid billing period</li>
           </ul>
           <button class="btn primary plan-action" id="purchaseYearly" type="button" disabled>Sign in to purchase yearly</button>
@@ -121,8 +124,8 @@
       </section>
       <section class="about-section pricing-terms">
         <h2>Pricing, purchase, and access terms</h2>
-        <p>Pro is a recurring subscription billed in Indian rupees (INR). The current price is shown above before checkout. The subscription renews at that price and interval until canceled. Canceling stops future renewals; access remains through the current paid period. Payments are handled by Razorpay. Resume content is not sent to Razorpay.</p>
-        <p>Purchases require signing in with Google. Core editing, guest browser-saving controls, account-based cloud resume sync, JSON backup, resume-only ATS checks, cover letters, and standard PDF export remain free. A Google account can export two resumes using Pro templates at no cost; each Pro-template PDF download counts, including repeat downloads.</p>
+        <p>Pro is a recurring subscription billed in Indian rupees (INR). The current price and billing interval are shown above and confirmed again before checkout. The subscription renews on that interval until canceled. Canceling stops future renewals, and access continues through the current paid period. Payments are handled by Razorpay. Resume content is not sent to Razorpay.</p>
+        <p>Purchases require signing in with Google. Resume editing, guest browser saving, Google account cloud resumes, JSON import/export, resume-only ATS checks, basic cover-letter tools, and standard PDF export are included in Free. Each signed-in account gets two lifetime downloads using Pro templates at no cost; every Pro-template PDF download counts, including repeat downloads. Pro removes that download limit while the subscription is active.</p>
         <div class="pricing-links">
           <a href="/privacy.html">Privacy policy</a>
           <a href="/terms.html">Terms of service</a>
@@ -136,14 +139,10 @@
         <button class="support-dialog-close" id="closeSupportDialog" type="button" aria-label="Close contact dialog">×</button>
         <p class="about-eyebrow">SUPPORT</p>
         <h2 id="supportDialogTitle">How can we help?</h2>
-        <p>Choose the contact method that works best for you.</p>
+        <p>Email support is currently available at resumeout@gmail.com.</p>
         <div class="support-dialog-actions">
           <a class="support-contact-method support-email" href="mailto:resumeout@gmail.com">
             <span class="support-contact-copy"><span class="support-contact-label">EMAIL</span><strong>Email support</strong><span class="support-contact-detail">resumeout@gmail.com</span></span>
-            <span class="support-contact-action" aria-hidden="true">Open ↗</span>
-          </a>
-          <!-- <a class="support-contact-method support-whatsapp" href="https://wa.me/918800640825" target="_blank" rel="noopener noreferrer"> -->
-            <span class="support-contact-copy"><span class="support-contact-label">WHATSAPP</span><strong>Message us</strong><span class="support-contact-detail">+91 88006 40825</span></span>
             <span class="support-contact-action" aria-hidden="true">Open ↗</span>
           </a>
         </div>

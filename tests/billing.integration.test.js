@@ -390,6 +390,82 @@ test('billing routes reject unauthenticated and unapproved checkout requests', a
   process.env.BILLING_TEST_MODE_VERIFIED = environment.BILLING_TEST_MODE_VERIFIED;
 });
 
+test('earned scheduled referral days extend active Pro expiry without extending paid billing records', async () => {
+  const uid = 'user-1';
+  const entitlementKey = `users/${uid}/billing/entitlement`;
+  const originalEntitlement = fakeDatabase.records.get(entitlementKey);
+  const freeEntitlementKey = 'users/user-3/billing/entitlement';
+  const originalFreeEntitlement = fakeDatabase.records.get(freeEntitlementKey);
+  const originalReferralFlag = process.env.REFERRALS_ENABLED;
+  const rewardKey = 'referralRewards/test-scheduled-registration-reward';
+  const originalReward = fakeDatabase.records.get(rewardKey);
+  const freeRewardKey = 'referralRewards/test-future-registration-reward';
+  const originalFreeReward = fakeDatabase.records.get(freeRewardKey);
+  const now = Date.now();
+  const paidUntil = now + 5 * 86_400_000;
+  const rewardUntil = paidUntil + 7 * 86_400_000;
+  process.env.REFERRALS_ENABLED = 'true';
+  fakeDatabase.records.set(entitlementKey, {
+    planId: 'pro',
+    billingPlan: 'voucher',
+    status: 'active',
+    source: 'server-verified',
+    lifetime: false,
+    validUntil: paidUntil
+  });
+  fakeDatabase.records.set(rewardKey, {
+    beneficiaryUid: uid,
+    rewardType: 'registration',
+    status: 'scheduled',
+    startsAt: paidUntil,
+    expiresAt: rewardUntil
+  });
+
+  try {
+    const response = await request('/api/billing/entitlement', { token: 'valid-test-token' });
+    assert.equal(response.status, 200);
+    const { entitlement } = await response.json();
+    assert.equal(entitlement.status, 'active');
+    assert.equal(entitlement.validUntil, rewardUntil);
+    assert.equal(entitlement.promotionalValidUntil, rewardUntil);
+    assert.equal(fakeDatabase.records.get(entitlementKey).validUntil, paidUntil);
+
+    fakeDatabase.records.set(freeEntitlementKey, {
+      planId: 'free',
+      billingPlan: 'voucher',
+      status: 'inactive',
+      source: 'server-verified',
+      lifetime: false,
+      validUntil: 0
+    });
+    fakeDatabase.records.set(freeRewardKey, {
+      beneficiaryUid: 'user-3',
+      rewardType: 'registration',
+      status: 'scheduled',
+      startsAt: now + 86_400_000,
+      expiresAt: now + 8 * 86_400_000
+    });
+    const futureOnlyResponse = await request('/api/billing/entitlement', { token: 'third-test-token' });
+    assert.equal(futureOnlyResponse.status, 200);
+    const futureOnly = (await futureOnlyResponse.json()).entitlement;
+    assert.equal(futureOnly.status, 'inactive');
+    assert.equal(futureOnly.planId, 'free');
+    assert.equal(futureOnly.validUntil, 0);
+    assert.equal(futureOnly.promotionalValidUntil, now + 8 * 86_400_000);
+  } finally {
+    if (originalEntitlement === undefined) fakeDatabase.records.delete(entitlementKey);
+    else fakeDatabase.records.set(entitlementKey, originalEntitlement);
+    if (originalFreeEntitlement === undefined) fakeDatabase.records.delete(freeEntitlementKey);
+    else fakeDatabase.records.set(freeEntitlementKey, originalFreeEntitlement);
+    if (originalReward === undefined) fakeDatabase.records.delete(rewardKey);
+    else fakeDatabase.records.set(rewardKey, originalReward);
+    if (originalFreeReward === undefined) fakeDatabase.records.delete(freeRewardKey);
+    else fakeDatabase.records.set(freeRewardKey, originalFreeReward);
+    if (originalReferralFlag === undefined) delete process.env.REFERRALS_ENABLED;
+    else process.env.REFERRALS_ENABLED = originalReferralFlag;
+  }
+});
+
 test('active monthly subscribers can schedule yearly billing at the end of their current period', async () => {
   const subscriptionId = 'sub_switchyearly';
   const validUntil = Date.now() + 30 * 24 * 60 * 60 * 1000;
@@ -895,6 +971,109 @@ test('admin dashboard reports current subscriptions and captured revenue accurat
     assert.equal(dashboard.users.find(user => user.uid === 'user-2').isPro, false);
   } finally {
     for (const [key] of testRecords) fakeDatabase.records.delete(key);
+    if (originalAdminEmails === undefined) delete process.env.ADMIN_EMAILS;
+    else process.env.ADMIN_EMAILS = originalAdminEmails;
+  }
+});
+
+test('admin dashboard includes active and scheduled referral Pro rewards in activation and expiry', async () => {
+  const originalAdminEmails = process.env.ADMIN_EMAILS;
+  process.env.ADMIN_EMAILS = 'admin@example.com';
+  const now = Date.now();
+  const records = [
+    ['users/user-4', { email: 'scheduled@example.com', name: 'Scheduled User' }],
+    ['users/user-5', { email: 'admin-grant-referral@example.com' }],
+    ['users/user-6', { email: 'voucher-referral@example.com' }],
+    ['users/user-7', { email: 'referral-only@example.com' }],
+    ['users/user-1/billing/entitlement', {
+      planId: 'pro', billingPlan: 'monthly', status: 'active', source: 'server-verified',
+      validUntil: now + 86400000
+    }],
+    ['users/user-2/billing/entitlement', {
+      planId: 'pro', billingPlan: 'yearly', status: 'expired', source: 'razorpay',
+      validUntil: now - 86400000
+    }],
+    ['users/user-5/billing/entitlement', {
+      planId: 'pro', billingPlan: 'monthly', status: 'active', source: 'admin',
+      validUntil: now + 5 * 86400000
+    }],
+    ['users/user-6/billing/entitlement', {
+      planId: 'pro', billingPlan: 'voucher', status: 'expired', source: 'server-verified',
+      validUntil: now - 86400000
+    }],
+    ['referralRewards/referrer-active', {
+      beneficiaryUid: 'user-1', rewardSource: 'referral', rewardType: 'registration',
+      status: 'active', startsAt: now - 86400000, expiresAt: now + 6 * 86400000
+    }],
+    ['referralRewards/referrer-scheduled', {
+      beneficiaryUid: 'user-1', rewardSource: 'referral', rewardType: 'registration',
+      status: 'scheduled', startsAt: now + 2 * 86400000, expiresAt: now + 9 * 86400000
+    }],
+    ['referralRewards/referred-active', {
+      beneficiaryUid: 'user-2', rewardSource: 'referral', rewardType: 'registration',
+      status: 'active', startsAt: now - 86400000, expiresAt: now + 6 * 86400000
+    }],
+    ['referralRewards/admin-grant-referral', {
+      beneficiaryUid: 'user-5', rewardSource: 'referral', rewardType: 'registration',
+      status: 'active', startsAt: now - 86400000, expiresAt: now + 6 * 86400000
+    }],
+    ['referralRewards/voucher-referral', {
+      beneficiaryUid: 'user-6', rewardSource: 'referral', rewardType: 'registration',
+      status: 'active', startsAt: now - 86400000, expiresAt: now + 6 * 86400000
+    }],
+    ['referralRewards/referral-only', {
+      beneficiaryUid: 'user-7', rewardSource: 'referral', rewardType: 'registration',
+      status: 'active', startsAt: now - 86400000, expiresAt: now + 6 * 86400000
+    }],
+    ['referralRewards/future-only', {
+      beneficiaryUid: 'user-4', rewardSource: 'referral', rewardType: 'registration',
+      status: 'scheduled', startsAt: now + 2 * 86400000, expiresAt: now + 9 * 86400000
+    }],
+    ['referralRewards/expired-only', {
+      beneficiaryUid: 'user-3', rewardSource: 'referral', rewardType: 'registration',
+      status: 'expired', startsAt: now - 9 * 86400000, expiresAt: now - 2 * 86400000
+    }],
+    ['referralRewards/reversed-original', {
+      beneficiaryUid: 'user-3', rewardSource: 'referral', rewardType: 'conversion',
+      status: 'active', startsAt: now - 86400000, expiresAt: now + 6 * 86400000
+    }],
+    ['referralRewards/reversal', {
+      beneficiaryUid: 'user-3', rewardSource: 'referral', rewardType: 'reversal',
+      status: 'revoked', originalRewardId: 'reversed-original'
+    }]
+  ];
+  const previousRecords = records.map(([key]) => [key, fakeDatabase.records.get(key)]);
+  for (const [key, value] of records) fakeDatabase.records.set(key, value);
+
+  try {
+    const response = await request('/api/admin/dashboard', { token: 'admin-test-token' });
+    assert.equal(response.status, 200);
+    const dashboard = await response.json();
+    const referrer = dashboard.users.find(user => user.uid === 'user-1');
+    assert.equal(referrer.isPro, true);
+    assert.equal(referrer.activationSource, 'payment');
+    assert.equal(referrer.validUntil, now + 9 * 86400000);
+    const referredUser = dashboard.users.find(user => user.uid === 'user-2');
+    assert.equal(referredUser.isPro, true);
+    assert.equal(referredUser.activationSource, 'referral');
+    assert.equal(referredUser.billingPlan, 'referral');
+    assert.equal(referredUser.validUntil, now + 6 * 86400000);
+    const futureOnlyUser = dashboard.users.find(user => user.uid === 'user-4');
+    assert.equal(futureOnlyUser.isPro, false);
+    assert.equal(futureOnlyUser.activationSource, null);
+    assert.notEqual(futureOnlyUser.validUntil, now + 9 * 86400000);
+    const expiredAndReversedUser = dashboard.users.find(user => user.uid === 'user-3');
+    assert.equal(expiredAndReversedUser.isPro, false);
+    assert.equal(expiredAndReversedUser.activationSource, null);
+    assert.equal(dashboard.users.find(user => user.uid === 'user-5').activationSource, 'admin');
+    assert.equal(dashboard.users.find(user => user.uid === 'user-6').activationSource, 'voucher');
+    assert.equal(dashboard.users.find(user => user.uid === 'user-6').isPro, true);
+    assert.equal(dashboard.users.find(user => user.uid === 'user-7').activationSource, 'referral');
+  } finally {
+    for (const [key, value] of previousRecords) {
+      if (value === undefined) fakeDatabase.records.delete(key);
+      else fakeDatabase.records.set(key, value);
+    }
     if (originalAdminEmails === undefined) delete process.env.ADMIN_EMAILS;
     else process.env.ADMIN_EMAILS = originalAdminEmails;
   }
@@ -2280,21 +2459,28 @@ test('captured recurring Razorpay webhook payments are recorded for account refu
       }
     }
   };
-  const response = await signedWebhook(event);
-  assert.equal(response.status, 200);
-  assert.equal(fakeDatabase.records.get(`billingPayments/${paymentId}`).uid, 'user-1');
-  assert.equal(fakeDatabase.records.get(`billingPayments/${paymentId}`).status, 'captured');
-  assert.equal(fakeDatabase.records.get(`billingPayments/${paymentId}`).amount, 9900);
-  assert.equal(fakeDatabase.records.get(`billingPayments/${paymentId}`).paymentMode, 'card');
-  const accessRecord = fakeDatabase.records.get(`billingAccessHistory/${paymentId}`);
-  assert.equal(accessRecord.subscriptionId, subscriptionId);
-  assert.equal(accessRecord.planKey, 'monthly');
-  assert.equal(accessRecord.paymentId, paymentId);
-  assert.equal(accessRecord.paymentMode, 'card');
-  assert.ok(accessRecord.validUntil > accessRecord.validFrom);
+  const originalReferralFlag = process.env.REFERRALS_ENABLED;
+  process.env.REFERRALS_ENABLED = 'false';
+  try {
+    const response = await signedWebhook(event);
+    assert.equal(response.status, 200);
+    assert.equal(fakeDatabase.records.get(`billingPayments/${paymentId}`).uid, 'user-1');
+    assert.equal(fakeDatabase.records.get(`billingPayments/${paymentId}`).status, 'captured');
+    assert.equal(fakeDatabase.records.get(`billingPayments/${paymentId}`).amount, 9900);
+    assert.equal(fakeDatabase.records.get(`billingPayments/${paymentId}`).paymentMode, 'card');
+    const accessRecord = fakeDatabase.records.get(`billingAccessHistory/${paymentId}`);
+    assert.equal(accessRecord.subscriptionId, subscriptionId);
+    assert.equal(accessRecord.planKey, 'monthly');
+    assert.equal(accessRecord.paymentId, paymentId);
+    assert.equal(accessRecord.paymentMode, 'card');
+    assert.ok(accessRecord.validUntil > accessRecord.validFrom);
 
-  fakeDatabase.records.delete(`billingSubscriptions/${subscriptionId}`);
-  fakeDatabase.records.delete(`billingPayments/${paymentId}`);
-  fakeDatabase.records.delete(`billingAccessHistory/${paymentId}`);
-  fakeDatabase.records.delete('billingWebhookEvents/evt_recurring_refund_test');
+    fakeDatabase.records.delete(`billingSubscriptions/${subscriptionId}`);
+    fakeDatabase.records.delete(`billingPayments/${paymentId}`);
+    fakeDatabase.records.delete(`billingAccessHistory/${paymentId}`);
+    fakeDatabase.records.delete('billingWebhookEvents/evt_recurring_refund_test');
+  } finally {
+    if (originalReferralFlag === undefined) delete process.env.REFERRALS_ENABLED;
+    else process.env.REFERRALS_ENABLED = originalReferralFlag;
+  }
 });

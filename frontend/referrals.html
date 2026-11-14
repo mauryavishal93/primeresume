@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Invite friends to ResumeOut and track referral rewards.">
+    <title>Referrals &amp; Rewards | ResumeOut.com</title>
+    <link rel="icon" type="image/svg+xml" href="/images/resumeout-mark.svg">
+    <link rel="stylesheet" href="/src/about.css">
+    <link rel="stylesheet" href="/src/referrals.css">
+    <script type="module" src="/src/theme.js"></script>
+    <script type="module" src="/src/auth-nav.js"></script>
+    <script type="module" src="/src/referrals.js"></script>
+  </head>
+  <body class="about-page referrals-page site-mobile-header">
+    <header class="about-header">
+      <a class="about-brand" href="/home.html" aria-label="ResumeOut.com home">
+        <img class="about-logo" src="/images/resumeout-mark.svg" alt="" aria-hidden="true">
+        <span class="about-brand-name"><span class="brand-resume">Resume</span><span class="brand-out">Out</span><span class="brand-domain">.com</span></span>
+      </a>
+      <nav class="about-nav" aria-label="Main navigation">
+        <div class="auth-actions">
+          <button class="btn google-signin" type="button" data-auth-sign-in><span data-auth-sign-in-label>Sign in with Google</span></button>
+          <button class="btn outline" type="button" data-auth-sign-out hidden>Sign out</button>
+          <span class="auth-status" data-auth-status role="status" aria-live="polite"></span>
+        </div>
+        <a class="btn outline" href="/community.html">Community</a>
+        <a class="btn outline" href="/pricing.html">Plans</a>
+        <a class="btn outline" href="/support.html">Support</a>
+        <a class="btn outline about-editor" href="/editor.html">Open Editor</a>
+        <a class="btn primary referral-nav-link" href="/referrals.html" aria-current="page">Refer &amp; Earn</a>
+      </nav>
+    </header>
+    <main class="about-main referrals-main">
+      <section class="referrals-hero">
+        <div class="referrals-hero-copy">
+          <p class="about-eyebrow">REFER FRIENDS · EARN PRO TIME</p>
+          <h1>Refer friends &amp;<br>get <span>more Pro time</span></h1>
+          <p class="about-lead">Invite friends to ResumeOut. When a genuinely new account qualifies, both of you can receive 7 promotional Pro days; you can earn more when that friend completes their first qualifying paid plan.</p>
+        </div>
+        <div class="referrals-hero-art" aria-hidden="true">
+          <div class="hero-spark spark-one">✦</div>
+          <div class="hero-spark spark-two">✦</div>
+          <div class="hero-crown">♛</div>
+          <div class="hero-friends">
+            <div class="hero-friend friend-one"><span>R</span><i></i></div>
+            <div class="hero-friend friend-two"><span>E</span><i></i></div>
+          </div>s
+          <div class="hero-laptop"><span>ResumeOut</span><i></i></div>
+          <div class="hero-gift"><span></span><i></i><b></b></div>
+        </div>
+      </section>
+      <section class="referrals-sign-in" data-referrals-sign-in hidden>
+        <h2>Get your personal referral link</h2>
+        <p>Sign in to share a tracked referral link and view your reward history. You can still share ResumeOut below.</p>
+        <button class="btn google-signin" type="button" data-auth-sign-in><span data-auth-sign-in-label>Sign in with Google</span></button>
+      </section>
+      <section class="referral-link-card" aria-labelledby="referral-link-title">
+        <h2 id="referral-link-title">Share ResumeOut</h2>
+        <p class="referral-link-hint" data-referral-hint>Sign in to get your personal referral link. This general link does not track referrals.</p>
+        <div class="referral-url-row">
+          <label class="sr-only" for="referral-url">Your referral URL</label>
+          <input id="referral-url" type="text" value="https://www.resumeout.com/" readonly autocomplete="off">
+          <button type="button" class="referral-action primary" data-copy-link>Copy link</button>
+          <button type="button" class="referral-action share-link-button" data-share-invite>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><path d="m8.7 10.6 6.6-4.2M8.7 13.4l6.6 4.2"></path></svg>
+            Share
+          </button>
+        </div>
+        <div class="referral-code-row">
+          <p class="referral-code-line">Your referral code: <code data-referral-code>Sign in to view</code></p>
+          <button type="button" class="referral-action" data-copy-code disabled>Copy code</button>
+        </div>
+        <div class="referral-social-row" aria-label="Share via">
+          <span>Share via</span>
+          <a class="social-share whatsapp" data-whatsapp href="https://wa.me/" target="_blank" rel="noopener noreferrer" aria-label="Share via WhatsApp">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill-rule="evenodd" d="M12.02 2a9.82 9.82 0 0 0-8.43 14.86L2.3 22l5.28-1.38A9.82 9.82 0 1 0 12.02 2Zm0 17.85a8 8 0 0 1-4.08-1.12l-.29-.17-3.13.82.84-3.05-.19-.31A8.02 8.02 0 1 1 12.02 19.85Z"></path><path d="M9.12 7.72c-.2-.45-.4-.46-.6-.47h-.51c-.18 0-.47.07-.72.34s-.94.92-.94 2.24.96 2.6 1.09 2.78 1.85 2.96 4.57 4.03c2.26.9 2.72.72 3.21.67s1.57-.64 1.8-1.25.22-1.13.16-1.24-.25-.18-.52-.32-1.57-.77-1.81-.86-.42-.13-.6.14-.69.86-.84 1.04-.31.2-.58.07a7.38 7.38 0 0 1-2.18-1.35 8.18 8.18 0 0 1-1.51-1.88c-.16-.27-.02-.41.11-.54s.27-.31.41-.47.18-.27.27-.45.04-.34-.02-.47-.59-1.45-.81-1.99Z"></path></svg>
+          </a>
+          <a class="social-share telegram" data-telegram href="https://t.me/share/url" target="_blank" rel="noopener noreferrer" aria-label="Share via Telegram">➤</a>
+          <a class="social-share facebook" data-facebook href="https://www.facebook.com/sharer/sharer.php" target="_blank" rel="noopener noreferrer" aria-label="Share via Facebook">f</a>
+          <a class="social-share x-social" data-x-social href="https://twitter.com/intent/tweet" target="_blank" rel="noopener noreferrer" aria-label="Share via X">𝕏</a>
+          <a class="social-share linkedin" data-linkedin href="https://www.linkedin.com/sharing/share-offsite/" target="_blank" rel="noopener noreferrer" aria-label="Share via LinkedIn">in</a>
+          <a class="social-share email" data-email href="mailto:" aria-label="Share via email">@</a>
+        </div>
+        <dialog class="facebook-share-dialog" data-facebook-share-dialog aria-labelledby="facebook-share-title">
+          <div class="facebook-share-dialog-content">
+            <h2 id="facebook-share-title">Share on Facebook</h2>
+            <p>Facebook does not allow websites to prefill post text. Copy this message, open Facebook, then paste it into “What’s on your mind?”</p>
+            <label class="sr-only" for="facebook-share-message">Referral message to copy into Facebook</label>
+            <textarea id="facebook-share-message" data-facebook-share-message readonly rows="8"></textarea>
+            <p class="facebook-share-status" data-facebook-share-status role="status" aria-live="polite"></p>
+            <div class="facebook-share-actions">
+              <button class="referral-action primary" data-facebook-copy type="button">Copy message</button>
+              <a class="referral-action" data-facebook-continue href="https://www.facebook.com/" target="_blank" rel="noopener noreferrer">Open Facebook</a>
+              <button class="referral-action" data-facebook-close type="button">Close</button>
+            </div>
+          </div>
+        </dialog>
+        <p class="referral-feedback" data-share-feedback aria-live="polite"></p>
+        <details class="referral-message">
+          <summary>Your ready-to-share message</summary>
+          <textarea id="referral-message" data-referral-message rows="12" readonly aria-label="Your referral message"></textarea>
+          <button type="button" class="referral-action" data-copy-message>Copy referral message</button>
+        </details>
+      </section>
+      <p class="referrals-status" data-referrals-status role="status" aria-live="polite">Checking referral rewards…</p>
+      <section class="referral-steps" aria-label="How referral rewards work">
+        <article class="referral-step-card">
+          <span class="step-icon step-friend" aria-hidden="true">
+            <svg viewBox="0 0 32 32" fill="none"><circle cx="13" cy="10" r="5"></circle><path d="M3.5 27c.8-5.3 4.1-8 9.5-8s8.7 2.7 9.5 8M26 9v10m-5-5h10"></path></svg>
+          </span>
+          <h2>Eligible friend joins</h2>
+          <p>After eligibility is verified<br><strong>7 promotional Pro days each</strong></p>
+        </article>
+        <span class="step-arrow" aria-hidden="true">→</span>
+        <article class="referral-step-card">
+          <span class="step-icon step-crown" aria-hidden="true">
+            <svg viewBox="0 0 32 32" fill="none"><path d="m4 10 7 6 5-10 5 10 7-6-3 15H7L4 10Z"></path><path d="M8 29h16"></path><circle cx="4" cy="8" r="1.5"></circle><circle cx="16" cy="4" r="1.5"></circle><circle cx="28" cy="8" r="1.5"></circle></svg>
+          </span>
+          <h2>They upgrade</h2>
+          <p>After their first verified payment:<br><strong>+7 days</strong> monthly<br>or <strong>+30 days</strong> yearly</p>
+        </article>
+        <span class="step-arrow" aria-hidden="true">→</span>
+        <article class="referral-step-card">
+          <span class="step-icon step-infinity" aria-hidden="true">
+            <svg viewBox="0 0 32 32" fill="none"><path d="M16 16c-4.8 6.8-9 7.2-11 3.8-2.2-3.8 1.4-10.4 6-10.4 5.2 0 8.8 13.2 14 13.2 4.6 0 8.2-6.6 6-10.4-2-3.4-6.2-3-11 3.8"></path></svg>
+          </span>
+          <h2>Keep earning</h2>
+          <p>Invite more eligible friends.<br>Qualifying rewards stack<br>after your existing Pro time.</p>
+        </article>
+      </section>
+      <div class="referrals-content" data-referrals-content hidden>
+        <section class="referral-summary" aria-labelledby="referral-summary-title">
+          <h2 id="referral-summary-title"><span aria-hidden="true">▮</span> Your referral summary</h2>
+          <div class="referral-metrics" data-referral-metrics></div>
+        </section>
+        <aside class="referral-note">
+          <span aria-hidden="true">i</span>
+          <p><strong>Note:</strong> Referral rewards are added to Pro access automatically. Turning off auto-renewal does not remove a conversion reward while the paid period is active. Verified refunds, chargebacks, or immediate cancellations may reverse the related conversion reward.</p>
+        </aside>
+        <section class="referral-rules">
+          <h2>How rewards work</h2>
+          <ul>
+            <li>After a genuinely new referred user registers and passes eligibility checks, both of you receive 7 promotional Pro days.</li>
+            <li>After their first verified successful monthly Pro payment, you receive 7 more days; for a yearly payment, you receive 30 more days.</li>
+            <li>Checkout starts, failed payments, renewals, later plan changes, and unverified payment events do not earn a conversion reward.</li>
+            <li>Turning off auto-renewal does not remove a conversion reward while the paid period remains active. A verified immediate cancellation, refund, or chargeback can reverse only that conversion reward. Registration rewards and rewards from other referrals remain.</li>
+            <li>Referral Pro days are promotional, non-cash, non-transferable, and stack after existing paid access and earlier valid referral rewards.</li>
+          </ul>
+          <a href="/terms.html#referral-terms">Read referral terms</a>
+        </section>
+        <section class="referral-list-section">
+          <div class="referral-section-heading"><div><p class="about-eyebrow">YOUR INVITES</p><h2>Referral history</h2></div></div>
+          <div class="referral-table-wrap">
+            <table>
+              <thead><tr><th>Referred user</th><th>Referral date</th><th>Registration</th><th>First paid plan</th><th>Payment</th><th>Conversion reward</th><th>Status</th></tr></thead>
+              <tbody data-referral-history><tr><td colspan="7">Loading referral history…</td></tr></tbody>
+            </table>
+          </div>
+          <button class="referral-action" type="button" data-history-more hidden>Load more referrals</button>
+        </section>
+        <section class="referral-list-section">
+          <div class="referral-section-heading"><div><p class="about-eyebrow">AUDITABLE REWARDS</p><h2>Reward ledger</h2></div></div>
+          <div class="referral-table-wrap">
+            <table>
+              <thead><tr><th>Date</th><th>Source</th><th>Description</th><th>Days</th><th>Status</th><th>Starts</th><th>Expires</th></tr></thead>
+              <tbody data-reward-ledger><tr><td colspan="7">Loading reward ledger…</td></tr></tbody>
+            </table>
+          </div>
+          <button class="referral-action" type="button" data-rewards-more hidden>Load more rewards</button>
+        </section>
+      </div>
+    </main>
+  </body>
+</html>

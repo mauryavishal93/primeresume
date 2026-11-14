@@ -84,13 +84,13 @@ test('homepage footer Contact Us links to Support on both entry points', () => {
 test('home and Plans pages explain the Google sign-in Pro-template PDF allowance', () => {
   for (const page of ['home.html', 'index.html']) {
     const html = readFileSync(new URL(`../frontend/${page}`, import.meta.url), 'utf8');
-    assert.match(html, /Pro-template PDF downloads<\/span><span>2 after Google sign-in<\/span>/);
-    assert.match(html, /Sign in with Google for first 2 free Pro-template PDF downloads per account/);
+    assert.match(html, /Pro-template PDF downloads<\/span><span>2 lifetime after Google sign-in<\/span>/);
+    assert.match(html, /Sign in with Google for two lifetime Pro-template PDF downloads per account/);
     assert.match(html, /Sign in with Google to get 2 lifetime downloads using Pro templates per account/);
   }
   const pricing = readFileSync(new URL('../frontend/pricing.html', import.meta.url), 'utf8');
   const features = readFileSync(new URL('../frontend/src/plan-access.js', import.meta.url), 'utf8');
-  assert.match(pricing, /First 2 free Pro-template PDF downloads after Google sign-in, per account/);
+  assert.match(pricing, /Two lifetime Pro-template PDF downloads after Google sign-in, per account/);
   assert.match(features, /label: 'Pro-template PDF downloads', free: '2 lifetime after Google sign-in', pro: 'Unlimited'/);
 });
 

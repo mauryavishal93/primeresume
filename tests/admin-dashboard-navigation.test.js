@@ -8,7 +8,7 @@ const aboutStyles = readFileSync(new URL('../frontend/src/about.css', import.met
 const source = readFileSync(new URL('../frontend/src/admin.js', import.meta.url), 'utf8');
 
 test('admin dashboard groups management tools into left-nav categories', () => {
-  const categories = ['overview', 'users', 'access', 'revenue', 'pricing', 'community'];
+  const categories = ['overview', 'users', 'access', 'revenue', 'pricing', 'referrals', 'community'];
   for (const category of categories) {
     assert.match(html, new RegExp(`data-admin-category-link="${category}"`));
     assert.match(html, new RegExp(`data-admin-category="${category}"`));
@@ -18,11 +18,13 @@ test('admin dashboard groups management tools into left-nav categories', () => {
   assert.match(html, /data-admin-category="access"[\s\S]*?id="voucher-list"/);
   assert.match(html, /data-admin-category="revenue"[\s\S]*?id="payment-list"/);
   assert.match(html, /data-admin-category="pricing"[\s\S]*?id="save-pricing-config"/);
+  assert.match(html, /data-admin-category="referrals"[\s\S]*?data-admin-referral-rows/);
   assert.match(html, /data-admin-category="community"[\s\S]*?id="forum-activity-list"/);
 });
 
 test('voucher-based Pro accounts are labeled as Voucher in the plan and activation column', () => {
   assert.match(source, /user\.isPro \? 'Pro · Voucher' : 'Voucher'/);
+  assert.match(source, /user\.isPro \? 'Pro · Referral' : 'Referral'/);
   assert.match(source, /user\.isPro \? 'Pro · Admin granted' : 'Admin granted'/);
   assert.match(source, /user\.isPro \? 'Pro' : status/);
   assert.match(source, /const accessAction = user\.isPro[\s\S]*?Cancel Pro access/);
@@ -57,7 +59,7 @@ test('user table groups secondary account actions in compact, accessible menus',
 });
 
 test('mobile site headers keep compact Google sign-in and main links on one row', () => {
-  const pages = ['about', 'admin', 'billing', 'community', 'home', 'index', 'my-account', 'my-posts', 'pricing', 'support'];
+  const pages = ['about', 'admin', 'billing', 'community', 'home', 'index', 'my-account', 'my-posts', 'pricing', 'referrals', 'support'];
   for (const page of pages) {
     const html = readFileSync(new URL(`../frontend/${page}.html`, import.meta.url), 'utf8');
     assert.match(html, /<body[^>]*\bsite-mobile-header\b/, `${page} should use the mobile header layout`);
@@ -97,7 +99,7 @@ test('billing, pricing, editor, and navigation refresh entitlement after admin c
 test('admin category navigation switches panels and adapts to narrow screens', () => {
   assert.match(source, /function selectAdminCategory\(category\)/);
   assert.match(source, /panel\.hidden = panel\.dataset\.adminCategory !== category/);
-  assert.match(source, /button\.addEventListener\('click', \(\) => selectAdminCategory/);
+  assert.match(source, /button\.addEventListener\('click', \(\) => \{\s*selectAdminCategory/);
   assert.match(styles, /#admin-content:not\(\[hidden\]\)\s*\{[\s\S]*?grid-template-columns:\s*220px minmax\(0,\s*1fr\)/);
   assert.match(styles, /@media \(max-width: 720px\)[\s\S]*?\.admin-category-nav \{[\s\S]*?overflow-x: auto/);
 });

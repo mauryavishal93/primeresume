@@ -1675,3 +1675,81 @@ tbody tr:hover {
     border-radius: 0;
   }
 }
+
+.referral-admin-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+  margin: 18px 0;
+}
+
+.referral-admin-metric {
+  display: grid;
+  gap: 7px;
+  padding: 12px;
+  border: 1px solid var(--admin-border);
+  border-radius: 12px;
+  background: var(--admin-surface-2);
+}
+
+.referral-admin-metric span {
+  color: var(--admin-muted);
+  font-size: var(--admin-font-small);
+}
+
+.referral-admin-metric strong {
+  color: var(--admin-text);
+  font-size: 1.2rem;
+}
+
+.referral-admin-toolbar {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.referral-admin-toolbar label {
+  display: grid;
+  gap: 5px;
+  color: var(--admin-muted);
+  font-size: var(--admin-font-small);
+}
+
+.referral-admin-toolbar input,
+.referral-admin-toolbar select {
+  min-height: 38px;
+  padding: 7px 10px;
+  border: 1px solid var(--admin-border);
+  border-radius: 8px;
+  background: var(--admin-surface-2);
+  color: var(--admin-text);
+  font: inherit;
+}
+
+.referral-admin-toolbar input {
+  min-width: min(280px, 70vw);
+}
+
+.referral-admin-status[data-state="error"] {
+  color: var(--admin-danger);
+}
+
+.referral-admin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.referral-admin-detail {
+  overflow: auto;
+  max-height: 320px;
+  padding: 12px;
+  border: 1px solid var(--admin-border);
+  border-radius: 10px;
+  background: var(--admin-surface-2);
+  color: var(--admin-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
