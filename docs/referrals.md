@@ -21,7 +21,7 @@ The user experience is a separate `/referrals.html` page (`frontend/src/referral
 | `referralRewardEvents` | Immutable system reversal audit records |
 | `referralAdminAudit` | Administrator action, target, reason, actor, timestamp, and before/after state |
 
-Reward ledger rows are not overwritten or deleted. A reversal is a separate row linked by `originalRewardId`; the user-facing ledger derives the original reward's revoked status from that reversal. The `firestore.indexes.json` file contains the composite indexes used for user history and reward pagination. Deploy the indexes and rules before enabling the feature.
+Reward ledger rows are not overwritten or deleted. A reversal is a separate row linked by `originalRewardId`; the user-facing ledger derives the original reward's revoked status from that reversal. The `firestore.indexes.json` file contains the composite indexes used for referral history. Reward history is sorted and paginated from the beneficiary-scoped read, so it does not depend on a composite history index. Deploy the indexes and rules before enabling the feature.
 
 ## Reward and entitlement semantics
 

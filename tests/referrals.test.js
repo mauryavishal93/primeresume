@@ -183,6 +183,7 @@ test('user referral page and server support pagination, verified reversals, and 
   assert.match(client, /No referral history\./);
   assert.match(server, /function referralHistoryIndexUnavailable/);
   assert.match(server, /Using the fallback reader for \$\{collection\}/);
+  assert.match(server, /if \(collection === 'referralRewards'\) \{\s+const snapshot = await userQuery\.get\(\)/);
   assert.match(client, /renderListError\(historyBody, 'Referral history could not be loaded right now/);
   assert.match(client, /renderListError\(ledgerBody, 'Reward history could not be loaded right now/);
   assert.match(client, /data\.summaryError \|\| 'Referral dashboard loaded\.'/);

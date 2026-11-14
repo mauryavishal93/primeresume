@@ -689,6 +689,24 @@ function referralHistoryIndexUnavailable(error) {
     || /requires an index/i.test(String(error?.message || ''));
 }
 
+function sortReferralDocumentsForPage(documents, cursor) {
+  return documents
+    .filter(document => {
+      if (!cursor) return true;
+      const createdAt = Number(document.data()?.createdAt) || 0;
+      return createdAt < cursor.createdAt
+        || createdAt === cursor.createdAt && document.id < cursor.id;
+    })
+    .sort((left, right) => {
+      const createdAtDifference = (Number(right.data()?.createdAt) || 0)
+        - (Number(left.data()?.createdAt) || 0);
+      if (createdAtDifference) return createdAtDifference;
+      if (right.id > left.id) return 1;
+      if (right.id < left.id) return -1;
+      return 0;
+    });
+}
+
 function referralAttributionRateLimited(clientAddress, now = Date.now()) {
   const key = String(clientAddress || 'unknown');
   const record = referralAttributionAttempts.get(key);
@@ -2480,41 +2498,34 @@ async function loadReferralPage(collection, field, uid, request, response) {
     const cursor = parseReferralCursor(request.query.cursor);
     const userQuery = db.collection(collection).where(field, '==', uid);
     let documents;
-    try {
-      let query = userQuery
-        .orderBy('createdAt', 'desc')
-        .orderBy('__name__', 'desc')
-        .limit(size + 1);
-      if (cursor) query = query.startAfter(cursor.createdAt, cursor.id);
-      const snapshot = await query.get();
-      documents = snapshot.docs || [];
-    } catch (error) {
-      if (!referralHistoryIndexUnavailable(error)) throw error;
+    let rewardDocuments = null;
+    if (collection === 'referralRewards') {
       const snapshot = await userQuery.get();
-      documents = (snapshot.docs || [])
-        .filter(document => {
-          if (!cursor) return true;
-          const createdAt = Number(document.data()?.createdAt) || 0;
-          return createdAt < cursor.createdAt
-            || createdAt === cursor.createdAt && document.id < cursor.id;
-        })
-        .sort((left, right) => {
-          const createdAtDifference = (Number(right.data()?.createdAt) || 0)
-            - (Number(left.data()?.createdAt) || 0);
-          if (createdAtDifference) return createdAtDifference;
-          if (right.id > left.id) return 1;
-          if (right.id < left.id) return -1;
-          return 0;
-        })
+      rewardDocuments = snapshot.docs || [];
+      documents = sortReferralDocumentsForPage(rewardDocuments, cursor)
         .slice(0, size + 1);
-      console.warn(`Using the fallback reader for ${collection}; its Firestore history index is unavailable.`);
+    } else {
+      try {
+        let query = userQuery
+          .orderBy('createdAt', 'desc')
+          .orderBy('__name__', 'desc')
+          .limit(size + 1);
+        if (cursor) query = query.startAfter(cursor.createdAt, cursor.id);
+        const snapshot = await query.get();
+        documents = snapshot.docs || [];
+      } catch (error) {
+        if (!referralHistoryIndexUnavailable(error)) throw error;
+        const snapshot = await userQuery.get();
+        documents = sortReferralDocumentsForPage(snapshot.docs || [], cursor)
+          .slice(0, size + 1);
+        console.warn(`Using the fallback reader for ${collection}; its Firestore history index is unavailable.`);
+      }
     }
     const hasMore = documents.length > size;
     const page = documents.slice(0, size);
     const reversalByRewardId = new Map();
     if (collection === 'referralRewards') {
-      const allRewards = await db.collection('referralRewards').where(field, '==', uid).get();
-      for (const rewardDocument of allRewards.docs || []) {
+      for (const rewardDocument of rewardDocuments || []) {
         const rewardData = rewardDocument.data() || {};
         if (rewardData.rewardType === 'reversal' && rewardData.originalRewardId) {
           reversalByRewardId.set(rewardData.originalRewardId, { id: rewardDocument.id, ...rewardData });

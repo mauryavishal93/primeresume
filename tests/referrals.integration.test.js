@@ -263,6 +263,76 @@ test('history endpoints fall back to user-scoped database reads when ordered ind
   }
 });
 
+test('reward history sorts and paginates user-scoped reads without an ordered index', async () => {
+  const originalCollection = database.collection;
+  const originalRewards = [...database.records.entries()]
+    .filter(([key]) => key.startsWith('referralRewards/'));
+  database.collection = name => {
+    const collection = originalCollection(name);
+    if (name !== 'referralRewards') return collection;
+    return {
+      ...collection,
+      where: (...whereArgs) => {
+        const query = collection.where(...whereArgs);
+        return {
+          get: () => query.get(),
+          orderBy: () => {
+            throw new Error('Reward history should not request an ordered index.');
+          }
+        };
+      }
+    };
+  };
+  try {
+    database.records.set('referralRewards/paged-reward-a', {
+      beneficiaryUid: 'referrer-1',
+      rewardType: 'registration',
+      durationDays: 7,
+      createdAt: 300,
+      startsAt: 300,
+      expiresAt: 7 * 86_400_000 + 300
+    });
+    database.records.set('referralRewards/paged-reward-b', {
+      beneficiaryUid: 'referrer-1',
+      rewardType: 'registration',
+      durationDays: 7,
+      createdAt: 200,
+      startsAt: 200,
+      expiresAt: 7 * 86_400_000 + 200
+    });
+    database.records.set('referralRewards/paged-reward-c', {
+      beneficiaryUid: 'another-user',
+      rewardType: 'registration',
+      durationDays: 7,
+      createdAt: 400,
+      startsAt: 400,
+      expiresAt: 7 * 86_400_000 + 400
+    });
+
+    const load = cursor => fetch(
+      `${origin}/api/referrals/rewards?limit=1${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+      { headers: { authorization: 'Bearer referrer-token' } }
+    );
+    const firstResponse = await load(null);
+    assert.equal(firstResponse.status, 200);
+    const firstPage = await firstResponse.json();
+    assert.equal(firstPage.items[0].id, 'paged-reward-a');
+    assert.ok(firstPage.nextCursor);
+
+    const secondResponse = await load(firstPage.nextCursor);
+    assert.equal(secondResponse.status, 200);
+    const secondPage = await secondResponse.json();
+    assert.equal(secondPage.items[0].id, 'paged-reward-b');
+    assert.equal(secondPage.nextCursor, null);
+  } finally {
+    database.collection = originalCollection;
+    for (const key of [...database.records.keys()]) {
+      if (key.startsWith('referralRewards/')) database.records.delete(key);
+    }
+    for (const [key, value] of originalRewards) database.records.set(key, value);
+  }
+});
+
 test('referral code stays available when reward summary queries fail', async () => {
   const originalCollection = database.collection;
   database.collection = name => {

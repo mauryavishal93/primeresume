@@ -34,15 +34,6 @@
       "collectionGroup": "referralRewards",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "beneficiaryUid", "order": "ASCENDING" },
-        { "fieldPath": "createdAt", "order": "DESCENDING" },
-        { "fieldPath": "__name__", "order": "DESCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "referralRewards",
-      "queryScope": "COLLECTION",
-      "fields": [
         { "fieldPath": "referralId", "order": "ASCENDING" }
       ]
     }
